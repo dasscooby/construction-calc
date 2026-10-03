@@ -1,0 +1,118 @@
+// A "tool" is one calculator screen: a list of input boxes and a compute() that turns
+// them into result rows. The screen (src/screens/ToolScreen.tsx) draws any tool from this.
+
+export interface Option {
+  value: string;
+  label: string;
+}
+
+interface FieldBase {
+  key: string;
+  label: string;
+  /** Small gray hint under the label */
+  help?: string;
+  /** Blank is allowed (compute gets 0 and has(key) is false) */
+  optional?: boolean;
+}
+
+/** Feet + inches boxes. compute() receives FEET. Boxes accept 6, 6.5, 6 1/2, 6-1/2, 1/2. */
+export interface LengthField extends FieldBase {
+  kind: 'length';
+  default?: { ft?: string; in?: string };
+}
+
+/** One number box (accepts 12, 0.25, 1/4, 1 1/2). */
+export interface NumberField extends FieldBase {
+  kind: 'number';
+  /** Shown after the box: "%", "psf", "kips", "in", "ft" ... */
+  unit?: string;
+  default?: string;
+  allowNegative?: boolean;
+}
+
+/** Whole number box. */
+export interface CountField extends FieldBase {
+  kind: 'count';
+  default?: string;
+}
+
+/** A row of buttons; exactly one is picked. */
+export interface ChoiceField extends FieldBase {
+  kind: 'choice';
+  options: Option[];
+  default: string;
+}
+
+/** Any number of length × width rectangles (odd-shaped slabs). compute() receives feet. */
+export interface AreasField extends FieldBase {
+  kind: 'areas';
+}
+
+/** Rows of rebar marks: bar size, how many, cut length. compute() receives feet. */
+export interface BarListField extends FieldBase {
+  kind: 'barlist';
+  /** Bar sizes offered as buttons, e.g. ['3', '4', '5'] */
+  sizes: string[];
+  defaultSize: string;
+}
+
+export type Field = LengthField | NumberField | CountField | ChoiceField | AreasField | BarListField;
+
+export interface Rect {
+  length: number; // feet
+  width: number; // feet
+}
+
+export interface BarRow {
+  size: string; // '5' for #5
+  qty: number;
+  length: number; // feet
+}
+
+/** What compute() reads. Required fields are always filled in and valid before compute() runs. */
+export interface Inputs {
+  /** Length field, in feet (0 if an optional field is blank). */
+  len(key: string): number;
+  /** Number field (0 if an optional field is blank). */
+  num(key: string): number;
+  /** Count field (0 if an optional field is blank). */
+  count(key: string): number;
+  /** Choice field: the picked option's value. */
+  choice(key: string): string;
+  /** Areas field: the filled-in rectangles. */
+  areas(key: string): Rect[];
+  /** Bar list field: the filled-in rows. */
+  bars(key: string): BarRow[];
+  /** True if the field was filled in. */
+  has(key: string): boolean;
+}
+
+export interface ResultRow {
+  label: string;
+  value: string;
+  /** Main answers are shown bigger */
+  big?: boolean;
+  /** Small text under the row */
+  note?: string;
+}
+
+export interface ToolResult {
+  rows: ResultRow[];
+  /** Plain-English cautions shown in a yellow box */
+  warnings?: string[];
+}
+
+/** Return { error } for values that don't make sense (e.g. cover bigger than the slab). */
+export type ComputeOutput = ToolResult | { error: string };
+
+export interface Tool {
+  /** Unique, kebab-case: "slab-rebar" */
+  id: string;
+  title: string;
+  /** One short line for the menu */
+  blurb: string;
+  fields: Field[];
+  compute(inp: Inputs): ComputeOutput;
+  /** Assumptions / how it works, shown under the results */
+  notes?: string[];
+}

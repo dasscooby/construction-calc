@@ -1,0 +1,36 @@
+{
+  "expo": {
+    "name": "Construction Calc",
+    "slug": "aaron",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "icon": "./assets/icon.png",
+    "userInterfaceStyle": "light",
+    "ios": {
+      "supportsTablet": true
+    },
+    "android": {
+      "package": "com.dasscooby.constructioncalc",
+      "adaptiveIcon": {
+        "backgroundColor": "#FFB300",
+        "foregroundImage": "./assets/android-icon-foreground.png",
+        "backgroundImage": "./assets/android-icon-background.png",
+        "monochromeImage": "./assets/android-icon-monochrome.png"
+      },
+      "predictiveBackGestureEnabled": false
+    },
+    "web": {
+      "favicon": "./assets/favicon.png",
+      "name": "Construction Calc",
+      "shortName": "Constr Calc",
+      "themeColor": "#FFB300",
+      "backgroundColor": "#FFFFFF"
+    },
+    "extra": {
+      "eas": {
+        "projectId": "44020c03-bffb-4999-be2b-0a30f5d6f390"
+      }
+    },
+    "owner": "dasscoobys-team"
+  }
+}

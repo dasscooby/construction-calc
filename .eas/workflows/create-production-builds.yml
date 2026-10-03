@@ -1,0 +1,14 @@
+# Builds the Google Play version (.aab) on Expo's servers.
+# Run it from the project folder with:
+#   npx eas-cli@latest workflow:run create-production-builds.yml
+# (iPhone is left out until there's an Apple Developer account.)
+
+name: Create production builds
+
+jobs:
+  build_android:
+    name: Build Android
+    type: build
+    params:
+      platform: android
+      profile: production
