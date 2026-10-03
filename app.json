@@ -8,7 +8,11 @@
     "userInterfaceStyle": "dark",
     "backgroundColor": "#000000",
     "ios": {
-      "supportsTablet": true
+      "bundleIdentifier": "com.dasscooby.constructioncalc",
+      "supportsTablet": false,
+      "infoPlist": {
+        "ITSAppUsesNonExemptEncryption": false
+      }
     },
     "android": {
       "package": "com.dasscooby.constructioncalc",
