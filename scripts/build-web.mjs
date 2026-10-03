@@ -22,8 +22,8 @@ fs.writeFileSync(
       scope: '/',
       display: 'standalone',
       orientation: 'portrait',
-      background_color: '#FFFFFF',
-      theme_color: '#FFB300',
+      background_color: '#000000',
+      theme_color: '#000000',
       icons: [{ src: '/app-icon.png', sizes: '1024x1024', type: 'image/png', purpose: 'any' }],
     },
     null,
@@ -92,7 +92,8 @@ html = html.replace(
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-title" content="Constr Calc">
-<meta name="apple-mobile-web-app-status-bar-style" content="default">
+<meta name="apple-mobile-web-app-status-bar-style" content="black">
+<style>html, body { background: #000; }</style>
 <style>* { touch-action: manipulation; -webkit-tap-highlight-color: transparent; }</style>
 </head>`,
 );

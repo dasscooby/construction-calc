@@ -54,12 +54,12 @@ const ROWS: KeyDef[][] = [
 ];
 
 const KEY_COLORS: Record<KeyKind, { bg: string; fg: string }> = {
-  fn: { bg: colors.fnKey, fg: colors.lightText },
+  fn: { bg: colors.fnKey, fg: colors.fnKeyText },
   num: { bg: colors.numKey, fg: colors.numKeyText },
-  op: { bg: colors.opKey, fg: colors.lightText },
-  conv: { bg: colors.convKey, fg: colors.text },
-  clear: { bg: colors.clearKey, fg: colors.lightText },
-  util: { bg: colors.utilKey, fg: colors.lightText },
+  op: { bg: colors.opKey, fg: colors.opKeyText },
+  conv: { bg: colors.lightKey, fg: colors.lightKeyText },
+  clear: { bg: colors.lightKey, fg: colors.lightKeyText },
+  util: { bg: colors.lightKey, fg: colors.lightKeyText },
 };
 
 // ---------- state + saving settings on the phone ----------
@@ -166,8 +166,8 @@ export default function CalculatorScreen() {
 
 function Lcd({ v }: { v: CalcView }) {
   const len = v.text.length;
-  const size = len <= 9 ? 46 : len <= 13 ? 40 : len <= 17 ? 33 : len <= 21 ? 27 : 22;
-  const unitSize = Math.max(13, Math.round(size * 0.42));
+  const size = len <= 9 ? 58 : len <= 13 ? 47 : len <= 17 ? 38 : len <= 21 ? 31 : 25;
+  const unitSize = Math.max(13, Math.round(size * 0.36));
   return (
     <View style={styles.lcd}>
       <View style={styles.lcdRow}>
@@ -222,7 +222,8 @@ function CalcKey({
   compact?: boolean;
 }) {
   const c = KEY_COLORS[def.kind];
-  const fontSize = def.kind === 'num' ? 28 : def.label.length <= 2 ? 26 : def.label.length <= 4 ? 18 : 15;
+  const lit = def.kind === 'conv' && armed; // Conv turns white with orange text, like a picked operator
+  const fontSize = def.kind === 'num' ? 30 : def.label.length <= 2 ? 26 : def.label.length <= 4 ? 18 : 15;
   return (
     <View style={[styles.keyWrap, { flex: def.flex ?? 1 }]}>
       {!compact && (
@@ -236,11 +237,10 @@ function CalcKey({
         accessibilityLabel={def.k === 'back' ? 'Backspace' : def.label}
         style={({ pressed }) => [
           styles.key,
-          { backgroundColor: c.bg, opacity: pressed ? 0.55 : 1 },
-          def.kind === 'conv' && armed ? styles.convArmed : null,
+          { backgroundColor: lit ? colors.text : c.bg, opacity: pressed ? 0.6 : 1 },
         ]}
       >
-        <Text style={[styles.keyText, { color: c.fg, fontSize }]} numberOfLines={1} maxFontSizeMultiplier={1.15}>
+        <Text style={[styles.keyText, { color: lit ? colors.opKey : c.fg, fontSize }, def.kind === 'num' && styles.numText]} numberOfLines={1} maxFontSizeMultiplier={1.15}>
           {def.label}
         </Text>
       </Pressable>
@@ -408,72 +408,56 @@ function GuideModal({ visible, onClose }: { visible: boolean; onClose: () => voi
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: colors.bg, paddingHorizontal: 5, paddingTop: 6 },
+  container: { flex: 1, backgroundColor: colors.bg, paddingHorizontal: 6, paddingTop: 4 },
 
-  lcd: {
-    backgroundColor: colors.lcd,
-    borderWidth: 3,
-    borderColor: colors.border,
-    borderRadius: 10,
-    paddingHorizontal: 10,
-    paddingVertical: 4,
-    marginHorizontal: 3,
-  },
+  lcd: { backgroundColor: colors.lcd, paddingHorizontal: 12, paddingTop: 2, paddingBottom: 4 },
   lcdRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', minHeight: 20 },
-  flags: { fontSize: 14, fontWeight: '900', color: colors.text, marginRight: 8 },
-  pending: { fontSize: 15, fontWeight: '700', color: colors.subtext, flexShrink: 1, textAlign: 'right' },
-  lcdMain: { flexDirection: 'row', alignItems: 'center', minHeight: 54 },
-  lcdLabel: { fontSize: 17, fontWeight: '900', color: colors.text, marginRight: 6, maxWidth: 82 },
-  lcdValue: { flex: 1, textAlign: 'right', color: colors.text, fontWeight: '800', fontVariant: ['tabular-nums'] },
-  lcdUnit: { fontWeight: '900' },
+  flags: { fontSize: 13, fontWeight: '800', color: colors.accent, marginRight: 8, letterSpacing: 1 },
+  pending: { fontSize: 16, fontWeight: '400', color: colors.subtext, flexShrink: 1, textAlign: 'right' },
+  lcdMain: { flexDirection: 'row', alignItems: 'flex-end', minHeight: 66 },
+  lcdLabel: { fontSize: 15, fontWeight: '700', color: colors.accent, marginRight: 6, marginBottom: 10, maxWidth: 82 },
+  lcdValue: { flex: 1, textAlign: 'right', color: colors.text, fontWeight: '300', fontVariant: ['tabular-nums'] },
+  lcdUnit: { fontWeight: '500', color: colors.subtext },
   lcdError: { color: colors.error },
-  info: { fontSize: 14, fontWeight: '700', color: colors.subtext, flexShrink: 1, marginRight: 8 },
-  extra: { fontSize: 14, fontWeight: '800', color: colors.text, flexShrink: 1, textAlign: 'right' },
+  info: { fontSize: 14, fontWeight: '500', color: colors.subtext, flexShrink: 1, marginRight: 8 },
+  extra: { fontSize: 14, fontWeight: '600', color: colors.text, flexShrink: 1, textAlign: 'right' },
 
   topRow: { flexDirection: 'row', height: 46, marginTop: 4 },
-  pad: { flex: 1, paddingBottom: 2 },
+  pad: { flex: 1, paddingBottom: 4 },
   row: { flex: 1, flexDirection: 'row' },
-  keyWrap: { paddingHorizontal: 3, paddingBottom: 3 },
-  sub: { fontSize: 11, fontWeight: '800', color: colors.subLabel, textAlign: 'center', height: 14, borderRadius: 4, overflow: 'hidden' },
-  subArmed: { backgroundColor: colors.convKey, color: colors.text },
-  key: { flex: 1, borderRadius: 9, alignItems: 'center', justifyContent: 'center', minHeight: 34 },
-  convArmed: { borderWidth: 4, borderColor: colors.text },
-  keyText: { fontWeight: '800' },
+  keyWrap: { paddingHorizontal: 4, paddingBottom: 4 },
+  sub: { fontSize: 11, fontWeight: '700', color: colors.subLabel, textAlign: 'center', height: 14, borderRadius: 7, overflow: 'hidden' },
+  subArmed: { backgroundColor: colors.accent, color: colors.accentText },
+  key: { flex: 1, borderRadius: 999, alignItems: 'center', justifyContent: 'center', minHeight: 34 },
+  keyText: { fontWeight: '600' },
+  numText: { fontWeight: '500' },
 
-  backdrop: { flex: 1, backgroundColor: 'rgba(0,0,0,0.45)', justifyContent: 'flex-end' },
-  sheet: { backgroundColor: colors.bg, borderTopLeftRadius: 16, borderTopRightRadius: 16, maxHeight: '88%' },
+  backdrop: { flex: 1, backgroundColor: 'rgba(0,0,0,0.6)', justifyContent: 'flex-end' },
+  sheet: { backgroundColor: colors.panel, borderTopLeftRadius: 18, borderTopRightRadius: 18, maxHeight: '88%' },
   sheetHeader: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
     padding: 14,
-    borderBottomWidth: 2,
+    borderBottomWidth: StyleSheet.hairlineWidth,
     borderBottomColor: colors.border,
   },
-  sheetTitle: { fontSize: 24, fontWeight: '900', color: colors.text },
-  closeBtn: { backgroundColor: colors.text, borderRadius: 10, paddingHorizontal: 18, paddingVertical: 10 },
-  closeText: { color: colors.bg, fontSize: 18, fontWeight: '800' },
+  sheetTitle: { fontSize: 24, fontWeight: '800', color: colors.text },
+  closeBtn: { backgroundColor: colors.accent, borderRadius: 999, paddingHorizontal: 18, paddingVertical: 9 },
+  closeText: { color: colors.accentText, fontSize: 17, fontWeight: '700' },
   sheetBody: { padding: 14, paddingBottom: 40 },
   para: { fontSize: 17, color: colors.text, lineHeight: 24 },
   guideItem: { marginBottom: 14 },
-  guideTitle: { fontSize: 19, fontWeight: '900', color: colors.text, marginBottom: 2 },
-  tapeRow: { flexDirection: 'row', paddingVertical: 6, borderBottomWidth: 1, borderBottomColor: '#DDD' },
-  tapeTotal: { backgroundColor: colors.panel },
-  tapeTag: { width: 64, fontSize: 18, fontWeight: '900', color: colors.subtext },
-  tapeText: { flex: 1, fontSize: 20, fontWeight: '800', color: colors.text, textAlign: 'right' },
+  guideTitle: { fontSize: 18, fontWeight: '800', color: colors.accent, marginBottom: 2 },
+  tapeRow: { flexDirection: 'row', paddingVertical: 7, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: colors.border },
+  tapeTotal: { backgroundColor: colors.panel2 },
+  tapeTag: { width: 64, fontSize: 17, fontWeight: '700', color: colors.accent },
+  tapeText: { flex: 1, fontSize: 20, fontWeight: '500', color: colors.text, textAlign: 'right' },
   prefBlock: { marginBottom: 14 },
-  prefTitle: { fontSize: 18, fontWeight: '900', color: colors.text, marginBottom: 6 },
+  prefTitle: { fontSize: 17, fontWeight: '700', color: colors.subtext, marginBottom: 6 },
   chips: { flexDirection: 'row', flexWrap: 'wrap' },
-  chip: {
-    borderWidth: 2,
-    borderColor: colors.border,
-    borderRadius: 10,
-    paddingHorizontal: 12,
-    paddingVertical: 9,
-    marginRight: 8,
-    marginBottom: 8,
-  },
-  chipOn: { backgroundColor: colors.convKey },
-  chipText: { fontSize: 17, fontWeight: '700', color: colors.text },
-  chipTextOn: { fontWeight: '900' },
+  chip: { backgroundColor: colors.panel2, borderRadius: 999, paddingHorizontal: 14, paddingVertical: 9, marginRight: 8, marginBottom: 8 },
+  chipOn: { backgroundColor: colors.accent },
+  chipText: { fontSize: 17, fontWeight: '600', color: colors.text },
+  chipTextOn: { color: colors.accentText, fontWeight: '800' },
 });

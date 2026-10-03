@@ -5,7 +5,8 @@
     "version": "1.0.0",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
-    "userInterfaceStyle": "light",
+    "userInterfaceStyle": "dark",
+    "backgroundColor": "#000000",
     "ios": {
       "supportsTablet": true
     },
@@ -23,8 +24,8 @@
       "favicon": "./assets/favicon.png",
       "name": "Construction Calc",
       "shortName": "Constr Calc",
-      "themeColor": "#FFB300",
-      "backgroundColor": "#FFFFFF"
+      "themeColor": "#000000",
+      "backgroundColor": "#000000"
     },
     "extra": {
       "eas": {

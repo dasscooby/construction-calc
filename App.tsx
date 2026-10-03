@@ -24,7 +24,7 @@ export default function App() {
 
   return (
     <SafeAreaProvider>
-      <StatusBar style="dark" />
+      <StatusBar style="light" />
       <SafeAreaView style={styles.root} edges={['top', 'left', 'right']}>
         <View style={styles.body}>
           {screens.map((screen, i) => (
@@ -63,17 +63,17 @@ const styles = StyleSheet.create({
   body: { flex: 1 },
   screen: { flex: 1 },
   hidden: { display: 'none' },
-  tabBarWrap: { backgroundColor: colors.bg, borderTopWidth: 3, borderTopColor: colors.border },
+  tabBarWrap: { backgroundColor: colors.panel, borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: colors.border },
   tabBar: { flexDirection: 'row', height: 56 },
   tab: {
     flex: 1,
     alignItems: 'center',
     justifyContent: 'center',
-    marginVertical: 4,
-    marginHorizontal: 2,
-    borderRadius: 10,
+    marginVertical: 6,
+    marginHorizontal: 3,
+    borderRadius: 999,
   },
-  tabActive: { backgroundColor: colors.accent },
-  tabText: { fontSize: 15, fontWeight: '700', color: colors.subtext },
-  tabTextActive: { color: colors.text, fontWeight: '900' },
+  tabActive: { backgroundColor: colors.panel2 },
+  tabText: { fontSize: 15, fontWeight: '600', color: colors.subtext },
+  tabTextActive: { color: colors.accent, fontWeight: '800' },
 });
