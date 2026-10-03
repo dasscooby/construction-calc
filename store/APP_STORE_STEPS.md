@@ -29,7 +29,7 @@ Unlike Google, Apple allows this for the very first upload.
 - **Support URL:** https://github.com/dasscooby/construction-calc
 - **Privacy policy URL:** https://construction-calc-7815.netlify.app/privacy.html
 - **Screenshots (6.9" iPhone):** the 6 pictures in `store/ios-screenshots/`
-- **App Privacy:** Data Not Collected
+- **App Privacy:** Data Collected → **Identifiers → Device ID** → used for **App Functionality** → **not** linked to the user → **not** used for tracking. (This is the random install ID the update check sends.)
 - **Age rating:** answer None/No to everything → 4+
 - **Price:** Free · **Category:** Utilities (or Productivity)
 

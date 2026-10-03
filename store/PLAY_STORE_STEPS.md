@@ -24,7 +24,10 @@ Answers for this app:
 - **Ads:** No, my app does not contain ads.
 - **Content rating:** start the questionnaire, category **Utility, Productivity, Communication, or Other**, answer **No** to everything → rating comes out "Everyone".
 - **Target audience:** **18 and over**.
-- **Data safety:** "Does your app collect or share any of the required user data types?" → **No**.
+- **Data safety:** "Does your app collect or share any of the required user data types?" → **Yes** (only for app updates). Then:
+  - Data type: **Device or other IDs** → **Collected**, not shared · **App functionality** · collected automatically (not optional).
+  - "Is all of the user data collected by your app encrypted in transit?" → **Yes**.
+  - "Do you provide a way for users to request that their data is deleted?" → **No** (the ID is random and not tied to a person).
 - **Government app:** No. **Financial features:** None. **Health:** None.
 - **Store listing:** copy the text from `store/listing.md`, upload `store/icon-512.png`, `store/feature-graphic.png`, and the 6 pictures in `store/screenshots/`. Category: **Tools**. Add your contact email.
 
