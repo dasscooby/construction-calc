@@ -15,6 +15,7 @@ import HistoryScreen from './src/screens/HistoryScreen';
 import JobsScreen from './src/screens/JobsScreen';
 import SettingsScreen from './src/screens/SettingsScreen';
 import ToolsTab, { OpenRequest } from './src/screens/ToolsTab';
+import { startPlanQueue } from './src/lib/planReader';
 import { TABS } from './src/tabs';
 import { migrateItem } from './src/tools';
 import { colors, mode, onThemeChange, themed } from './src/theme';
@@ -40,6 +41,8 @@ export default function App() {
 
   // Keep the Home Screen widget and any pour on the Lock Screen up to date (iPhone).
   useEffect(() => syncWidgets(jobs), [jobs, prefs.accent, prefs.mode]);
+  // Plans picked with no signal get read once it's back.
+  useEffect(() => startPlanQueue(), []);
   const [tab, setTab] = useState<TabId>(prefs.tabOrder[0]);
   const [overlay, setOverlay] = useState<'history' | 'settings' | null>(null);
   const [request, setRequest] = useState<{ tab: TabId; req: OpenRequest } | null>(null);

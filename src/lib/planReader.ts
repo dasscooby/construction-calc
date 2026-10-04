@@ -1,7 +1,10 @@
 // Reading a plan page: the picture or PDF goes to the app's server, which asks Claude what's on it,
 // and comes back as slabs (walked side by side, like Slab Layout), rebar, dowels and notes.
 
-import { Platform } from 'react-native';
+import { AppState, Platform } from 'react-native';
+
+import { allJobs, jobStore } from './jobs';
+import { scansForReport } from './scanner';
 
 import { slabLayout } from '../tools/slabLayoutTool';
 import { defaultRaw, RawLength, RawOutlineRow, RawValues } from '../tools/run';
@@ -26,13 +29,19 @@ export interface PlanRead {
 // The web app talks to its own site; the phone app to the live site.
 const ENDPOINT = Platform.OS === 'web' ? '/.netlify/functions/read-plan' : 'https://construction-calc-7815.netlify.app/.netlify/functions/read-plan';
 
+/** No signal: the plan waits and is read later. */
+export class OfflineError extends Error {}
+
 export async function readPlan(data: string, mediaType: string): Promise<PlanRead> {
+  if (Platform.OS === 'web' && typeof navigator !== 'undefined' && navigator.onLine === false) throw new OfflineError('No signal');
   let res: Response;
   try {
     res = await fetch(ENDPOINT, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ data, mediaType }) });
   } catch {
-    throw new Error('No signal. Try again when you have service.');
+    throw new OfflineError('No signal');
   }
+  // The offline web app answers 504 for anything it can't reach.
+  if (res.status === 504) throw new OfflineError('No signal');
   const body = (await res.json().catch(() => ({}))) as Partial<PlanRead> & { error?: string };
   if (!res.ok) throw new Error(body.error ?? 'Couldn’t read the plan right now.');
   return {
@@ -110,4 +119,79 @@ export function slabToRaw(s: PlanSlab, base: RawValues = defaultRaw(slabLayout))
     if (s.dowels.length_in) raw.dowelLength = inches(s.dowels.length_in);
   }
   return raw;
+}
+
+// ---- Waiting for signal ----------------------------------------------------------------------
+// Web: a picked file waits in the browser's own storage (IndexedDB) until it's read.
+
+const DB = 'plan-queue';
+function db(): Promise<IDBDatabase> {
+  return new Promise((resolve, reject) => {
+    const req = indexedDB.open(DB, 1);
+    req.onupgradeneeded = () => req.result.createObjectStore('files');
+    req.onsuccess = () => resolve(req.result);
+    req.onerror = () => reject(req.error);
+  });
+}
+async function store<T>(mode: IDBTransactionMode, fn: (s: IDBObjectStore) => IDBRequest<T>): Promise<T> {
+  const d = await db();
+  return new Promise((resolve, reject) => {
+    const req = fn(d.transaction('files', mode).objectStore('files'));
+    req.onsuccess = () => resolve(req.result);
+    req.onerror = () => reject(req.error);
+  });
+}
+export const savePendingFile = (id: string, data: string) => store('readwrite', (s) => s.put(data, id));
+const loadPendingFile = (id: string) => store<string | undefined>('readonly', (s) => s.get(id) as IDBRequest<string | undefined>);
+const dropPendingFile = (id: string) => store('readwrite', (s) => s.delete(id)).catch(() => {});
+
+let running = false;
+
+/** Reads every waiting plan it can. Stops at the first sign of no signal and tries again later. */
+export async function processPlanQueue(): Promise<void> {
+  if (running) return;
+  running = true;
+  try {
+    for (const job of allJobs()) {
+      for (const p of job.planQueue ?? []) {
+        let data: string | undefined;
+        if (p.uri) {
+          const [url] = await scansForReport([p.uri]);
+          data = url ? url.slice(url.indexOf(',') + 1) : undefined;
+        } else {
+          data = await loadPendingFile(p.id).catch(() => undefined);
+        }
+        if (!data) {
+          jobStore.planDone(job.id, p.id, { error: 'A waiting plan was deleted before it could be read.' });
+          continue;
+        }
+        try {
+          const found = await readPlan(data, p.mediaType);
+          jobStore.planDone(job.id, p.id, found.slabs.length || found.notes.length ? { found } : { error: 'Couldn’t find slab sizes on that page.' });
+        } catch (e) {
+          if (e instanceof OfflineError) return; // still no signal
+          jobStore.planDone(job.id, p.id, { error: e instanceof Error ? e.message : 'Couldn’t read the plan.' });
+        }
+        if (!p.uri) void dropPendingFile(p.id);
+      }
+    }
+  } finally {
+    running = false;
+  }
+}
+
+/** Keeps trying waiting plans: when signal comes back, when the app opens, and every half minute. */
+export function startPlanQueue(): () => void {
+  const kick = () => void processPlanQueue();
+  const timer = setInterval(() => {
+    if (allJobs().some((j) => j.planQueue?.length)) kick();
+  }, 30_000);
+  const sub = AppState.addEventListener('change', (st) => st === 'active' && kick());
+  if (Platform.OS === 'web' && typeof window !== 'undefined') window.addEventListener('online', kick);
+  setTimeout(kick, 3000);
+  return () => {
+    clearInterval(timer);
+    sub.remove();
+    if (Platform.OS === 'web' && typeof window !== 'undefined') window.removeEventListener('online', kick);
+  };
 }

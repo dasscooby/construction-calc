@@ -1,11 +1,11 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { Image, Platform, Pressable, ScrollView, Share, Text, TextInput, View } from 'react-native';
 
 import { feel } from '../lib/feel';
 import { dayLabel, timeLabel } from '../lib/history';
 import { Job, JobItem, jobStore, PriceLine, useJobs, yardsIn } from '../lib/jobs';
 import { deleteJobScans, deleteScanFile, scanPages, scannerAvailable, scansForReport } from '../lib/scanner';
-import { pickPlanFileWeb, PlanRead, PlanSlab, readPlan, slabToRaw } from '../lib/planReader';
+import { pickPlanFileWeb, PlanSlab, processPlanQueue, savePendingFile, slabToRaw } from '../lib/planReader';
 import { useSettings } from '../lib/settings';
 import { dec } from '../tools/format';
 import { liveActivitiesSupported } from '../widgets/bridge';
@@ -378,31 +378,34 @@ function PourCard({ job, orderYd, truckYd }: { job: Job; orderYd: number; truckY
  * on it come back ready to add to the job as Slab Layouts.
  */
 function PlanReader({ job }: { job: Job }) {
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState('');
-  const [found, setFound] = useState<PlanRead | null>(null);
+  // Every plan goes in the job's queue first, so with no signal it waits and is read later.
   const [added, setAdded] = useState<number[]>([]);
-  const run = async (get: () => Promise<{ data: string; mediaType: string } | null>) => {
-    setError('');
-    const file = await get();
+  const found = job.planFound;
+  const error = job.planError ?? '';
+  const waiting = job.planQueue?.length ?? 0;
+  const seen = useRef(found?.slabs.length ?? 0);
+  useEffect(() => {
+    if ((found?.slabs.length ?? 0) > seen.current) feel.success();
+    seen.current = found?.slabs.length ?? 0;
+  }, [found?.slabs.length]);
+  const pickWeb = async () => {
+    const file = await pickPlanFileWeb();
     if (!file) return;
-    setBusy(true);
+    const id = `${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`;
     try {
-      const r = await readPlan(file.data, file.mediaType);
-      setFound(r);
-      setAdded([]);
-      if (!r.slabs.length && !r.notes.length) setError('Couldn’t find slab sizes on that page.');
-      else feel.success();
-    } catch (e) {
-      setError(e instanceof Error ? e.message : 'Couldn’t read the plan.');
+      await savePendingFile(id, file.data);
+    } catch {
+      jobStore.planDone(job.id, '', { error: 'Couldn’t save that file on this phone. Try a smaller one.' });
+      return;
     }
-    setBusy(false);
+    jobStore.queuePlan(job.id, { id, mediaType: file.mediaType });
+    void processPlanQueue();
+  };
+  const readScan = (uri: string) => {
+    jobStore.queuePlan(job.id, { uri, mediaType: 'image/jpeg' });
+    void processPlanQueue();
   };
   const scans = job.scans ?? [];
-  const fromScan = (uri: string) => async () => {
-    const [url] = await scansForReport([uri]);
-    return url ? { data: url.slice(url.indexOf(',') + 1), mediaType: 'image/jpeg' } : null;
-  };
   const summary = (s: PlanSlab) =>
     [
       `${s.sides.length} sides`,
@@ -418,13 +421,13 @@ function PlanReader({ job }: { job: Job }) {
     <>
       <Text style={styles.section}>Read a plan</Text>
       {Platform.OS === 'web' ? (
-        <Pressable onPress={() => void run(pickPlanFileWeb)} disabled={busy} style={styles.secondary} accessibilityRole="button">
-          <Text style={styles.secondaryText}>{busy ? 'Reading the plan…' : 'Pick a PDF or picture'}</Text>
+        <Pressable onPress={() => void pickWeb()} style={styles.secondary} accessibilityRole="button">
+          <Text style={styles.secondaryText}>Pick a PDF or picture</Text>
         </Pressable>
       ) : scans.length ? (
         <View style={styles.sendRow}>
           {scans.slice(0, 4).map((uri, i) => (
-            <Pressable key={uri} onPress={() => void run(fromScan(uri))} disabled={busy} style={[styles.smallBtn, styles.readBtn]} accessibilityRole="button">
+            <Pressable key={uri} onPress={() => readScan(uri)} style={[styles.smallBtn, styles.readBtn]} accessibilityRole="button">
               <Text style={styles.smallBtnText}>Page {i + 1}</Text>
             </Pressable>
           ))}
@@ -432,11 +435,27 @@ function PlanReader({ job }: { job: Job }) {
       ) : (
         <Text style={styles.help}>Scan the plans below, then come back here to read them.</Text>
       )}
-      {busy && Platform.OS !== 'web' ? <Text style={styles.help}>Reading the plan…</Text> : null}
+      {waiting ? (
+        <Text style={styles.help}>
+          Reading {waiting === 1 ? 'the plan' : `${waiting} plans`}… No signal? It’s saved and gets read as soon as you have service.
+        </Text>
+      ) : null}
       {error ? <Text style={styles.warn}>{error}</Text> : null}
       {found && (found.slabs.length > 0 || found.notes.length > 0) ? (
         <View style={styles.card}>
-          <Text style={styles.label}>On the plan</Text>
+          <View style={styles.cardHead}>
+            <Text style={styles.label}>On the plan</Text>
+            <Pressable
+              onPress={() => {
+                jobStore.setPlanFound(job.id, undefined);
+                setAdded([]);
+              }}
+              accessibilityRole="button"
+              accessibilityLabel="Clear what the plan said"
+            >
+              <Text style={styles.smallBtnText}>Clear</Text>
+            </Pressable>
+          </View>
           {found.slabs.map((s, i) => (
             <View key={i} style={styles.line}>
               <Text style={styles.cardTitle}>{s.name || `Slab ${i + 1}`}</Text>
@@ -465,7 +484,7 @@ function PlanReader({ job }: { job: Job }) {
               <Pressable
                 onPress={() => {
                   jobStore.edit(job.id, { notes: [job.notes.trim(), ...found.notes.map((n) => `• ${n}`)].filter(Boolean).join('\n') });
-                  setFound({ ...found, notes: [] });
+                  jobStore.setPlanFound(job.id, { ...found, notes: [] });
                 }}
                 style={[styles.smallBtn, styles.lineGap]}
                 accessibilityRole="button"

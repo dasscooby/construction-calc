@@ -1,6 +1,10 @@
+jest.mock('@react-native-async-storage/async-storage', () => require('@react-native-async-storage/async-storage/jest/async-storage-mock'));
+jest.mock('../scanner', () => ({ scansForReport: async (uris: string[]) => uris.map(() => 'data:image/jpeg;base64,AAAA') }));
+
+import { allJobs, jobStore } from '../jobs';
 import { rowValue, runTool } from '../../tools/run';
 import { slabLayout } from '../../tools/slabLayoutTool';
-import { slabToRaw } from '../planReader';
+import { processPlanQueue, slabToRaw } from '../planReader';
 
 test('a slab read off a plan opens in Slab Layout with the same numbers', () => {
   const raw = slabToRaw({
@@ -27,4 +31,22 @@ test('a slab read off a plan opens in Slab Layout with the same numbers', () => 
 test("feet and inches: 14.5 ft → 14' 6\"", () => {
   const raw = slabToRaw({ name: '', sides: [{ length_ft: 14.5, turn: 'R', radius_ft: 0, edge: 'form' }] });
   expect((raw.sides as { length: unknown }[])[0].length).toEqual({ ft: '14', in: '6' });
+});
+
+test('no signal: the plan waits in the job, then gets read when signal is back', async () => {
+  const id = jobStore.create('Queue test');
+  jobStore.queuePlan(id, { uri: 'file:///plan-1.jpg', mediaType: 'image/jpeg' });
+  const job = () => allJobs().find((j) => j.id === id)!;
+
+  globalThis.fetch = jest.fn().mockRejectedValue(new TypeError('Network request failed'));
+  await processPlanQueue();
+  expect(job().planQueue).toHaveLength(1);
+  expect(job().planFound).toBeUndefined();
+
+  const slab = { name: 'Patio', sides: [{ length_ft: 10, turn: 'R', radius_ft: 0, edge: 'form' }] };
+  globalThis.fetch = jest.fn().mockResolvedValue({ ok: true, status: 200, json: async () => ({ slabs: [slab], notes: ['6 mil vapor barrier'], unsure: [] }) });
+  await processPlanQueue();
+  expect(job().planQueue).toHaveLength(0);
+  expect(job().planFound?.slabs[0].name).toBe('Patio');
+  expect(job().planFound?.notes).toEqual(['6 mil vapor barrier']);
 });

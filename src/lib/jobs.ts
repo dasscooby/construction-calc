@@ -5,6 +5,16 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useSyncExternalStore } from 'react';
 
 import type { RawValues } from '../tools/run';
+import type { PlanRead } from './planReader';
+
+/** A plan picked with no signal, read when the phone is back online. */
+export interface PendingPlan {
+  id: string;
+  mediaType: string;
+  /** Phone app: the scanned page file. Web: the file waits in the browser's storage under `id`. */
+  uri?: string;
+  at: number;
+}
 
 export interface JobItem {
   id: string;
@@ -56,6 +66,12 @@ export interface Job {
   taxPct?: string;
   /** Already paid (deposit), dollars, as typed */
   paid?: string;
+  /** Plans waiting for signal to be read */
+  planQueue?: PendingPlan[];
+  /** What the plans said (cleared when you're done with it) */
+  planFound?: PlanRead;
+  /** Last plan that couldn't be read, and why */
+  planError?: string;
 }
 
 const SAVE_KEY = 'jobs-v1';
@@ -134,9 +150,31 @@ export const jobStore = {
   setLines(jobId: string, lines: Omit<PriceLine, 'id'>[] | PriceLine[]) {
     update(jobId, (j) => ({ ...j, lines: lines.map((l) => ({ ...l, id: 'id' in l && l.id ? l.id : newId() })) }));
   },
+  queuePlan(jobId: string, p: Omit<PendingPlan, 'id' | 'at'> & { id?: string }) {
+    update(jobId, (j) => ({ ...j, planError: undefined, planQueue: [...(j.planQueue ?? []), { ...p, id: p.id ?? newId(), at: Date.now() }] }));
+  },
+  /** A queued plan is done: drop it and keep what it said (or why it failed). */
+  planDone(jobId: string, planId: string, out: { found?: PlanRead; error?: string }) {
+    update(jobId, (j) => {
+      const prev = j.planFound;
+      const found = out.found
+        ? { slabs: [...(prev?.slabs ?? []), ...out.found.slabs], notes: [...(prev?.notes ?? []), ...out.found.notes], unsure: [...(prev?.unsure ?? []), ...out.found.unsure] }
+        : prev;
+      return { ...j, planQueue: (j.planQueue ?? []).filter((p) => p.id !== planId), planFound: found, planError: out.error };
+    });
+  },
+  setPlanFound(jobId: string, found: PlanRead | undefined) {
+    update(jobId, (j) => ({ ...j, planFound: found, planError: undefined }));
+  },
   removeScan(jobId: string, uri: string) {
     update(jobId, (j) => ({ ...j, scans: (j.scans ?? []).filter((s) => s !== uri) }));
   },
+};
+
+/** Every job, right now (outside of a screen). */
+export const allJobs = (): Job[] => {
+  load();
+  return jobs;
 };
 
 /** The job changed most recently (what the widget shows). */
