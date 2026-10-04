@@ -5,7 +5,7 @@ import { ftIn } from '../tools/format';
 import type { EdgeKind, OutlineRow } from '../tools/types';
 import { planSvg } from './drawings';
 import { bounds, Pt } from './geometry';
-import { alongSide, BarSegment, cornerArc, insetRuns, Layout, outlinePoints, sideRun } from './layoutGeom';
+import { alongSide, BarSegment, buildLayout, cornerArc, insetRuns, Layout, outlinePoints, sideRun } from './layoutGeom';
 
 const n = (v: number) => Math.round(v * 10) / 10;
 // No XML entities: the phone's SVG reader shows them literally.
@@ -243,3 +243,55 @@ export function layoutIsoSvg(p: LayoutIsoInput): string {
 }
 
 export type { OutlineRow };
+
+/**
+ * Quick sketch of the sides entered so far, drawn as you type: numbered sides, where you started,
+ * and a dashed red line back to the start until the shape closes.
+ */
+export function layoutSketchSvg(sides: OutlineRow[]): string | null {
+  if (!sides.length) return null;
+  const L = buildLayout(sides);
+  const pts: Pt[] = [{ x: 0, y: 0 }, ...L.V];
+  const b = bounds(pts);
+  const W = 760;
+  const pad = 90;
+  const spanX = Math.max(b.maxX - b.minX, 1);
+  const spanY = Math.max(b.maxY - b.minY, 1);
+  const s = Math.min((W - 2 * pad) / spanX, 340 / spanY);
+  const H = Math.round(spanY * s + 2 * pad);
+  const ox = (W - spanX * s) / 2;
+  const X = (x: number) => n(ox + (x - b.minX) * s);
+  const Y = (y: number) => n(pad + (y - b.minY) * s);
+  const font = 'font-family="Helvetica, Arial, sans-serif"';
+  const out: string[] = [`<rect width="${W}" height="${H}" fill="#0d4a8a"/>`];
+  sides.forEach((side, k) => {
+    const a = pts[k];
+    const c = pts[k + 1];
+    const style =
+      side.edge === 'form'
+        ? 'stroke="#ffffff" stroke-width="5"'
+        : isHouse(side.edge)
+          ? 'stroke="#c3cbd2" stroke-width="12"'
+          : 'stroke="#9ec5ff" stroke-width="8" stroke-dasharray="16 10"';
+    out.push(`<line x1="${X(a.x)}" y1="${Y(a.y)}" x2="${X(c.x)}" y2="${Y(c.y)}" ${style} stroke-linecap="round"/>`);
+    // Label outside the slab (left of the walk).
+    const d = L.dir[k];
+    const o = outward(d);
+    const mx = (Number(X(a.x)) + Number(X(c.x))) / 2 + o.x * 16;
+    const my = (Number(Y(a.y)) + Number(Y(c.y))) / 2 + o.y * 22 + (o.y > 0.5 ? 18 : o.y < -0.5 ? 0 : 9);
+    const anchor = o.x > 0.5 ? 'start' : o.x < -0.5 ? 'end' : 'middle';
+    out.push(`<text x="${n(mx)}" y="${n(my)}" text-anchor="${anchor}" ${font} font-size="26" font-weight="700" fill="#ffffff">${esc(`${k + 1}) ${ftIn(side.length)}`)}</text>`);
+    if (side.radius > 0) out.push(`<circle cx="${X(c.x)}" cy="${Y(c.y)}" r="11" fill="none" stroke="#ffb347" stroke-width="4"/>`);
+  });
+  out.push(`<circle cx="${X(0)}" cy="${Y(0)}" r="12" fill="#3ddc84"/>`);
+  out.push(`<text x="${n(Number(X(0)) - 14)}" y="${n(Number(Y(0)) - 16)}" text-anchor="end" ${font} font-size="22" font-weight="700" fill="#3ddc84">START</text>`);
+  const end = pts[pts.length - 1];
+  if (!L.closed) {
+    if (L.gap >= 0.05) out.push(`<line x1="${X(end.x)}" y1="${Y(end.y)}" x2="${X(0)}" y2="${Y(0)}" stroke="#ff5a5a" stroke-width="4" stroke-dasharray="10 10"/>`);
+    const msg = L.gap >= 0.05 ? 'Not closed yet' : 'Back at start: check the last turn';
+    out.push(`<text x="${W / 2}" y="${H - 20}" text-anchor="middle" ${font} font-size="24" font-weight="700" fill="#ff8a8a">${esc(msg)}</text>`);
+  } else {
+    out.push(`<text x="${W / 2}" y="${H - 20}" text-anchor="middle" ${font} font-size="24" font-weight="700" fill="#3ddc84">Shape closes</text>`);
+  }
+  return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${W} ${H}" width="100%" role="img" aria-label="Shape so far">${out.join('')}</svg>`;
+}

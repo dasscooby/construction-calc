@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
+import { SvgXml } from 'react-native-svg';
 import {
   BackHandler,
   Keyboard,
@@ -28,12 +29,14 @@ import {
   RunResult,
   WALL_ENDS,
   defaultRaw,
+  parseLength,
   runTool,
 } from '../tools/run';
 import { feel } from '../lib/feel';
 import { history } from '../lib/history';
 import { jobStore, useJobs } from '../lib/jobs';
 import { companyLine, userDefaults, useSettings } from '../lib/settings';
+import { layoutSketchSvg } from '../report/layoutDraw';
 import { toolDrawings } from '../report/report';
 import DrawingView from './DrawingView';
 import { shareText } from '../tools/share';
@@ -659,6 +662,7 @@ function OutlineInput({ value, onChange }: { value: RawOutlineRow[]; onChange: (
           <LengthInput value={r.radius} onChange={(radius) => update(i, { radius })} label={`Side ${i + 1} corner radius`} />
         </View>
       ))}
+      <ShapeSketch value={value} />
       <Pressable
         onPress={() => onChange([...value, { length: emptyLength(), turn: 'R', radius: emptyLength(), edge: 'form' }])}
         style={styles.addBtn}
@@ -666,6 +670,29 @@ function OutlineInput({ value, onChange }: { value: RawOutlineRow[]; onChange: (
       >
         <Text style={styles.addText}>+ Add another side</Text>
       </Pressable>
+    </View>
+  );
+}
+
+/** The shape so far, redrawn as each side is typed in. */
+function ShapeSketch({ value }: { value: RawOutlineRow[] }) {
+  const [width, setWidth] = useState(0);
+  const svg = useMemo(() => {
+    const sides = value
+      .map((r) => {
+        const len = parseLength(r.length);
+        const rad = parseLength(r.radius);
+        return { length: len && len > 0 ? len : 0, turn: r.turn, radius: rad && rad > 0 ? rad : 0, edge: r.edge };
+      })
+      .filter((r) => r.length > 0);
+    return layoutSketchSvg(sides);
+  }, [value]);
+  if (!svg) return null;
+  const m = svg.match(/viewBox="0 0 ([\d.]+) ([\d.]+)"/);
+  const aspect = m ? Number(m[1]) / Number(m[2]) : 1.6;
+  return (
+    <View style={styles.sketch} onLayout={(e) => setWidth(e.nativeEvent.layout.width)} accessibilityRole="image" accessibilityLabel="Shape so far">
+      {width > 0 ? <SvgXml xml={svg} width={width} height={width / aspect} /> : null}
     </View>
   );
 }
@@ -791,6 +818,7 @@ const getStyles = themed(() => ({
   stockRow: { flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 8 },
   stockCol: { flex: 1, minWidth: 0, flexDirection: 'row' },
   stockRemove: { width: 36, alignItems: 'center', justifyContent: 'center', paddingVertical: 10 },
+  sketch: { borderRadius: 14, overflow: 'hidden', marginBottom: 12 },
   addBtn: { borderWidth: 1, borderColor: colors.faint, borderStyle: 'dashed', borderRadius: 14, padding: 12, alignItems: 'center' },
   addText: { fontSize: 17, fontWeight: '700', color: colors.accent },
 
