@@ -265,8 +265,8 @@ const forms: Tool = {
 
 const OC_PIECE_IN = 12; // the 1' piece on the outside face at an outside corner
 const INSIDE_CORNER_IN = 4; // the 4×4 inside corner
-/** Fillers the crew carries (1', 8", 6"), biggest first. Odd inches left over get a wood strip. */
-const FILLERS_IN = [12, 8, 6];
+/** Fillers the crew carries (14", 1', 8", 6"), biggest first. Odd inches left over get a wood strip. */
+const FILLERS_IN = [14, 12, 8, 6];
 
 /** Fewest fillers that add up to exactly this many inches (ties: the one whose smallest piece is biggest). */
 export function fillerSet(inches: number): number[] | null {

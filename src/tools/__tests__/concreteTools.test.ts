@@ -168,16 +168,16 @@ describe('forms & stakes', () => {
 });
 
 describe('wall forms (aluminum)', () => {
-  test('fillers: fewest pieces from 1\', 8", 6"', () => {
+  test(`fillers: fewest pieces from 14", 1', 8", 6"`, () => {
     expect(fillerSet(18)).toEqual([12, 6]);
-    expect(fillerSet(26)).toEqual([12, 8, 6]);
+    expect(fillerSet(26)).toEqual([14, 12]);
     expect(fillerSet(8)).toEqual([8]);
     expect(fillerSet(2)).toBeNull();
   });
 
   test('layoutFace trades a panel for fillers when the leftover is too small', () => {
     expect(layoutFace(816, 24)).toEqual({ panels: 34, fillers: [], woodIn: 0 });
-    expect(layoutFace(290, 24)).toEqual({ panels: 11, fillers: [12, 8, 6], woodIn: 0 });
+    expect(layoutFace(290, 24)).toEqual({ panels: 11, fillers: [14, 12], woodIn: 0 });
     expect(layoutFace(331, 24)).toEqual({ panels: 13, fillers: [12, 6], woodIn: 1 });
   });
 
@@ -187,7 +187,7 @@ describe('wall forms (aluminum)', () => {
   //   74' (both outside)     out 1' + 36 + 1'            in 36
   //   4' bump end            out 1' + 1 + 1'             in 1
   //   4' bump side (o + i)   out 1' + 1 + 8"             in 1 + 8"
-  //   25'6" (o + i)          out 1' + 11 + 1' + 8" + 6"  in 11 + 1' + 8" + 6"
+  //   25'6" (o + i)          out 1' + 11 + 14" + 1'       in 11 + 14" + 1'
   const job: [number, 'oo' | 'oi'][] = [[70, 'oo'], [29.5, 'oo'], [74, 'oo'], [4, 'oo'], [4, 'oi'], [25.5, 'oi']];
 
   test('the crew job, wall by wall', () => {
@@ -199,20 +199,21 @@ describe('wall forms (aluminum)', () => {
     expect(note(`Wall 3: 74' 0"`)).toBe(`Out: 1' + 36 × 2' + 1'\nIn: 36 × 2'`);
     expect(note(`Wall 4: 4' 0"`)).toBe(`Out: 1' + 1 × 2' + 1'\nIn: 1 × 2'`);
     expect(note(`Wall 5: 4' 0"`)).toBe(`Out: 1' + 1 × 2' + 8"\nIn: 1 × 2' + 8"`);
-    expect(note(`Wall 6: 25' 6"`)).toBe(`Out: 1' + 11 × 2' + 1' + 8" + 6"\nIn: 11 × 2' + 1' + 8" + 6"`);
+    expect(note(`Wall 6: 25' 6"`)).toBe(`Out: 1' + 11 × 2' + 14" + 1'
+In: 11 × 2' + 14" + 1'`);
   });
 
   test('the crew job, totals', () => {
     const r = runTool(tool('wall-forms'), { walls: job });
     expect(rowValue(r, 'Wall height')).toBe(`4'`);
     expect(rowValue(r, `2' panels`)).toBe('192'); // 68 + 26 + 72 + 2 + 2 + 22
-    expect(rowValue(r, 'Fillers')).toBe('22');
+    expect(rowValue(r, 'Fillers')).toBe('20');
     expect(rowValue(r, 'Inside corners (4×4)')).toBe('6'); // 5 outside + 1 inside corner
-    expect(rowValue(r, 'Ties')).toBe('about 354'); // 118 joints × 3
+    expect(rowValue(r, 'Ties')).toBe('about 351'); // 117 joints × 3
     // centerline 207 − 4 × 8" = 204.33 ft × 0.667 × 4 = 544.9 cu ft
     expect(rowValue(r, 'Concrete in the wall')).toBe('20.18 cu yd');
     if (r.status === 'ok') {
-      expect(r.result.rows.find((x) => x.label === 'Fillers')!.note).toBe(`14 × 1', 4 × 8", 4 × 6"`);
+      expect(r.result.rows.find((x) => x.label === 'Fillers')!.note).toBe(`2 × 14", 14 × 1', 2 × 8", 2 × 6"`);
       expect(r.result.warnings).toEqual([]);
     }
   });
@@ -220,7 +221,7 @@ describe('wall forms (aluminum)', () => {
   test('staggered 8\' doubles every piece', () => {
     const r = runTool(tool('wall-forms'), { walls: job, stack: 'stagger8' });
     expect(rowValue(r, `2' panels`)).toBe('384');
-    expect(rowValue(r, 'Fillers')).toBe('44');
+    expect(rowValue(r, 'Fillers')).toBe('40');
   });
 
   test('corners that don\'t close up get a warning; no walls asks for one', () => {
