@@ -1,4 +1,4 @@
-import { layoutRun } from '../concreteTools';
+import { fillerSet, layoutFace } from '../concreteTools';
 import { belledPierCuFt, bellHeightFt, perimeterBeamCenterline, truckLoads } from '../../lib/concrete';
 import { CONCRETE_TOOLS } from '../concreteTools';
 import { rowValue, runTool } from '../run';
@@ -168,45 +168,64 @@ describe('forms & stakes', () => {
 });
 
 describe('wall forms (aluminum)', () => {
-  test('layoutRun: panels, then a filler; under 4" left over swaps a panel for two fillers', () => {
-    expect(layoutRun(478, 24)).toEqual({ panels: 19, fillers: [22] });
-    expect(layoutRun(456, 24)).toEqual({ panels: 19, fillers: [] });
-    expect(layoutRun(482, 24)).toEqual({ panels: 19, fillers: [13, 13] }); // 20 panels + 2" → 19 + 26"
+  test('fillers: fewest pieces from 1\', 8", 6"', () => {
+    expect(fillerSet(18)).toEqual([12, 6]);
+    expect(fillerSet(26)).toEqual([12, 8, 6]);
+    expect(fillerSet(8)).toEqual([8]);
+    expect(fillerSet(2)).toBeNull();
   });
 
-  // 40' × 30' outside, 8" wall, 5'4" + 2'8" staggered:
-  //   outside face 40': 480 − 2 = 478" = 19 panels + 22" filler   30': 358" = 14 + 22"
-  //   inside face 40': 480 − 16 − 8 = 456" = 19 panels             30': 336" = 14
-  //   columns = 2 × (19 + 14) × 2 faces = 132 → 132 of each height = 264 panels
-  //   ties: outside joints (20 + 1) + (15 + 1) = 37 per half → 74 × 6 = 444
-  //   concrete: (140 − 2.667) × 0.667 × 8 = 732.4 cu ft = 27.13 cu yd
-  test('40 x 30 foundation, 8" wall, staggered 8\'', () => {
-    const r = runTool(tool('wall-forms'), { length: 40, width: 30, stack: 'stagger8' });
-    expect(rowValue(r, 'Wall height')).toBe(`8'`);
-    expect(rowValue(r, '24" panels')).toBe('264');
-    expect(rowValue(r, 'Fillers')).toBe('8');
-    expect(rowValue(r, 'Outside corners (1×1)')).toBe('8');
-    expect(rowValue(r, 'Inside corners (4×4)')).toBe('8');
-    expect(rowValue(r, 'Ties')).toBe('about 444');
-    expect(rowValue(r, 'Concrete in the wall')).toBe('27.13 cu yd');
+  test('layoutFace trades a panel for fillers when the leftover is too small', () => {
+    expect(layoutFace(816, 24)).toEqual({ panels: 34, fillers: [], woodIn: 0 });
+    expect(layoutFace(290, 24)).toEqual({ panels: 11, fillers: [12, 8, 6], woodIn: 0 });
+    expect(layoutFace(331, 24)).toEqual({ panels: 13, fillers: [12, 6], woodIn: 1 });
+  });
+
+  // The crew's real job, 8" wall, 2' × 4' panels, measured on the outside, going around:
+  //   70' (both outside)     out 1' + 34 + 1'            in 34
+  //   29'6" (both outside)   out 1' + 13 + 1' + 6" + 1'  in 13 + 1' + 6"
+  //   74' (both outside)     out 1' + 36 + 1'            in 36
+  //   4' bump end            out 1' + 1 + 1'             in 1
+  //   4' bump side (o + i)   out 1' + 1 + 8"             in 1 + 8"
+  //   25'6" (o + i)          out 1' + 11 + 1' + 8" + 6"  in 11 + 1' + 8" + 6"
+  const job: [number, 'oo' | 'oi'][] = [[70, 'oo'], [29.5, 'oo'], [74, 'oo'], [4, 'oo'], [4, 'oi'], [25.5, 'oi']];
+
+  test('the crew job, wall by wall', () => {
+    const r = runTool(tool('wall-forms'), { walls: job });
+    if (r.status !== 'ok') throw new Error(r.status);
+    const note = (label: string) => r.result.rows.find((x) => x.label === label)!.note;
+    expect(note(`Wall 1: 70' 0"`)).toBe(`Out: 1' + 34 × 2' + 1'\nIn: 34 × 2'`);
+    expect(note(`Wall 2: 29' 6"`)).toBe(`Out: 1' + 13 × 2' + 1' + 6" + 1'\nIn: 13 × 2' + 1' + 6"`);
+    expect(note(`Wall 3: 74' 0"`)).toBe(`Out: 1' + 36 × 2' + 1'\nIn: 36 × 2'`);
+    expect(note(`Wall 4: 4' 0"`)).toBe(`Out: 1' + 1 × 2' + 1'\nIn: 1 × 2'`);
+    expect(note(`Wall 5: 4' 0"`)).toBe(`Out: 1' + 1 × 2' + 8"\nIn: 1 × 2' + 8"`);
+    expect(note(`Wall 6: 25' 6"`)).toBe(`Out: 1' + 11 × 2' + 1' + 8" + 6"\nIn: 11 × 2' + 1' + 8" + 6"`);
+  });
+
+  test('the crew job, totals', () => {
+    const r = runTool(tool('wall-forms'), { walls: job });
+    expect(rowValue(r, 'Wall height')).toBe(`4'`);
+    expect(rowValue(r, `2' panels`)).toBe('192'); // 68 + 26 + 72 + 2 + 2 + 22
+    expect(rowValue(r, 'Fillers')).toBe('22');
+    expect(rowValue(r, 'Inside corners (4×4)')).toBe('6'); // 5 outside + 1 inside corner
+    expect(rowValue(r, 'Ties')).toBe('about 354'); // 118 joints × 3
+    // centerline 207 − 4 × 8" = 204.33 ft × 0.667 × 4 = 544.9 cu ft
+    expect(rowValue(r, 'Concrete in the wall')).toBe('20.18 cu yd');
     if (r.status === 'ok') {
-      expect(r.result.rows.find((x) => x.label === '24" panels')!.note).toBe(`132 × 5'4" + 132 × 2'8"`);
-      expect(r.result.rows.find((x) => x.label === 'Fillers')!.note).toBe('4 × 22" of each height');
+      expect(r.result.rows.find((x) => x.label === 'Fillers')!.note).toBe(`14 × 1', 4 × 8", 4 × 6"`);
+      expect(r.result.warnings).toEqual([]);
     }
   });
 
-  test('single 8\' panels: one of each piece per column', () => {
-    const r = runTool(tool('wall-forms'), { length: 40, width: 30, stack: 'p8' });
-    expect(rowValue(r, '24" panels')).toBe('132');
-    expect(rowValue(r, 'Outside corners (1×1)')).toBe('4');
+  test('staggered 8\' doubles every piece', () => {
+    const r = runTool(tool('wall-forms'), { walls: job, stack: 'stagger8' });
+    expect(rowValue(r, `2' panels`)).toBe('384');
+    expect(rowValue(r, 'Fillers')).toBe('44');
   });
 
-  test('other shapes use the outside wall length and inside corners', () => {
-    const r = runTool(tool('wall-forms'), { perim: 140, jogs: 1, stack: 'p8' });
-    expect(r.status).toBe('ok');
-    expect(rowValue(r, 'Outside corners (1×1)')).toBe('5');
-    expect(rowValue(r, 'Inside corners (4×4)')).toBe('1');
-    expect(rowValue(r, 'Fillers')).toBe('about 12');
-    expect(runTool(tool('wall-forms'), {}).status).toBe('invalid');
+  test('corners that don\'t close up get a warning; no walls asks for one', () => {
+    const r = runTool(tool('wall-forms'), { walls: [[40, 'oo'], [30, 'oo'], [40, 'oo'], [30, 'oi']] });
+    expect(r.status === 'ok' && r.result.warnings?.[0]).toMatch(/4 more outside corners/);
+    expect(runTool(tool('wall-forms'), {}).status).toBe('missing');
   });
 });

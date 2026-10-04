@@ -1,12 +1,15 @@
 // Reads the text in a tool's boxes, checks it, and runs compute().
 // The screen and the tests both use runTool().
 
-import { BarRow, ComputeOutput, Field, Inputs, Rect, Tool, ToolResult } from './types';
+import { BarRow, ComputeOutput, Field, Inputs, Rect, Tool, ToolResult, WallEnds, WallRow } from './types';
 
 export type RawLength = { ft: string; in: string };
 export type RawArea = { length: RawLength; width: RawLength };
 export type RawBarRow = { size: string; qty: string; length: RawLength };
-export type RawValue = string | RawLength | RawArea[] | RawBarRow[];
+export type RawWallRow = { length: RawLength; ends: WallEnds };
+export type RawValue = string | RawLength | RawArea[] | RawBarRow[] | RawWallRow[];
+
+export const WALL_ENDS: WallEnds[] = ['oo', 'oi', 'ii'];
 export type RawValues = Record<string, RawValue>;
 
 /** Accepts 12, 12.5, .5, 1/4, 1 1/2, 1-1/2 (and a leading minus if allowed). Commas are ignored. */
@@ -53,6 +56,9 @@ export function defaultRaw(tool: Tool): RawValues {
       case 'barlist':
         raw[f.key] = [{ size: f.defaultSize, qty: '', length: emptyLength() }];
         break;
+      case 'walls':
+        raw[f.key] = [{ length: emptyLength(), ends: 'oo' }];
+        break;
       case 'choice':
         raw[f.key] = f.default;
         break;
@@ -83,6 +89,8 @@ export function restoreRaw(tool: Tool, saved: unknown): RawValues {
       v.every((r) => f.sizes.includes(r?.size) && typeof r?.qty === 'string' && isRawLength(r?.length))
     ) {
       raw[f.key] = v as RawBarRow[];
+    } else if (f.kind === 'walls' && Array.isArray(v) && v.length && v.every((r) => isRawLength(r?.length) && WALL_ENDS.includes(r?.ends))) {
+      raw[f.key] = v as RawWallRow[];
     } else if (f.kind === 'choice' && f.options.some((o) => o.value === v)) raw[f.key] = v as string;
     else if ((f.kind === 'number' || f.kind === 'count') && typeof v === 'string') raw[f.key] = v;
   }
@@ -94,14 +102,14 @@ export type RunResult =
   | { status: 'missing'; message: string }
   | { status: 'invalid'; message: string };
 
-type Parsed = number | string | Rect[] | BarRow[] | null;
+type Parsed = number | string | Rect[] | BarRow[] | WallRow[] | null;
 
 /**
  * Test-friendly inputs are allowed too: a number for a length field means feet,
  * a number for a number/count field is used as-is, areas can be [[length, width], ...] in feet,
- * and bar lists can be [[size, how many, length in feet], ...].
+ * bar lists can be [[size, how many, length in feet], ...], and walls [[length in feet, 'oo' | 'oi' | 'ii'], ...].
  */
-export type LooseValue = RawValue | number | [number, number][] | [string, number, number][];
+export type LooseValue = RawValue | number | [number, number][] | [string, number, number][] | [number, WallEnds][];
 
 function normalize(f: Field, v: LooseValue | undefined): RawValue | undefined {
   if (v === undefined) return undefined;
@@ -111,6 +119,9 @@ function normalize(f: Field, v: LooseValue | undefined): RawValue | undefined {
       length: { ft: String(l), in: '' },
       width: { ft: String(w), in: '' },
     }));
+  }
+  if (f.kind === 'walls' && Array.isArray(v) && v.length && Array.isArray(v[0])) {
+    return (v as [number, WallEnds][]).map(([ft, ends]) => ({ length: { ft: String(ft), in: '' }, ends }));
   }
   if (f.kind === 'barlist' && Array.isArray(v) && v.length && Array.isArray(v[0])) {
     return (v as [string, number, number][]).map(([size, qty, ft]) => ({ size, qty: String(qty), length: { ft: String(ft), in: '' } }));
@@ -188,6 +199,18 @@ export function runTool(tool: Tool, values: Record<string, LooseValue>): RunResu
         else blank = true;
         break;
       }
+      case 'walls': {
+        const rows: WallRow[] = [];
+        for (const [i, r] of (v as RawWallRow[]).entries()) {
+          const len = parseLength(r.length);
+          if (len === null) continue; // empty row
+          if (Number.isNaN(len) || len <= 0) return { status: 'invalid', message: `Check the length of wall ${i + 1}` };
+          rows.push({ length: len, ends: r.ends });
+        }
+        if (rows.length) value = rows;
+        else blank = true;
+        break;
+      }
     }
     if (blank && !f.optional) return { status: 'missing', message: `Enter ${f.label.toLowerCase()}` };
     parsed[f.key] = value;
@@ -204,6 +227,7 @@ export function runTool(tool: Tool, values: Record<string, LooseValue>): RunResu
     choice: (k) => get(k) as string,
     areas: (k) => (get(k) as Rect[] | null) ?? [],
     bars: (k) => (get(k) as BarRow[] | null) ?? [],
+    walls: (k) => (get(k) as WallRow[] | null) ?? [],
     has: (k) => get(k) !== null,
   };
 

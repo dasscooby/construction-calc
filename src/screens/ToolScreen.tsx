@@ -13,7 +13,7 @@ import {
   View,
 } from 'react-native';
 
-import { RawArea, RawBarRow, RawLength, RawValue, RawValues, RunResult, defaultRaw, runTool } from '../tools/run';
+import { RawArea, RawBarRow, RawLength, RawValue, RawValues, RawWallRow, RunResult, WALL_ENDS, defaultRaw, runTool } from '../tools/run';
 import { history } from '../lib/history';
 import { shareText } from '../tools/share';
 import { BarListField, Field, Tool } from '../tools/types';
@@ -64,7 +64,7 @@ export default function ToolScreen({ tool, raw, onChange, onBack, active }: Prop
     });
     return () => sub.remove();
   }, [active]);
-  const hasInches = tool.fields.some((f) => f.kind === 'length' || f.kind === 'areas' || f.kind === 'barlist');
+  const hasInches = tool.fields.some((f) => f.kind === 'length' || f.kind === 'areas' || f.kind === 'barlist' || f.kind === 'walls');
   const titleSize = tool.title.length > 22 ? 16 : tool.title.length > 16 ? 18 : 22;
 
   return (
@@ -220,6 +220,7 @@ function FieldInput({ field, value, onChange }: { field: Field; value: RawValue;
       )}
       {field.kind === 'areas' && <AreasInput value={value as RawArea[]} onChange={onChange} />}
       {field.kind === 'barlist' && <BarListInput field={field} value={value as RawBarRow[]} onChange={onChange} />}
+      {field.kind === 'walls' && <WallsInput value={value as RawWallRow[]} onChange={onChange} />}
     </View>
   );
 }
@@ -347,6 +348,59 @@ function BarListInput({ field, value, onChange }: { field: BarListField; value: 
       ))}
       <Pressable onPress={add} style={styles.addBtn} accessibilityRole="button">
         <Text style={styles.addText}>+ Add another bar mark</Text>
+      </Pressable>
+    </View>
+  );
+}
+
+const ENDS_LABEL: Record<RawWallRow['ends'], string> = { oo: 'Outside both ends', oi: 'Outside + inside', ii: 'Inside both ends' };
+
+function WallsInput({ value, onChange }: { value: RawWallRow[]; onChange: (v: RawWallRow[]) => void }) {
+  const update = (i: number, patch: Partial<RawWallRow>) => onChange(value.map((r, j) => (j === i ? { ...r, ...patch } : r)));
+  return (
+    <View>
+      {value.map((r, i) => (
+        <View key={i} style={styles.area}>
+          <View style={styles.areaHead}>
+            <Text style={styles.areaTitle}>Wall {i + 1}</Text>
+            {value.length > 1 && (
+              <Pressable
+                onPress={() => onChange(value.filter((_, j) => j !== i))}
+                style={styles.removeBtn}
+                accessibilityRole="button"
+                accessibilityLabel={`Remove wall ${i + 1}`}
+              >
+                <Text style={styles.removeText}>Remove</Text>
+              </Pressable>
+            )}
+          </View>
+          <LengthInput value={r.length} onChange={(length) => update(i, { length })} label={`Wall ${i + 1} length`} />
+          <Text style={styles.areaSub}>Corners at the ends</Text>
+          <View style={styles.chips}>
+            {WALL_ENDS.map((ends) => {
+              const on = ends === r.ends;
+              return (
+                <Pressable
+                  key={ends}
+                  onPress={() => update(i, { ends })}
+                  accessibilityRole="button"
+                  accessibilityLabel={`Wall ${i + 1} ${ENDS_LABEL[ends]}`}
+                  accessibilityState={{ selected: on }}
+                  style={[styles.chip, styles.chipSmall, on && styles.chipOn]}
+                >
+                  <Text style={[styles.chipText, on && styles.chipTextOn]}>{ENDS_LABEL[ends]}</Text>
+                </Pressable>
+              );
+            })}
+          </View>
+        </View>
+      ))}
+      <Pressable
+        onPress={() => onChange([...value, { length: emptyLength(), ends: value[value.length - 1]?.ends ?? 'oo' }])}
+        style={styles.addBtn}
+        accessibilityRole="button"
+      >
+        <Text style={styles.addText}>+ Add another wall</Text>
       </Pressable>
     </View>
   );

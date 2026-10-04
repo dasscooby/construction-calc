@@ -257,149 +257,179 @@ const forms: Tool = {
 };
 
 // ---------------------------------------------------------------------------------------------
-// Aluminum wall forms, sized to the Advance Concrete Form systems (advanceconcreteform.com):
-// 24" panels, fillers in 1" steps from 4" to 24", 1"×1" outside corners, 4"×4" inside corners.
-// 6-bar system ties are 16" o.c. (8' panel = 6 ties per joint); 4-bar 8' panel has 4.
+// Aluminum wall forms (Advance Concrete Form panels: 24" wide, 1"×1" outside and 4"×4" inside corners).
+// Checked against a real crew layout on an 8" wall, wall by wall. At each end of a wall:
+//   outside corner: outside face runs to the corner and gets a 1' piece; inside face stops t + 4" short (1' on 8")
+//   inside corner:  both faces stop 4" short (the 4×4 inside corner)
+// The rest of each face is 2' panels, then fillers.
 
-const OUTSIDE_CORNER_IN = 1; // each leg of the 1×1 outside corner
-const INSIDE_CORNER_IN = 4; // each leg of the 4×4 inside corner
-const MIN_FILLER_IN = 4;
+const OC_PIECE_IN = 12; // the 1' piece on the outside face at an outside corner
+const INSIDE_CORNER_IN = 4; // the 4×4 inside corner
+/** Fillers the crew carries (1', 8", 6"), biggest first. Odd inches left over get a wood strip. */
+const FILLERS_IN = [12, 8, 6];
 
-/** Panel heights stacked in every column, and ties in each vertical joint. */
-const WALL_STACKS: Record<string, { label: string; heightsIn: number[]; ties: number }> = {
-  stagger8: { label: '5\'4" + 2\'8" staggered', heightsIn: [64, 32], ties: 6 },
-  p8: { label: '8\'', heightsIn: [96], ties: 6 },
-  p4x2: { label: '4\' + 4\'', heightsIn: [48, 48], ties: 6 },
-  p94: { label: '9\'4"', heightsIn: [112], ties: 7 },
-  p4: { label: '4\'', heightsIn: [48], ties: 3 },
-  bar4_8: { label: '8\' 4-bar', heightsIn: [96], ties: 4 },
-  bar5_9: { label: '9\' 5-bar', heightsIn: [108], ties: 5 },
-};
+/** Fewest fillers that add up to exactly this many inches (ties: the one whose smallest piece is biggest). */
+export function fillerSet(inches: number): number[] | null {
+  if (inches === 0) return [];
+  if (inches < 0) return null;
+  const best: (number[] | null)[] = [[]];
+  for (let n = 1; n <= inches; n++) {
+    let pick: number[] | null = null;
+    for (const f of FILLERS_IN) {
+      const rest = n >= f ? best[n - f] : null;
+      if (!rest) continue;
+      const cand = [...rest, f].sort((x, y) => y - x);
+      if (!pick || cand.length < pick.length || (cand.length === pick.length && cand[cand.length - 1] > pick[pick.length - 1])) {
+        pick = cand;
+      }
+    }
+    best[n] = pick;
+  }
+  return best[inches];
+}
 
-/**
- * One straight run of forms between corners: full panels, then fillers for what's left.
- * Leftovers under 4" can't take a filler, so one panel is swapped for two fillers.
- */
-export function layoutRun(runIn: number, panelIn: number): { panels: number; fillers: number[] } {
-  const run = Math.round(runIn);
-  let panels = Math.floor(run / panelIn);
-  const left = run - panels * panelIn;
-  if (left === 0) return { panels, fillers: [] };
-  if (left >= MIN_FILLER_IN) return { panels, fillers: [left] };
-  if (panels === 0) return { panels, fillers: [] }; // too short for any form: fill with wood
-  panels -= 1;
-  const total = panelIn + left;
-  return { panels, fillers: [Math.ceil(total / 2), Math.floor(total / 2)] };
+/** One face of one wall: panels, then fillers, then a wood strip for any odd inch. Runs are rounded to the inch. */
+export function layoutFace(runIn: number, panelIn: number): { panels: number; fillers: number[]; woodIn: number } {
+  const run = Math.max(0, Math.round(runIn));
+  const n = Math.floor(run / panelIn);
+  const r = run - n * panelIn;
+  for (const wood of [0, 1]) {
+    // Leftover too small for the fillers? Trade a panel or two for fillers.
+    for (let k = 0; k <= Math.min(2, n); k++) {
+      const set = fillerSet(r - wood + k * panelIn);
+      if (set) return { panels: n - k, fillers: set, woodIn: wood };
+    }
+  }
+  return { panels: n, fillers: [], woodIn: r };
 }
 
 /** "9'4"" / "5'4"" / "8'" */
 const heightText = (inch: number) => (inch % 12 ? `${Math.floor(inch / 12)}'${inch % 12}"` : `${inch / 12}'`);
+/** 12 → 1'   8 → 8" */
+const fillerText = (inch: number) => (inch === 12 ? `1'` : `${inch}"`);
+
+/** Panel heights stacked in every column, and ties in each vertical joint. */
+const WALL_STACKS: Record<string, { label: string; heightsIn: number[]; ties: number }> = {
+  p4: { label: `4'`, heightsIn: [48], ties: 3 },
+  stagger8: { label: `5'4" + 2'8" staggered`, heightsIn: [64, 32], ties: 6 },
+  p4x2: { label: `4' + 4'`, heightsIn: [48, 48], ties: 6 },
+  p8: { label: `8'`, heightsIn: [96], ties: 6 },
+  p94: { label: `9'4"`, heightsIn: [112], ties: 7 },
+  bar4_8: { label: `8' 4-bar`, heightsIn: [96], ties: 4 },
+  bar5_9: { label: `9' 5-bar`, heightsIn: [108], ties: 5 },
+};
+
+type FaceLayout = ReturnType<typeof layoutFace>;
+
+/** "1' + 34 × 2' + 1'" */
+function describeFace(lead: number[], face: FaceLayout, trail: number[], panelText: string): string {
+  const parts = [
+    ...lead.map(fillerText),
+    ...(face.panels ? [`${face.panels} × ${panelText}`] : []),
+    ...face.fillers.map(fillerText),
+    ...(face.woodIn ? [`${face.woodIn}" wood`] : []),
+    ...trail.map(fillerText),
+  ];
+  return parts.join(' + ') || 'nothing';
+}
 
 const wallForms: Tool = {
   id: 'wall-forms',
   title: 'Wall Forms (Aluminum)',
-  blurb: 'Panels, fillers, corners and ties for foundation walls',
+  blurb: 'Panels, fillers and corners, wall by wall',
   fields: [
-    { key: 'length', label: 'Outside length', kind: 'length', optional: true },
-    { key: 'width', label: 'Outside width', kind: 'length', optional: true },
-    { key: 'perim', label: 'Or outside wall length', kind: 'number', unit: 'ft', optional: true, help: 'Other shapes: total around the outside' },
-    { key: 'jogs', label: 'Inside corners', kind: 'count', optional: true, help: 'Other shapes only. An L-shape has 1.' },
+    { key: 'walls', label: 'Walls', kind: 'walls', help: 'Measure on the outside. Go around the foundation one wall at a time.' },
     { key: 'thick', label: 'Wall thickness', kind: 'number', unit: 'in', default: '8' },
     {
       key: 'stack',
       label: 'Panels',
       kind: 'choice',
-      options: Object.entries(WALL_STACKS).map(([value, s]) => ({ value, label: s.label })),
+      options: Object.entries(WALL_STACKS).map(([value, st]) => ({ value, label: st.label })),
       default: 'p4',
     },
     { key: 'panel', label: 'Panel width', kind: 'number', unit: 'in', default: '24' },
   ],
   compute: (inp) => {
+    const walls = inp.walls('walls');
     const t = inp.num('thick');
     const panelIn = inp.num('panel');
     const stack = WALL_STACKS[inp.choice('stack')];
     if (t <= 0) return { error: 'Wall thickness must be more than 0.' };
-    if (panelIn < MIN_FILLER_IN) return { error: 'Panel width must be at least 4".' };
-
-    // Each run: its length in inches, and which corner sits at each end on that face.
-    let runs: number[];
-    let outsideCorners: number;
-    let insideCorners: number;
-    let perimFt: number;
-    let exact = true;
-    if (inp.has('perim')) {
-      perimFt = inp.num('perim');
-      const jogs = inp.count('jogs');
-      outsideCorners = 4 + jogs;
-      insideCorners = jogs;
-      // Outside face: 1×1 corners at the building's outside corners, 4×4 at its inside corners.
-      // Inside face: the other way around. The inside face is 8 × the thickness shorter.
-      const outFace = perimFt * 12 - 2 * OUTSIDE_CORNER_IN * outsideCorners - 2 * INSIDE_CORNER_IN * insideCorners;
-      const inFace = perimFt * 12 - 8 * t - 2 * INSIDE_CORNER_IN * outsideCorners - 2 * OUTSIDE_CORNER_IN * insideCorners;
-      if (inFace <= 0) return { error: 'The wall is too short for that many corners.' };
-      runs = [outFace, inFace];
-      exact = false;
-    } else {
-      if (!inp.has('length') || !inp.has('width')) return { error: 'Enter the outside length and width, or the outside wall length.' };
-      const L = inp.len('length') * 12;
-      const W = inp.len('width') * 12;
-      perimFt = (2 * (L + W)) / 12;
-      outsideCorners = 4;
-      insideCorners = 4;
-      const outRun = (s: number) => s - 2 * OUTSIDE_CORNER_IN;
-      const inRun = (s: number) => s - 2 * t - 2 * INSIDE_CORNER_IN;
-      if (inRun(L) <= 0 || inRun(W) <= 0) return { error: 'The foundation is too small for that wall thickness.' };
-      runs = [outRun(L), outRun(W), outRun(L), outRun(W), inRun(L), inRun(W), inRun(L), inRun(W)];
-    }
-
-    let columns = 0;
-    let outsideJoints = 0;
-    const fillers = new Map<number, number>();
-    runs.forEach((run, i) => {
-      const lay = layoutRun(run, panelIn);
-      const cols = lay.panels + lay.fillers.length;
-      columns += lay.panels;
-      for (const f of lay.fillers) fillers.set(f, (fillers.get(f) ?? 0) + 1);
-      if (exact ? i < 4 : i === 0) outsideJoints += cols + (exact ? 1 : 0);
-    });
-    if (!exact) {
-      // Odd shapes: no per-wall layout, so allow one filler (about 12" on average) per wall on each face.
-      const walls = outsideCorners + insideCorners;
-      const avgFillerIn = 12;
-      columns = Math.max(0, Math.floor((runs[0] + runs[1] - 2 * walls * avgFillerIn) / panelIn));
-      fillers.clear();
-      outsideJoints = Math.floor((runs[0] - walls * avgFillerIn) / panelIn) + 2 * walls;
-    }
+    if (panelIn < 4) return { error: 'Panel width must be at least 4".' };
 
     const pieces = stack.heightsIn.length;
-    const each = pieces > 1 ? ' of each height' : '';
-    const rows: ResultRow[] = [
-      { label: 'Wall height', value: heightText(stack.heightsIn.reduce((a, b) => a + b, 0)) },
-      { label: `${dec(panelIn)}" panels`, value: commas(columns * pieces), big: true, note: stack.heightsIn.map((h) => `${commas(columns)} × ${heightText(h)}`).join(' + ') },
-    ];
-    if (exact) {
-      const list = [...fillers.entries()].sort((a, b) => b[0] - a[0]);
-      rows.push({
-        label: 'Fillers',
-        value: list.length ? commas(list.reduce((s, [, n]) => s + n, 0) * pieces) : 'none',
-        big: true,
-        note: list.length ? list.map(([w, n]) => `${n} × ${w}"`).join(', ') + each : undefined,
+    const panelText = `${dec(panelIn / 12)}'`;
+    let panels = 0;
+    let woodStrips = 0;
+    let joints = 0;
+    let ocEnds = 0;
+    let icEnds = 0;
+    const fillers = new Map<number, number>();
+    const addFillers = (list: number[]) => list.forEach((f) => fillers.set(f, (fillers.get(f) ?? 0) + 1));
+
+    const wallRows: ResultRow[] = [];
+    for (const [i, w] of walls.entries()) {
+      const L = w.length * 12;
+      const oc = w.ends === 'oo' ? 2 : w.ends === 'oi' ? 1 : 0;
+      const ic = 2 - oc;
+      ocEnds += oc;
+      icEnds += ic;
+      const outMiddle = L - ic * INSIDE_CORNER_IN - oc * OC_PIECE_IN;
+      const inRun = L - oc * (t + INSIDE_CORNER_IN) - ic * INSIDE_CORNER_IN;
+      if (outMiddle < 0 || inRun < 0) return { error: `Wall ${i + 1} is too short for its corners.` };
+      const out = layoutFace(outMiddle, panelIn);
+      const inside = layoutFace(inRun, panelIn);
+      const ocPieces = Array<number>(oc).fill(OC_PIECE_IN);
+      panels += out.panels + inside.panels;
+      addFillers([...ocPieces, ...out.fillers, ...inside.fillers]);
+      woodStrips += (out.woodIn ? 1 : 0) + (inside.woodIn ? 1 : 0);
+      joints += out.panels + out.fillers.length + oc + 1;
+      wallRows.push({
+        label: `Wall ${i + 1}: ${ftIn(w.length)}`,
+        value: `${out.panels + inside.panels} panels`,
+        note: `Out: ${describeFace(ocPieces.slice(0, 1), out, ocPieces.slice(1), panelText)}\nIn: ${describeFace([], inside, [], panelText)}`,
       });
-    } else {
-      rows.push({ label: 'Fillers', value: `about ${commas(2 * (outsideCorners + insideCorners) * pieces)}`, big: true, note: 'About 1 per wall on each side' + each });
     }
-    rows.push(
-      { label: 'Outside corners (1×1)', value: commas(outsideCorners * pieces), note: pieces > 1 ? `${outsideCorners} of each height` : undefined },
-      { label: 'Inside corners (4×4)', value: commas(insideCorners * pieces), note: pieces > 1 ? `${insideCorners} of each height` : undefined },
-      { label: 'Ties', value: `about ${commas(outsideJoints * stack.ties)}`, note: `${stack.ties} per joint` },
-    );
-    // Concrete: centerline length × thickness × height. Centerline = outside perimeter − 4 × thickness.
-    const heightFt = stack.heightsIn.reduce((a, b) => a + b, 0) / 12;
-    const cuFtWall = (perimFt - (4 * t) / 12) * (t / 12) * heightFt;
-    rows.push({ label: 'Concrete in the wall', value: cuYd(cuFtWall / CUFT_PER_CUYD), note: 'No waste added' });
-    return { rows };
+
+    const each = pieces > 1 ? ' of each height' : '';
+    const fillerList = [...fillers.entries()].sort((x, y) => y[0] - x[0]);
+    const fillerCount = fillerList.reduce((sum, [, n]) => sum + n, 0);
+    const ocCorners = Math.ceil(ocEnds / 2);
+    const icCorners = Math.ceil(icEnds / 2);
+    const rows: ResultRow[] = [
+      { label: 'Wall height', value: heightText(stack.heightsIn.reduce((x, y) => x + y, 0)) },
+      {
+        label: `${panelText} panels`,
+        value: commas(panels * pieces),
+        big: true,
+        note: pieces > 1 ? stack.heightsIn.map((h) => `${commas(panels)} × ${heightText(h)}`).join(' + ') : undefined,
+      },
+      {
+        label: 'Fillers',
+        value: commas(fillerCount * pieces),
+        big: true,
+        note: fillerList.length ? fillerList.map(([f, n]) => `${n} × ${fillerText(f)}`).join(', ') + each : undefined,
+      },
+      {
+        label: 'Inside corners (4×4)',
+        value: commas((ocCorners + icCorners) * pieces),
+        note: `${ocCorners} outside + ${icCorners} inside corners on the foundation${each}`,
+      },
+    ];
+    if (woodStrips) rows.push({ label: 'Wood strips', value: commas(woodStrips * pieces), note: '1" where a face comes out to an odd inch' });
+    rows.push({ label: 'Ties', value: `about ${commas(joints * stack.ties)}`, note: `${stack.ties} per joint` });
+    // Concrete: each outside corner shortens the centerline by the thickness, each inside corner adds it.
+    const centerFt = walls.reduce((sum, w) => sum + w.length, 0) - ((ocCorners - icCorners) * t) / 12;
+    const heightFt = stack.heightsIn.reduce((x, y) => x + y, 0) / 12;
+    rows.push({ label: 'Concrete in the wall', value: cuYd((centerFt * (t / 12) * heightFt) / CUFT_PER_CUYD), note: 'No waste added' });
+
+    const warnings: string[] = [];
+    if (walls.length >= 4 && ocCorners - icCorners !== 4) {
+      warnings.push('Check the corners: a closed foundation has 4 more outside corners than inside corners.');
+    }
+    return { rows: [...rows, ...wallRows], warnings };
   },
-  notes: ['Both sides of the wall. Runs are rounded to the nearest inch; make up any fraction with wood.'],
+  notes: ['Both sides of the wall. Lengths are rounded to the nearest inch.'],
 };
 
 export const CONCRETE_TOOLS: Tool[] = [slab, slabBeams, footings, piers, steps, forms, wallForms];

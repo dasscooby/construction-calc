@@ -56,7 +56,12 @@ export interface BarListField extends FieldBase {
   defaultSize: string;
 }
 
-export type Field = LengthField | NumberField | CountField | ChoiceField | AreasField | BarListField;
+/** Rows of walls: length (outside) and what kind of corner is at each end. compute() receives feet. */
+export interface WallsField extends FieldBase {
+  kind: 'walls';
+}
+
+export type Field = LengthField | NumberField | CountField | ChoiceField | AreasField | BarListField | WallsField;
 
 export interface Rect {
   length: number; // feet
@@ -67,6 +72,14 @@ export interface BarRow {
   size: string; // '5' for #5
   qty: number;
   length: number; // feet
+}
+
+/** What's at the two ends of a wall: 'oo' both outside corners, 'oi' one of each, 'ii' both inside corners. */
+export type WallEnds = 'oo' | 'oi' | 'ii';
+
+export interface WallRow {
+  length: number; // feet, measured on the outside
+  ends: WallEnds;
 }
 
 /** What compute() reads. Required fields are always filled in and valid before compute() runs. */
@@ -83,6 +96,8 @@ export interface Inputs {
   areas(key: string): Rect[];
   /** Bar list field: the filled-in rows. */
   bars(key: string): BarRow[];
+  /** Walls field: the filled-in rows. */
+  walls(key: string): WallRow[];
   /** True if the field was filled in. */
   has(key: string): boolean;
 }

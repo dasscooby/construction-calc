@@ -8,7 +8,7 @@
 //   Order: 25.75 yd
 
 import { ftIn, inches } from './format';
-import { RawArea, RawBarRow, RawLength, RawValues, parseLength, parseNumber, RunResult } from './run';
+import { RawArea, RawBarRow, RawLength, RawValues, RawWallRow, parseLength, parseNumber, RunResult } from './run';
 import { Field, Tool } from './types';
 
 const lengthText = (r: RawLength): string | null => {
@@ -46,8 +46,14 @@ function fieldText(f: Field, v: RawValues[string]): string | null {
         .map((r) => `${r.qty.trim()} – #${r.size} @ ${lengthText(r.length)}`);
       return parts.length ? parts.join(', ') : null;
     }
+    case 'walls': {
+      const parts = (v as RawWallRow[]).filter((r) => lengthText(r.length)).map((r) => `${lengthText(r.length)} (${WALL_ENDS_TEXT[r.ends]})`);
+      return parts.length ? parts.join(', ') : null;
+    }
   }
 }
+
+export const WALL_ENDS_TEXT = { oo: 'outside corners', oi: 'outside + inside corner', ii: 'inside corners' } as const;
 
 export function shareText(tool: Tool, raw: RawValues, result: RunResult): string | null {
   if (result.status !== 'ok') return null;
