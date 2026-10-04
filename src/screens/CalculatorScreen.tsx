@@ -18,6 +18,7 @@ import {
 import { calcHistory, newTapeLines, useCalcHistory } from '../lib/calcHistory';
 import { dayLabel, timeLabel } from '../lib/history';
 import { DENOMS } from '../lib/units';
+import { feel } from '../lib/feel';
 import GoofyForeman, { ERRORS_FOR_FOREMAN } from './GoofyForeman';
 import { colors, onThemeChange, themed } from '../theme';
 
@@ -146,6 +147,7 @@ export default function CalculatorScreen() {
   const wasError = useRef(false);
   useEffect(() => {
     if (v.isError && !wasError.current) {
+      feel.error();
       const n = errors + 1;
       if (n >= ERRORS_FOR_FOREMAN) {
         setForeman(true);
@@ -156,6 +158,7 @@ export default function CalculatorScreen() {
   }, [v.isError]);
 
   const onKey = (k: KeyDef['k']) => {
+    feel.key();
     if (k === 'guide' || k === 'tape' || k === 'prefs') setModal(k);
     else dispatch({ type: 'key', key: k });
   };

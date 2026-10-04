@@ -2,7 +2,7 @@
   "expo": {
     "name": "Construction Calc",
     "slug": "aaron",
-    "version": "1.0.0",
+    "version": "1.1.0",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
     "userInterfaceStyle": "dark",
@@ -44,7 +44,32 @@
       "url": "https://u.expo.dev/44020c03-bffb-4999-be2b-0a30f5d6f390"
     },
     "plugins": [
-      "expo-sharing"
+      "expo-sharing",
+      [
+        "expo-widgets",
+        {
+          "groupIdentifier": "group.com.dasscooby.constructioncalc",
+          "widgets": [
+            {
+              "name": "JobWidget",
+              "displayName": "Job",
+              "description": "Your latest job's order: yards, panels and fillers.",
+              "supportedFamilies": [
+                "systemSmall",
+                "systemMedium",
+                "accessoryRectangular"
+              ]
+            }
+          ]
+        }
+      ],
+      [
+        "react-native-document-scanner-plugin",
+        {
+          "cameraPermission": "Construction Calc uses the camera to scan plans and paperwork into your jobs."
+        }
+      ],
+      "expo-font"
     ]
   }
 }

@@ -184,7 +184,10 @@ function totalsRows(t: Totals): { label: string; value: string }[] {
   return rows;
 }
 
-export function buildReport(job: Job, s: Settings, now = new Date()): { html: string; text: string } {
+/** `scans`: scanned plan pages as data URIs (phone app), added at the end of the report. */
+export function buildReport(job: Job, s: Settings, opts: { now?: Date; scans?: string[] } = {}): { html: string; text: string } {
+  const now = opts.now ?? new Date();
+  const scans = opts.scans ?? [];
   const items = figureItems(job);
   const totals = jobTotals(items);
   const drawings = jobDrawings(job, items);
@@ -228,6 +231,8 @@ export function buildReport(job: Job, s: Settings, now = new Date()): { html: st
   .warn { background: #fff4dc; border: 1px solid #e0a000; border-radius: 6px; padding: 6px 8px; font-size: 13px; margin-bottom: 6px; }
   .draw { border: 1px solid #ccc; border-radius: 10px; overflow: hidden; margin-bottom: 12px; break-inside: avoid; }
   .notes { white-space: pre-wrap; font-size: 14px; }
+  .scan { break-before: page; }
+  .scan img { width: 100%; border: 1px solid #ccc; }
   .foot { margin-top: 24px; font-size: 11px; color: #888; text-align: center; }
   .print { position: fixed; right: 16px; bottom: 16px; padding: 12px 18px; border-radius: 999px; border: 0; background: #ff9f0a; color: #000; font-size: 16px; font-weight: 700; }
   @media print { .print { display: none; } body { padding: 0; } }
@@ -238,6 +243,7 @@ ${sum.length ? `<h2>Order summary</h2><table class="sum">${sum.map((r) => `<tr><
 ${drawings ? `<h2>Plan</h2><div class="draw">${drawings.plan}</div><h2>3D view</h2><div class="draw">${drawings.iso}</div>` : ''}
 ${items.length ? `<h2>Details</h2>${itemHtml}` : '<p>Nothing added to this job yet.</p>'}
 ${job.notes ? `<h2>Notes</h2><div class="notes">${esc(job.notes)}</div>` : ''}
+${scans.map((src, i) => `<div class="scan"><h2>Plans · page ${i + 1}</h2><img src="${src}" alt="Plan page ${i + 1}"></div>`).join('')}
 <div class="foot">Made with Construction Calc · Field numbers — always follow your plans and your engineer.</div>
 <button class="print" onclick="window.print()">Save as PDF / Print</button>
 </body></html>`;

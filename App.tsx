@@ -1,9 +1,14 @@
+import { GlassView, isLiquidGlassAvailable } from 'expo-glass-effect';
 import { StatusBar } from 'expo-status-bar';
+import { SymbolView } from 'expo-symbols';
 import { useEffect, useRef, useState } from 'react';
-import { Pressable, StyleSheet, Text, View } from 'react-native';
+import { Platform, Pressable, StyleSheet, Text, View } from 'react-native';
 import { SafeAreaProvider, SafeAreaView } from 'react-native-safe-area-context';
 
+import { feel } from './src/lib/feel';
 import { HistoryEntry } from './src/lib/history';
+import { useJobs } from './src/lib/jobs';
+import { syncWidgets } from './src/lib/jobSync';
 import { TabId, useSettings } from './src/lib/settings';
 import CalculatorScreen from './src/screens/CalculatorScreen';
 import HistoryScreen from './src/screens/HistoryScreen';
@@ -13,8 +18,25 @@ import ToolsTab, { OpenRequest } from './src/screens/ToolsTab';
 import { TABS } from './src/tabs';
 import { colors, mode, onThemeChange, themed } from './src/theme';
 
+// iPhone tab icons (SF Symbols). Web and Android show the names only.
+const TAB_SYMBOLS: Record<TabId, string> = {
+  calc: 'plus.forwardslash.minus',
+  concrete: 'cube.fill',
+  rebar: 'grid',
+  site: 'mountain.2.fill',
+  engineer: 'ruler.fill',
+  jobs: 'folder.fill',
+};
+const SHOW_ICONS = Platform.OS === 'ios';
+// iOS 26 Liquid Glass tab bar; older iOS and other platforms get the plain bar.
+const GLASS = Platform.OS === 'ios' && isLiquidGlassAvailable();
+
 export default function App() {
   const prefs = useSettings();
+  const jobs = useJobs();
+
+  // Keep the Home Screen widget and any pour on the Lock Screen up to date (iPhone).
+  useEffect(() => syncWidgets(jobs), [jobs, prefs.accent, prefs.mode]);
   const [tab, setTab] = useState<TabId>(prefs.tabOrder[0]);
   const [overlay, setOverlay] = useState<'history' | 'settings' | null>(null);
   const [request, setRequest] = useState<{ tab: TabId; req: OpenRequest } | null>(null);
@@ -79,8 +101,8 @@ export default function App() {
           )}
         </View>
       </SafeAreaView>
-      <SafeAreaView style={styles.tabBarWrap} edges={['bottom', 'left', 'right']}>
-        <View style={styles.tabBar}>
+      <SafeAreaView style={[styles.tabBarWrap, GLASS && styles.tabBarWrapGlass]} edges={['bottom', 'left', 'right']}>
+        <TabBarBackground>
           {prefs.tabOrder.map((id) => {
             const active = id === tab && !overlay;
             return (
@@ -88,6 +110,7 @@ export default function App() {
                 key={id}
                 onPress={() => {
                   picked.current = true;
+                  if (id !== tab || overlay) feel.tap();
                   setTab(id);
                   setOverlay(null);
                 }}
@@ -95,16 +118,40 @@ export default function App() {
                 accessibilityState={{ selected: active }}
                 style={[styles.tab, active && styles.tabActive]}
               >
-                <Text style={[styles.tabText, active && styles.tabTextActive]} numberOfLines={1} maxFontSizeMultiplier={1.15}>
+                {SHOW_ICONS && (
+                  <SymbolView
+                    name={TAB_SYMBOLS[id] as never}
+                    size={21}
+                    tintColor={active ? colors.accent : colors.subtext}
+                    weight={active ? 'semibold' : 'regular'}
+                  />
+                )}
+                <Text
+                  style={[styles.tabText, SHOW_ICONS && styles.tabTextSmall, active && styles.tabTextActive]}
+                  numberOfLines={1}
+                  maxFontSizeMultiplier={1.15}
+                >
                   {TABS[id].name}
                 </Text>
               </Pressable>
             );
           })}
-        </View>
+        </TabBarBackground>
       </SafeAreaView>
     </SafeAreaProvider>
   );
+}
+
+/** The row of tabs: a floating glass pill on iOS 26, a plain bar everywhere else. */
+function TabBarBackground({ children }: { children: React.ReactNode }) {
+  if (GLASS) {
+    return (
+      <GlassView style={[styles.tabBar, styles.tabBarGlass]} glassEffectStyle="regular" isInteractive>
+        {children}
+      </GlassView>
+    );
+  }
+  return <View style={styles.tabBar}>{children}</View>;
 }
 
 const getStyles = themed(() => ({
@@ -113,7 +160,9 @@ const getStyles = themed(() => ({
   screen: { flex: 1 },
   hidden: { display: 'none' },
   tabBarWrap: { backgroundColor: colors.panel, borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: colors.border },
-  tabBar: { flexDirection: 'row', height: 56 },
+  tabBarWrapGlass: { backgroundColor: colors.bg, borderTopWidth: 0 },
+  tabBar: { flexDirection: 'row', height: SHOW_ICONS ? 60 : 56 },
+  tabBarGlass: { marginHorizontal: 10, marginTop: 4, marginBottom: 2, borderRadius: 30, overflow: 'hidden' },
   tab: {
     flex: 1,
     alignItems: 'center',
@@ -124,6 +173,7 @@ const getStyles = themed(() => ({
   },
   tabActive: { backgroundColor: colors.panel2 },
   tabText: { fontSize: 14, fontWeight: '600', color: colors.subtext },
+  tabTextSmall: { fontSize: 11, marginTop: 2 },
   tabTextActive: { color: colors.accent, fontWeight: '800' },
 }), { scaleText: false });
 

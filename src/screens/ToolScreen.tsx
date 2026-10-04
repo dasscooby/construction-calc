@@ -15,6 +15,7 @@ import {
 } from 'react-native';
 
 import { RawArea, RawBarRow, RawLength, RawStockRow, RawValue, RawValues, RawWallRow, RunResult, WALL_ENDS, defaultRaw, runTool } from '../tools/run';
+import { feel } from '../lib/feel';
 import { history } from '../lib/history';
 import { jobStore, useJobs } from '../lib/jobs';
 import { companyLine, userDefaults, useSettings } from '../lib/settings';
@@ -183,6 +184,7 @@ function JobButtons({
   };
   const addTo = (jobId: string, name: string) => {
     jobStore.addItem(jobId, { toolId: tool.id, title, raw });
+    feel.success();
     setPicking(false);
     setNewName('');
     flash(`Added to ${name} ✓`);
@@ -194,6 +196,7 @@ function JobButtons({
         <Pressable
           onPress={() => {
             jobStore.editItem(linkedJob.id, jobLink!.itemId, { raw });
+            feel.success();
             flash(`Saved to ${linkedJob.name} ✓`);
           }}
           style={({ pressed }) => [styles.shareBtn, pressed && styles.sharePressed]}
@@ -319,7 +322,10 @@ function FieldInput({ field, value, onChange }: { field: Field; value: RawValue;
             return (
               <Pressable
                 key={o.value}
-                onPress={() => onChange(o.value)}
+                onPress={() => {
+                  if (o.value !== value) feel.tap();
+                  onChange(o.value);
+                }}
                 accessibilityRole="button"
                 accessibilityState={{ selected: on }}
                 style={[styles.chip, on && styles.chipOn]}

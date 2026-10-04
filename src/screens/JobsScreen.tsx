@@ -1,9 +1,13 @@
 import { useMemo, useState } from 'react';
-import { Pressable, ScrollView, Share, Text, TextInput, View } from 'react-native';
+import { Image, Platform, Pressable, ScrollView, Share, Text, TextInput, View } from 'react-native';
 
-import { dayLabel } from '../lib/history';
-import { Job, JobItem, jobStore, useJobs } from '../lib/jobs';
+import { feel } from '../lib/feel';
+import { dayLabel, timeLabel } from '../lib/history';
+import { Job, JobItem, jobStore, useJobs, yardsIn } from '../lib/jobs';
+import { deleteJobScans, deleteScanFile, scanPages, scannerAvailable, scansForReport } from '../lib/scanner';
 import { useSettings } from '../lib/settings';
+import { dec } from '../tools/format';
+import { liveActivitiesSupported } from '../widgets/bridge';
 import { openReport } from '../report/open';
 import { buildReport, figureItems, jobTotals } from '../report/report';
 import { colors, onThemeChange, themed } from '../theme';
@@ -71,8 +75,33 @@ function JobDetail({ job, onBack, onOpenItem }: { job: Job; onBack: () => void; 
   const [confirmDelete, setConfirmDelete] = useState(false);
   const figured = useMemo(() => figureItems(job), [job]);
   const report = useMemo(() => buildReport(job, prefs), [job, prefs]);
+  const totals = useMemo(() => jobTotals(figured), [figured]);
+  const [scanning, setScanning] = useState(false);
+  const canScan = useMemo(scannerAvailable, []);
+  const viewReport = () => {
+    // Phone app: put the scanned plan pages in the PDF too.
+    if (Platform.OS !== 'web' && job.scans?.length) {
+      void scansForReport(job.scans).then((scans) => {
+        const r = buildReport(job, prefs, { scans });
+        openReport(r.html, r.text, job.name);
+      });
+    } else openReport(report.html, report.text, job.name);
+  };
+  const scan = async () => {
+    setScanning(true);
+    try {
+      const pages = await scanPages(job.id);
+      if (pages.length) {
+        jobStore.addScans(job.id, pages);
+        feel.success();
+      }
+    } catch {
+      // cancelled or no camera permission
+    }
+    setScanning(false);
+  };
   const summary = useMemo(() => {
-    const t = jobTotals(figured);
+    const t = totals;
     const rows: [string, string][] = [];
     if (t.concreteOrderYd) rows.push(['Concrete to order', `${t.concreteOrderYd.toFixed(2)} yd`]);
     if (t.concreteCost) rows.push(['Concrete cost', `$${t.concreteCost.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`]);
@@ -81,7 +110,7 @@ function JobDetail({ job, onBack, onOpenItem }: { job: Job; onBack: () => void; 
     const fillers = [...t.fillers.values()].reduce((a, b) => a + b, 0);
     if (fillers) rows.push(['Fillers', fillers.toLocaleString()]);
     return rows;
-  }, [figured]);
+  }, [totals]);
 
   return (
     <View style={styles.page}>
@@ -120,16 +149,14 @@ function JobDetail({ job, onBack, onOpenItem }: { job: Job; onBack: () => void; 
           </View>
         )}
 
-        <Pressable
-          onPress={() => openReport(report.html, report.text, job.name)}
-          style={[styles.primary, styles.wide]}
-          accessibilityRole="button"
-        >
+        <Pressable onPress={viewReport} style={[styles.primary, styles.wide]} accessibilityRole="button">
           <Text style={styles.primaryText}>View report / PDF</Text>
         </Pressable>
         <Pressable onPress={() => Share.share({ title: job.name, message: report.text }).catch(() => {})} style={styles.secondary} accessibilityRole="button">
           <Text style={styles.secondaryText}>Share as text</Text>
         </Pressable>
+
+        <PourCard job={job} orderYd={totals.concreteOrderYd} truckYd={Number(prefs.defaults.truck) || 10} />
 
         <Text style={styles.section}>In this job</Text>
         {figured.length === 0 ? (
@@ -177,6 +204,36 @@ function JobDetail({ job, onBack, onOpenItem }: { job: Job; onBack: () => void; 
           ))
         )}
 
+        {(canScan || (job.scans?.length ?? 0) > 0) && (
+          <>
+            <Text style={styles.section}>Plans</Text>
+            {job.scans?.length ? (
+              <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.scans}>
+                {job.scans.map((uri, i) => (
+                  <Pressable
+                    key={uri}
+                    onPress={() => {
+                      jobStore.removeScan(job.id, uri);
+                      deleteScanFile(uri);
+                    }}
+                    accessibilityRole="button"
+                    accessibilityLabel={`Delete plan page ${i + 1}`}
+                    style={styles.scanThumb}
+                  >
+                    <Image source={{ uri }} style={styles.scanImg} resizeMode="cover" />
+                    <Text style={styles.scanLabel}>Page {i + 1} · tap to delete</Text>
+                  </Pressable>
+                ))}
+              </ScrollView>
+            ) : null}
+            {canScan && (
+              <Pressable onPress={scan} disabled={scanning} style={styles.secondary} accessibilityRole="button">
+                <Text style={styles.secondaryText}>{scanning ? 'Scanning…' : 'Scan plans'}</Text>
+              </Pressable>
+            )}
+          </>
+        )}
+
         <Text style={styles.section}>Notes</Text>
         <TextInput
           style={[styles.field, styles.notes]}
@@ -197,6 +254,7 @@ function JobDetail({ job, onBack, onOpenItem }: { job: Job; onBack: () => void; 
               </Pressable>
               <Pressable
                 onPress={() => {
+                  deleteJobScans(job.id);
                   jobStore.remove(job.id);
                   onBack();
                 }}
@@ -213,6 +271,73 @@ function JobDetail({ job, onBack, onOpenItem }: { job: Job; onBack: () => void; 
           </Pressable>
         )}
       </ScrollView>
+    </View>
+  );
+}
+
+/** Pour tracker: count trucks in. On iPhone it also shows on the Lock Screen and Dynamic Island. */
+function PourCard({ job, orderYd, truckYd }: { job: Job; orderYd: number; truckYd: number }) {
+  const p = job.pour;
+  if (!p) {
+    if (!orderYd) return null;
+    const trucks = Math.max(1, Math.ceil(orderYd / truckYd - 1e-9));
+    return (
+      <View style={styles.card}>
+        <Text style={styles.label}>Pour</Text>
+        <Text style={styles.cardSub}>
+          {dec(orderYd, 2)} yd · {trucks} {trucks === 1 ? 'truck' : 'trucks'} at {dec(truckYd)} yd
+          {liveActivitiesSupported ? ' · shows on your Lock Screen' : ''}
+        </Text>
+        <Pressable
+          onPress={() => {
+            jobStore.startPour(job.id, orderYd, truckYd);
+            feel.success();
+          }}
+          style={[styles.primary, styles.pourBtn]}
+          accessibilityRole="button"
+        >
+          <Text style={styles.primaryText}>Start pour</Text>
+        </Pressable>
+      </View>
+    );
+  }
+  const mins = Math.round((Date.now() - p.startedAt) / 60000);
+  return (
+    <View style={styles.card}>
+      <Text style={styles.label}>{p.done ? 'Pour done' : 'Pouring'}</Text>
+      <Text style={styles.pourBig}>
+        {p.done ? `${p.trucksIn} ${p.trucksIn === 1 ? 'truck' : 'trucks'}` : `Truck ${Math.min(p.trucksIn + 1, p.trucks)} of ${p.trucks}`}
+      </Text>
+      <Text style={styles.cardSub}>
+        {dec(yardsIn(p), 2)} of {dec(p.totalYd, 2)} yd in · started {timeLabel(p.startedAt)}
+        {p.done ? '' : ` · ${mins < 60 ? `${mins} min` : `${Math.floor(mins / 60)} h ${mins % 60} min`}`}
+      </Text>
+      {p.done ? (
+        <Pressable onPress={() => jobStore.clearPour(job.id)} style={[styles.secondary, styles.pourBtn]} accessibilityRole="button">
+          <Text style={styles.secondaryText}>Clear</Text>
+        </Pressable>
+      ) : (
+        <>
+          <Pressable
+            onPress={() => {
+              jobStore.countTruck(job.id, 1);
+              feel.success();
+            }}
+            style={[styles.primary, styles.pourBtn]}
+            accessibilityRole="button"
+          >
+            <Text style={styles.primaryText}>Truck in</Text>
+          </Pressable>
+          <View style={styles.itemBtns}>
+            <Pressable onPress={() => jobStore.countTruck(job.id, -1)} style={styles.smallBtn} accessibilityRole="button">
+              <Text style={styles.smallBtnText}>Undo</Text>
+            </Pressable>
+            <Pressable onPress={() => jobStore.finishPour(job.id)} style={styles.smallBtn} accessibilityRole="button">
+              <Text style={styles.smallBtnText}>Finish pour</Text>
+            </Pressable>
+          </View>
+        </>
+      )}
     </View>
   );
 }
@@ -256,6 +381,12 @@ const getStyles = themed(() => ({
   confirm: { backgroundColor: colors.panel, borderRadius: 16, padding: 14 },
   confirmText: { fontSize: 16, fontWeight: '600', color: colors.text, textAlign: 'center' },
   half: { flex: 1, marginBottom: 0 },
+  pourBtn: { marginTop: 12 },
+  pourBig: { fontSize: 28, fontWeight: '300', color: colors.accent, marginVertical: 2 },
+  scans: { gap: 10, paddingBottom: 10 },
+  scanThumb: { width: 130 },
+  scanImg: { width: 130, height: 170, borderRadius: 10, backgroundColor: colors.panel2 },
+  scanLabel: { fontSize: 12, color: colors.subtext, marginTop: 4 },
 }));
 
 // Rebuilt when the colors or text size change.

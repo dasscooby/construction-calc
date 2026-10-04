@@ -78,6 +78,19 @@ export default function SettingsScreen({ onClose }: { onClose: () => void }) {
             options={(Object.keys(TEXT_SIZES) as TextSize[]).map((k) => [k, TEXT_SIZES[k].label])}
             onPick={(textSize) => settings.update({ textSize })}
           />
+          {Platform.OS !== 'web' && (
+            <>
+              <Text style={styles.label}>Key clicks</Text>
+              <Chips
+                value={s.haptics ? 'on' : 'off'}
+                options={[
+                  ['on', 'On'],
+                  ['off', 'Off'],
+                ]}
+                onPick={(v) => settings.update({ haptics: v === 'on' })}
+              />
+            </>
+          )}
         </View>
 
         {/* ---------------- Defaults ---------------- */}

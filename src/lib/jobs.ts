@@ -16,13 +16,28 @@ export interface JobItem {
   at: number;
 }
 
+/** A pour in progress: trucks counted in as they arrive. */
+export interface Pour {
+  startedAt: number;
+  trucksIn: number;
+  trucks: number;
+  totalYd: number;
+  truckYd: number;
+  done: boolean;
+}
+
 export interface Job {
   id: string;
   name: string;
   address: string;
   notes: string;
   createdAt: number;
+  /** Last time anything in the job changed (the widget shows the latest job) */
+  touchedAt?: number;
   items: JobItem[];
+  pour?: Pour;
+  /** Scanned plan pages: image files saved on the phone */
+  scans?: string[];
 }
 
 const SAVE_KEY = 'jobs-v1';
@@ -51,13 +66,14 @@ function load() {
     .catch(() => {});
 }
 
-const update = (id: string, fn: (j: Job) => Job) => set(jobs.map((j) => (j.id === id ? fn(j) : j)));
+const update = (id: string, fn: (j: Job) => Job) => set(jobs.map((j) => (j.id === id ? { ...fn(j), touchedAt: Date.now() } : j)));
 
 export const jobStore = {
   /** Makes a job and returns its id. Newest jobs go first. */
   create(name: string): string {
     load();
-    const job: Job = { id: newId(), name: name.trim() || 'New job', address: '', notes: '', createdAt: Date.now(), items: [] };
+    const now = Date.now();
+    const job: Job = { id: newId(), name: name.trim() || 'New job', address: '', notes: '', createdAt: now, touchedAt: now, items: [] };
     set([job, ...jobs]);
     return job.id;
   },
@@ -76,7 +92,38 @@ export const jobStore = {
   removeItem(jobId: string, itemId: string) {
     update(jobId, (j) => ({ ...j, items: j.items.filter((it) => it.id !== itemId) }));
   },
+  startPour(jobId: string, totalYd: number, truckYd: number) {
+    const trucks = Math.max(1, Math.ceil(totalYd / truckYd - 1e-9));
+    update(jobId, (j) => ({ ...j, pour: { startedAt: Date.now(), trucksIn: 0, trucks, totalYd, truckYd, done: false } }));
+  },
+  /** +1 when a truck is in (−1 to undo). Adds a truck if more show up than planned. */
+  countTruck(jobId: string, by: 1 | -1) {
+    update(jobId, (j) => {
+      if (!j.pour) return j;
+      const trucksIn = Math.max(0, j.pour.trucksIn + by);
+      return { ...j, pour: { ...j.pour, trucksIn, trucks: Math.max(j.pour.trucks, trucksIn) } };
+    });
+  },
+  finishPour(jobId: string) {
+    update(jobId, (j) => (j.pour ? { ...j, pour: { ...j.pour, done: true } } : j));
+  },
+  clearPour(jobId: string) {
+    update(jobId, (j) => ({ ...j, pour: undefined }));
+  },
+  addScans(jobId: string, uris: string[]) {
+    update(jobId, (j) => ({ ...j, scans: [...(j.scans ?? []), ...uris] }));
+  },
+  removeScan(jobId: string, uri: string) {
+    update(jobId, (j) => ({ ...j, scans: (j.scans ?? []).filter((s) => s !== uri) }));
+  },
 };
+
+/** The job changed most recently (what the widget shows). */
+export const latestJob = (list: Job[]): Job | undefined =>
+  list.reduce<Job | undefined>((best, j) => (!best || (j.touchedAt ?? j.createdAt) > (best.touchedAt ?? best.createdAt) ? j : best), undefined);
+
+/** "Truck 2 of 3" math for the pour: yards in so far (the last truck may be short). */
+export const yardsIn = (p: Pour) => Math.min(p.totalYd, p.trucksIn * p.truckYd);
 
 export function useJobs(): Job[] {
   load();

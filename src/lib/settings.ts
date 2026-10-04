@@ -15,6 +15,8 @@ export interface Settings {
   mode: Mode;
   accent: AccentId;
   textSize: TextSize;
+  /** Key clicks you can feel (phone app) */
+  haptics: boolean;
   /** Starting numbers, as typed. Blank = the tool's own default. */
   defaults: {
     waste: string;
@@ -36,6 +38,7 @@ export const DEFAULT_SETTINGS: Settings = {
   mode: 'dark',
   accent: 'orange',
   textSize: 'normal',
+  haptics: true,
   defaults: { waste: '', truck: '', price: '', slabThick: '', wallThick: '', spacing: '', lap: '', stockLength: '' },
   company: { name: '', phone: '', email: '', license: '' },
   favorites: [],
@@ -62,6 +65,7 @@ export function cleanSettings(saved: unknown): Settings {
     mode: s.mode === 'light' ? 'light' : 'dark',
     accent: s.accent && s.accent in ACCENTS ? s.accent : 'orange',
     textSize: s.textSize && s.textSize in TEXT_SIZES ? s.textSize : 'normal',
+    haptics: s.haptics !== false,
     defaults: strings(DEFAULT_SETTINGS.defaults, s.defaults),
     company: strings(DEFAULT_SETTINGS.company, s.company),
     favorites: ids(s.favorites),
