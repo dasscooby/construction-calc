@@ -218,6 +218,27 @@ function FieldInput({ field, value, onChange }: { field: Field; value: RawValue;
           })}
         </View>
       )}
+      {field.kind === 'multi' && (
+        <View style={styles.chips}>
+          {field.options.map((o) => {
+            const picked = (value as string).split(',').filter(Boolean);
+            const on = picked.includes(o.value);
+            const toggle = () => onChange((on ? picked.filter((x) => x !== o.value) : [...picked, o.value]).join(','));
+            return (
+              <Pressable
+                key={o.value}
+                onPress={toggle}
+                accessibilityRole="checkbox"
+                accessibilityLabel={`${field.label} ${o.label}`}
+                accessibilityState={{ checked: on }}
+                style={[styles.chip, styles.chipSmall, on && styles.chipOn]}
+              >
+                <Text style={[styles.chipText, on && styles.chipTextOn]}>{o.label}</Text>
+              </Pressable>
+            );
+          })}
+        </View>
+      )}
       {field.kind === 'areas' && <AreasInput value={value as RawArea[]} onChange={onChange} />}
       {field.kind === 'barlist' && <BarListInput field={field} value={value as RawBarRow[]} onChange={onChange} />}
       {field.kind === 'walls' && <WallsInput value={value as RawWallRow[]} onChange={onChange} />}

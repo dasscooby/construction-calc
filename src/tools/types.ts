@@ -43,6 +43,13 @@ export interface ChoiceField extends FieldBase {
   default: string;
 }
 
+/** A row of buttons; any number can be picked. compute() reads the picked values with picks(). */
+export interface MultiChoiceField extends FieldBase {
+  kind: 'multi';
+  options: Option[];
+  default: string[];
+}
+
 /** Any number of length × width rectangles (odd-shaped slabs). compute() receives feet. */
 export interface AreasField extends FieldBase {
   kind: 'areas';
@@ -61,7 +68,7 @@ export interface WallsField extends FieldBase {
   kind: 'walls';
 }
 
-export type Field = LengthField | NumberField | CountField | ChoiceField | AreasField | BarListField | WallsField;
+export type Field = LengthField | NumberField | CountField | ChoiceField | MultiChoiceField | AreasField | BarListField | WallsField;
 
 export interface Rect {
   length: number; // feet
@@ -92,6 +99,8 @@ export interface Inputs {
   count(key: string): number;
   /** Choice field: the picked option's value. */
   choice(key: string): string;
+  /** Multi-choice field: the picked values, in the order of the options. */
+  picks(key: string): string[];
   /** Areas field: the filled-in rectangles. */
   areas(key: string): Rect[];
   /** Bar list field: the filled-in rows. */

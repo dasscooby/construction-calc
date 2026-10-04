@@ -265,11 +265,17 @@ const forms: Tool = {
 
 const OC_PIECE_IN = 12; // the 1' piece on the outside face at an outside corner
 const INSIDE_CORNER_IN = 4; // the 4×4 inside corner
-/** Fillers the crew carries (14", 1', 8", 6"), biggest first. Odd inches left over get a wood strip. */
-const FILLERS_IN = [14, 12, 8, 6];
+/** Advance sells fillers in every inch from 4" to 23" (24" is a full panel). */
+const ADVANCE_FILLERS_IN = Array.from({ length: 20 }, (_, i) => 4 + i);
+/** What this crew carries; the person picks theirs on the screen. */
+const CREW_FILLERS_IN = [6, 8, 12, 14];
 
-/** Fewest fillers that add up to exactly this many inches (ties: the one whose smallest piece is biggest). */
-export function fillerSet(inches: number): number[] | null {
+/**
+ * Fewest fillers from these sizes that add up to exactly this many inches
+ * (ties: the set whose smallest piece is biggest). Null if it can't be done.
+ */
+export function fillerSet(inches: number, sizes: number[] = CREW_FILLERS_IN): number[] | null {
+  const FILLERS_IN = [...sizes].sort((x, y) => y - x);
   if (inches === 0) return [];
   if (inches < 0) return null;
   const best: (number[] | null)[] = [[]];
@@ -289,14 +295,14 @@ export function fillerSet(inches: number): number[] | null {
 }
 
 /** One face of one wall: panels, then fillers, then a wood strip for any odd inch. Runs are rounded to the inch. */
-export function layoutFace(runIn: number, panelIn: number): { panels: number; fillers: number[]; woodIn: number } {
+export function layoutFace(runIn: number, panelIn: number, sizes: number[] = CREW_FILLERS_IN): { panels: number; fillers: number[]; woodIn: number } {
   const run = Math.max(0, Math.round(runIn));
   const n = Math.floor(run / panelIn);
   const r = run - n * panelIn;
   for (const wood of [0, 1]) {
     // Leftover too small for the fillers? Trade a panel or two for fillers.
     for (let k = 0; k <= Math.min(2, n); k++) {
-      const set = fillerSet(r - wood + k * panelIn);
+      const set = fillerSet(r - wood + k * panelIn, sizes);
       if (set) return { panels: n - k, fillers: set, woodIn: wood };
     }
   }
@@ -348,9 +354,17 @@ const wallForms: Tool = {
       default: 'p4',
     },
     { key: 'panel', label: 'Panel width', kind: 'number', unit: 'in', default: '24' },
+    {
+      key: 'fillers',
+      label: 'Fillers on the trailer',
+      kind: 'multi',
+      options: ADVANCE_FILLERS_IN.map((n) => ({ value: String(n), label: fillerText(n) })),
+      default: CREW_FILLERS_IN.map(String),
+    },
   ],
   compute: (inp) => {
     const walls = inp.walls('walls');
+    const sizes = inp.picks('fillers').map(Number);
     const t = inp.num('thick');
     const panelIn = inp.num('panel');
     const stack = WALL_STACKS[inp.choice('stack')];
@@ -377,8 +391,8 @@ const wallForms: Tool = {
       const outMiddle = L - ic * INSIDE_CORNER_IN - oc * OC_PIECE_IN;
       const inRun = L - oc * (t + INSIDE_CORNER_IN) - ic * INSIDE_CORNER_IN;
       if (outMiddle < 0 || inRun < 0) return { error: `Wall ${i + 1} is too short for its corners.` };
-      const out = layoutFace(outMiddle, panelIn);
-      const inside = layoutFace(inRun, panelIn);
+      const out = layoutFace(outMiddle, panelIn, sizes);
+      const inside = layoutFace(inRun, panelIn, sizes);
       const ocPieces = Array<number>(oc).fill(OC_PIECE_IN);
       panels += out.panels + inside.panels;
       addFillers([...ocPieces, ...out.fillers, ...inside.fillers]);

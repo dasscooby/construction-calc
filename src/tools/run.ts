@@ -62,6 +62,9 @@ export function defaultRaw(tool: Tool): RawValues {
       case 'choice':
         raw[f.key] = f.default;
         break;
+      case 'multi':
+        raw[f.key] = f.default.join(',');
+        break;
       default:
         raw[f.key] = f.default ?? '';
     }
@@ -92,6 +95,9 @@ export function restoreRaw(tool: Tool, saved: unknown): RawValues {
     } else if (f.kind === 'walls' && Array.isArray(v) && v.length && v.every((r) => isRawLength(r?.length) && WALL_ENDS.includes(r?.ends))) {
       raw[f.key] = v as RawWallRow[];
     } else if (f.kind === 'choice' && f.options.some((o) => o.value === v)) raw[f.key] = v as string;
+    else if (f.kind === 'multi' && typeof v === 'string' && v.split(',').every((x) => x === '' || f.options.some((o) => o.value === x))) {
+      raw[f.key] = v;
+    }
     else if ((f.kind === 'number' || f.kind === 'count') && typeof v === 'string') raw[f.key] = v;
   }
   return raw;
@@ -102,7 +108,7 @@ export type RunResult =
   | { status: 'missing'; message: string }
   | { status: 'invalid'; message: string };
 
-type Parsed = number | string | Rect[] | BarRow[] | WallRow[] | null;
+type Parsed = number | string | string[] | Rect[] | BarRow[] | WallRow[] | null;
 
 /**
  * Test-friendly inputs are allowed too: a number for a length field means feet,
@@ -169,6 +175,13 @@ export function runTool(tool: Tool, values: Record<string, LooseValue>): RunResu
       case 'choice':
         value = v as string;
         break;
+      case 'multi': {
+        const picked = (v as string).split(',').filter(Boolean);
+        const order = f.options.map((o) => o.value);
+        if (picked.length) value = order.filter((o) => picked.includes(o));
+        else blank = true;
+        break;
+      }
       case 'areas': {
         const rects: Rect[] = [];
         for (const [i, a] of (v as RawArea[]).entries()) {
@@ -212,7 +225,7 @@ export function runTool(tool: Tool, values: Record<string, LooseValue>): RunResu
         break;
       }
     }
-    if (blank && !f.optional) return { status: 'missing', message: `Enter ${f.label.toLowerCase()}` };
+    if (blank && !f.optional) return { status: 'missing', message: `${f.kind === 'multi' ? 'Pick' : 'Enter'} ${f.label.toLowerCase()}` };
     parsed[f.key] = value;
   }
 
@@ -225,6 +238,7 @@ export function runTool(tool: Tool, values: Record<string, LooseValue>): RunResu
     num: (k) => (get(k) as number | null) ?? 0,
     count: (k) => (get(k) as number | null) ?? 0,
     choice: (k) => get(k) as string,
+    picks: (k) => (get(k) as string[] | null) ?? [],
     areas: (k) => (get(k) as Rect[] | null) ?? [],
     bars: (k) => (get(k) as BarRow[] | null) ?? [],
     walls: (k) => (get(k) as WallRow[] | null) ?? [],

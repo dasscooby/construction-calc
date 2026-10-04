@@ -33,6 +33,11 @@ function fieldText(f: Field, v: RawValues[string]): string | null {
       return (v as string).trim() || null;
     case 'choice':
       return f.options.find((o) => o.value === v)?.label ?? null;
+    case 'multi': {
+      const picked = (v as string).split(',');
+      const labels = f.options.filter((o) => picked.includes(o.value)).map((o) => o.label);
+      return labels.length ? labels.join(', ') : null;
+    }
     case 'areas': {
       const parts = (v as RawArea[])
         .map((a) => [lengthText(a.length), lengthText(a.width)])

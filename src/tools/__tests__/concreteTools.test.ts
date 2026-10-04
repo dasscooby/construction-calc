@@ -218,6 +218,14 @@ In: 11 × 2' + 14" + 1'`);
     }
   });
 
+  test(`pick your fillers: with an 18" on the trailer, 29'6" takes one 18" instead of 1' + 6"`, () => {
+    const r = runTool(tool('wall-forms'), { walls: [[29.5, 'oo']], fillers: '6,8,12,14,18' });
+    if (r.status !== 'ok') throw new Error(r.status);
+    expect(r.result.rows.find((x) => x.label === `Wall 1: 29' 6"`)!.note).toBe(`Out: 1' + 13 × 2' + 18" + 1'
+In: 13 × 2' + 18"`);
+    expect(runTool(tool('wall-forms'), { walls: [[29.5, 'oo']], fillers: '' })).toEqual({ status: 'missing', message: 'Pick fillers on the trailer' });
+  });
+
   test('staggered 8\' doubles every piece', () => {
     const r = runTool(tool('wall-forms'), { walls: job, stack: 'stagger8' });
     expect(rowValue(r, `2' panels`)).toBe('384');
