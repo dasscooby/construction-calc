@@ -6,8 +6,8 @@ import { feel } from '../lib/feel';
 import type { Drawings } from '../report/report';
 import { colors, onThemeChange, themed } from '../theme';
 
-type Which = 'plan' | 'iso' | 'section';
-const LABELS: Record<Which, string> = { plan: 'Plan', iso: '3D', section: 'Edge' };
+type Which = 'plan' | 'iso' | 'section' | 'house';
+const LABELS: Record<Which, string> = { plan: 'Plan', iso: '3D', section: 'Edge', house: 'House' };
 
 /** The viewBox's width ÷ height, so the drawing keeps its shape at any screen width. */
 function aspect(svg: string): number {
@@ -19,7 +19,7 @@ function aspect(svg: string): number {
 export default function DrawingView({ drawings }: { drawings: Drawings }) {
   const [which, setWhich] = useState<Which>('plan');
   const [width, setWidth] = useState(0);
-  const tabs = (['plan', 'iso', 'section'] as Which[]).filter((w) => drawings[w]);
+  const tabs = (['plan', 'iso', 'section', 'house'] as Which[]).filter((w) => drawings[w]);
   const shown = drawings[tabs.includes(which) ? which : 'plan']!;
   const onLayout = (e: LayoutChangeEvent) => setWidth(e.nativeEvent.layout.width);
 

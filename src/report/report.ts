@@ -8,7 +8,7 @@ import { commas, cuYd, dec, money } from '../tools/format';
 import { isShown, parseLength, parseNumber, RawArea, RawValues, RawWallRow, restoreRaw, runTool, RunResult } from '../tools/run';
 import { fieldText } from '../tools/share';
 import type { ResultRow, Tool } from '../tools/types';
-import { isoSlabSvg, isoSvg, planSvg, sectionSvg, sideLabels, slabPlanSvg } from './drawings';
+import { houseSectionSvg, isoSlabSvg, isoSvg, planSvg, sectionSvg, sideLabels, SlabSide, slabPlanSvg } from './drawings';
 import { insetOutline, Pt, wallOutline } from './geometry';
 
 export interface FiguredItem {
@@ -111,6 +111,8 @@ export interface Drawings {
   plan: string;
   iso: string;
   section?: string;
+  /** Where the slab meets the house */
+  house?: string;
 }
 
 /** Plan and 3D view of a Wall Forms foundation (raw = the tool's boxes). Null until the walls close up. */
@@ -153,7 +155,18 @@ export function slabDrawings(raw: RawValues, title: string, date: string): Drawi
   const slabRebar = on('slabRebar');
   const spacingFt = slabRebar ? (parseNumber(String(raw.spacing)) ?? 0) / 12 : 0;
   const footBars = footing && on('footBars') ? Number(raw.fBars) || 0 : 0;
-  const tie = (footing && slabRebar ? raw.edgeTie : 'none') as 'bend' | 'lbars' | 'none';
+  // Sides marked against the house (top, right, bottom, left); footing only where it runs.
+  const marked = on('edges');
+  const sides: SlabSide[] | undefined = marked
+    ? (['sideTop', 'sideRight', 'sideBottom', 'sideLeft'] as const).map((k) => {
+        const kind = (['form', 'house', 'dowels'].includes(String(raw[k])) ? raw[k] : 'form') as SlabSide['kind'];
+        return { kind, footing: footing && (kind === 'form' || on('houseFooting')) };
+      })
+    : undefined;
+  const anyFooting = footing && (!sides || sides.some((x) => x.footing));
+  const dowelFt = marked ? (parseNumber(String(raw.dowelSpacing)) ?? 24) / 12 : 0;
+  const dowelLenIn = marked ? (parseLength(raw.dowelLength as never) ?? 1.5) * 12 : 0;
+  const tie = (anyFooting && slabRebar ? raw.edgeTie : 'none') as 'bend' | 'lbars' | 'none';
   // Slabs are thin next to their size; stretch the height so the edge and footing show in 3D.
   const realDepth = footing ? fD : thick;
   const z = Math.max(1, Math.max(L, Wd) / 10 / realDepth);
@@ -177,20 +190,32 @@ export function slabDrawings(raw: RawValues, title: string, date: string): Drawi
       labels: sideLabels(outer),
       title,
       subtitle: `${parts.join(' · ')} · ${date}`,
-      footingFt: footing ? fW : undefined,
+      footingFt: anyFooting ? fW : undefined,
       rebarFt: spacingFt || undefined,
       footingBars: footBars,
+      sides,
+      dowelFt: dowelFt || undefined,
     }),
     iso: isoSlabSvg({
       outer,
       thick: thick * z,
-      footing: footing ? { width: fW, depth: fD * z } : undefined,
+      footing: anyFooting ? { width: fW, depth: fD * z } : undefined,
       rebarFt: spacingFt || undefined,
       footingBars: bars,
       bentLegsTo: tie === 'bend' ? 4 * inch * z : undefined,
+      sides,
+      dowelFt: dowelFt || undefined,
       note: z > 1.5 ? 'Height exaggerated to show the edge and rebar' : undefined,
     }),
-    section: footing
+    house: sides?.some((x) => x.kind !== 'form')
+      ? houseSectionSvg({
+          slabIn: thick * 12,
+          dowelSize: Number(raw.dowelSize) || 4,
+          dowelIn: sides.some((x) => x.kind === 'dowels') ? dowelLenIn : 0,
+          footing: on('houseFooting') && footing ? { widthIn: fW * 12, depthIn: fD * 12 } : undefined,
+        })
+      : undefined,
+    section: anyFooting
       ? sectionSvg({
           slabIn: thick * 12,
           footWIn: fW * 12,
@@ -320,6 +345,7 @@ ${company ? `<div class="co">${esc(company).replace(/ · /g, '<br>')}</div>` : '
 ${sum.length ? `<h2>Order summary</h2><table class="sum">${sum.map((r) => `<tr><td>${esc(r.label)}</td><td class="v">${esc(r.value)}</td></tr>`).join('')}</table>` : ''}
 ${drawings ? `<h2>Plan</h2><div class="draw">${drawings.plan}</div><h2>3D view</h2><div class="draw">${drawings.iso}</div>` : ''}
 ${drawings?.section ? `<h2>Edge detail</h2><div class="draw">${drawings.section}</div>` : ''}
+${drawings?.house ? `<h2>At the house</h2><div class="draw">${drawings.house}</div>` : ''}
 ${items.length ? `<h2>Details</h2>${itemHtml}` : '<p>Nothing added to this job yet.</p>'}
 ${job.notes ? `<h2>Notes</h2><div class="notes">${esc(job.notes)}</div>` : ''}
 ${scans.map((src, i) => `<div class="scan"><h2>Plans · page ${i + 1}</h2><img src="${src}" alt="Plan page ${i + 1}"></div>`).join('')}

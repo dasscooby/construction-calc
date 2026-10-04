@@ -84,7 +84,7 @@ describe('slab rebar, footing bars and tying the slab to the edge', () => {
     if (r.status !== 'ok') throw new Error(r.status);
     const bars = r.result.rows.find((x) => x.label === 'Slab bars')!;
     expect(bars.note).toContain('49 bars, #4 at 18" both ways');
-    expect(bars.note).toContain('each end bent down 19"');
+    expect(bars.note).toContain('ends bent down 19"');
     // 49 bars × 2 ends × 19" = 155.17 ft more steel than not bending
     const flat = runTool(tool('slab'), { ...mono, edgeTie: 'none' });
     const ft = (x: ReturnType<typeof runTool>) => (x.status === 'ok' ? Number(x.result.rows.find((y) => y.label === 'Slab bars')!.value.replace(/[^\d.]/g, '')) : 0);
@@ -95,7 +95,7 @@ describe('slab rebar, footing bars and tying the slab to the edge', () => {
     const r = runTool(tool('slab'), mono);
     if (r.status !== 'ok') throw new Error(r.status);
     const fb = r.result.rows.find((x) => x.label === 'Footing bars')!;
-    expect(fb.note).toContain('3 #4 bars around');
+    expect(fb.note).toContain('3 #4 bars along the footing');
     expect(fb.note).toContain(`12 corner L-bars 3' 4" (20" legs)`);
     expect(rowValue(r, '#4 sticks')).toMatch(/^\d+ × 20'$/);
     expect(rowValue(r, 'Rebar weight')).toMatch(/ lb$/);
@@ -105,6 +105,50 @@ describe('slab rebar, footing bars and tying the slab to the edge', () => {
     const r = runTool(tool('slab'), { ...mono, edgeTie: 'lbars' });
     // centerline 136 ft = 1632" at 18" → 91 spaces → 92 L-bars, 20" + 19" = 3' 3"
     expect(rowValue(r, 'Edge L-bars')).toBe(`92 × 3' 3"`);
+  });
+});
+
+describe('slab sides: against the house, dowels', () => {
+  // 40 x 30, 12" x 24" footing on the formed sides only; the top side (40') is against the house with dowels.
+  const sides = {
+    areas: [[40, 30]] as [number, number][],
+    footing: true,
+    fDepth: 2,
+    edges: true,
+    sideTop: 'dowels',
+    slabRebar: true,
+    footBars: true,
+  };
+
+  test('forms only on the formed sides', () => {
+    expect(rowValue(runTool(tool('slab'), sides), 'Forms')).toBe('100 ft');
+  });
+
+  test('footing runs the 3 formed sides: 100 ft − 2 overlapping corners = 98 ft', () => {
+    // 98 × 1 × (2 − 1/3) = 163.33 cu ft = 6.05 cu yd
+    const r = runTool(tool('slab'), sides);
+    expect(rowValue(r, 'Exterior footing')).toBe('6.05 cu yd');
+    if (r.status !== 'ok') throw new Error(r.status);
+    expect(r.result.rows.find((x) => x.label === 'Footing bars')!.note).toContain('6 corner L-bars');
+    expect(r.result.rows.find((x) => x.label === 'Slab bars')!.note).toContain('(right, bottom, left)');
+  });
+
+  test('dowels along the house: 40 ft, 6" in from each end, every 24" = 21', () => {
+    expect(rowValue(runTool(tool('slab'), sides), 'Dowels')).toBe(`21 × 1' 6"`);
+  });
+
+  test('footing along the house too: back to the full 140 ft − 4', () => {
+    expect(rowValue(runTool(tool('slab'), { ...sides, houseFooting: true }), 'Exterior footing')).toBe('8.4 cu yd');
+  });
+
+  test('every side against the house and no footing there: warns, no footing yards', () => {
+    const r = runTool(tool('slab'), { ...sides, sideRight: 'house', sideBottom: 'house', sideLeft: 'house' });
+    expect(rowValue(r, 'Exterior footing')).toBeUndefined();
+    expect(r.status === 'ok' && r.result.warnings?.some((w) => w.includes('No side has a footing'))).toBe(true);
+  });
+
+  test('marking sides needs a one-piece slab', () => {
+    expect(runTool(tool('slab'), { ...sides, areas: [[40, 30], [10, 10]] }).status).toBe('invalid');
   });
 });
 

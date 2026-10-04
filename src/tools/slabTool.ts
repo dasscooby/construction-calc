@@ -26,13 +26,21 @@ const barChoice = (key: string, from: number, to: number, def: string, label: st
 
 const feet = (n: number) => `${commasTrim(n, 1)} ft`;
 
-/** One mat of bars both ways over a rectangle, each bar's ends optionally bent down `legFt`. */
-function mat(lengthFt: number, widthFt: number, spacingIn: number, stockFt: number, lapFt: number, legFt: number) {
+/** One mat of bars both ways over a rectangle; each side's bar ends can be bent down (legs in ft). */
+function mat(
+  lengthFt: number,
+  widthFt: number,
+  spacingIn: number,
+  stockFt: number,
+  lapFt: number,
+  legs: { top: number; right: number; bottom: number; left: number },
+) {
   const c = COVER_IN / 12;
   const spanL = lengthFt - 2 * c;
   const spanW = widthFt - 2 * c;
-  const alongL = { ...planRun(spanL + 2 * legFt, stockFt, lapFt), count: countAlong(spanW * 12, spacingIn) };
-  const alongW = { ...planRun(spanW + 2 * legFt, stockFt, lapFt), count: countAlong(spanL * 12, spacingIn) };
+  // Bars running the length end at the left and right sides; bars across end at the top and bottom.
+  const alongL = { ...planRun(spanL + legs.left + legs.right, stockFt, lapFt), count: countAlong(spanW * 12, spacingIn) };
+  const alongW = { ...planRun(spanW + legs.top + legs.bottom, stockFt, lapFt), count: countAlong(spanL * 12, spacingIn) };
   return {
     alongL,
     alongW,
@@ -45,6 +53,41 @@ function mat(lengthFt: number, widthFt: number, spacingIn: number, stockFt: numb
     ],
   };
 }
+
+export type SideKind = 'form' | 'house' | 'dowels';
+export interface Side {
+  name: 'Top' | 'Right' | 'Bottom' | 'Left';
+  len: number;
+  kind: SideKind;
+}
+export const SIDE_KEYS = ['sideTop', 'sideRight', 'sideBottom', 'sideLeft'] as const;
+
+/** The four sides of a one-piece slab, clockwise from the top (as the plan draws it). */
+export function sidesOf(r: { length: number; width: number }, kindOf: (key: string) => SideKind): Side[] {
+  return [
+    { name: 'Top', len: r.length, kind: kindOf('sideTop') },
+    { name: 'Right', len: r.width, kind: kindOf('sideRight') },
+    { name: 'Bottom', len: r.length, kind: kindOf('sideBottom') },
+    { name: 'Left', len: r.width, kind: kindOf('sideLeft') },
+  ];
+}
+
+/** Dowels along one side: 6" in from each end, none farther apart than the spacing. */
+export const dowelCount = (sideFt: number, spacingIn: number) => countAlong(Math.max(0, sideFt * 12 - 12), spacingIn);
+
+const sideChoice = (key: string, label: string, help?: string): ChoiceField => ({
+  key,
+  label,
+  kind: 'choice',
+  options: [
+    { value: 'form', label: 'Formed' },
+    { value: 'house', label: 'House' },
+    { value: 'dowels', label: 'House + dowels' },
+  ],
+  default: 'form',
+  help,
+  showIf: ['edges'],
+});
 
 export const slab: Tool = {
   id: 'slab',
@@ -61,6 +104,16 @@ export const slab: Tool = {
     { key: 'dugD', label: 'Dug deeper by', kind: 'number', unit: 'in', optional: true, showIf: ['footing'] },
     { key: 'fPerim', label: 'Footing length', kind: 'number', unit: 'ft', optional: true, help: 'Around the outside. Blank = figured from the slab size.', showIf: ['footing'] },
     { key: 'corners', label: 'Corners', kind: 'count', optional: true, help: 'Blank = 4. An L-shaped slab has 6.', showIf: ['footing'] },
+
+    { key: 'edges', label: 'Mark each side', kind: 'toggle', help: 'Poured against a house? Dowels? Set each side.' },
+    sideChoice('sideTop', 'Top side', 'Top and bottom run the length, left and right the width, like the plan.'),
+    sideChoice('sideRight', 'Right side'),
+    sideChoice('sideBottom', 'Bottom side'),
+    sideChoice('sideLeft', 'Left side'),
+    { key: 'houseFooting', label: 'Footing along the house too', kind: 'toggle', help: 'Off = no thickened edge where it meets the house', showIf: ['edges', 'footing'] },
+    barChoice('dowelSize', 4, 6, '4', 'Dowel size', ['edges']),
+    { key: 'dowelSpacing', label: 'Dowels every', kind: 'number', unit: 'in', default: '24', help: 'Used on sides marked House + dowels', showIf: ['edges'] },
+    { key: 'dowelLength', label: 'Dowel length', kind: 'length', default: { in: '18' }, help: 'Whole bar, about half drilled into the house', showIf: ['edges'] },
 
     { key: 'interior', label: 'Interior footings', kind: 'toggle', help: 'Footings under bearing walls or posts' },
     { key: 'iLength', label: 'Interior footing length', kind: 'number', unit: 'ft', help: 'All of them added together', showIf: ['interior'] },
@@ -93,7 +146,7 @@ export const slab: Tool = {
       kind: 'choice',
       options: [20, 30, 40, 60].map((n) => ({ value: String(n), label: `${n}'` })),
       default: '20',
-      showIfAny: ['slabRebar', 'footBars'],
+      showIfAny: ['slabRebar', 'footBars', 'edges'],
     },
     { key: 'lap', label: 'Lap', kind: 'number', unit: 'in', optional: true, help: 'Blank = 20" on #4, 25" on #5, 30" on #6', showIfAny: ['slabRebar', 'footBars'] },
 
@@ -109,46 +162,78 @@ export const slab: Tool = {
     const slabCuFt = area * t;
     let totalCuFt = slabCuFt;
 
+    // ---- Sides: formed, or poured against a house (with or without dowels) ----
+    const edges = inp.on('edges');
+    let sides: Side[] | null = null;
+    if (edges) {
+      if (rects.length !== 1) return { error: 'Marking sides works on a one-piece slab. Use one area.' };
+      sides = sidesOf(rects[0], (k) => inp.choice(k) as SideKind);
+      const formed = sides.filter((s) => s.kind === 'form').reduce((a, s) => a + s.len, 0);
+      const house = sides.filter((s) => s.kind !== 'form');
+      rows.push({
+        label: 'Forms',
+        value: feet(formed),
+        note: house.length ? `${feet(house.reduce((a, s) => a + s.len, 0))} against the house (${house.map((s) => s.name.toLowerCase()).join(', ')}), no forms there` : 'All sides formed',
+      });
+    }
+
     // ---- Exterior footing (thickened edge) ----
     const footing = inp.on('footing');
-    let perim = 0;
+    const footOn = (i: number) => footing && (!sides || sides[i].kind === 'form' || inp.on('houseFooting'));
     let centerline = 0;
     let w = 0;
     let d = 0;
     let corners = 4;
+    let hasFooting = false;
     if (footing) {
       w = inp.len('fWidth');
       d = inp.len('fDepth');
-      if (inp.has('fPerim')) perim = inp.num('fPerim');
-      else if (rects.length === 1) perim = 2 * (rects[0].length + rects[0].width);
-      else return { error: 'Enter the footing length (around the outside). It can’t be figured from several areas.' };
-      corners = inp.has('corners') ? inp.count('corners') : 4;
       if (w <= 0 || d <= 0) return { error: 'Footing width and depth must be more than 0.' };
       if (d <= t) warnings.push('The footing isn’t deeper than the slab. Measure footing depth from the top of the slab.');
-      // The edge's centerline runs inside the outside edge: 4 more outside corners than inside on any slab.
-      centerline = perim - 4 * w;
-      if (centerline <= 0) return { error: 'The footing is too wide for that slab.' };
-      const planned = centerline * w * Math.max(0, d - t);
-      const w2 = w + inp.num('dugW') / 12;
-      const d2 = d + inp.num('dugD') / 12;
-      const dug = Math.max(0, perim - 4 * w2) * w2 * Math.max(0, d2 - t);
-      rows.push({ label: 'Slab', value: cuYd(slabCuFt / CUFT_PER_CUYD) });
-      rows.push({
-        label: 'Exterior footing',
-        value: cuYd(planned / CUFT_PER_CUYD),
-        note: `${feet(perim)} around · ${inches(w * 12)} wide × ${inches(d * 12)} deep, below the slab only`,
-      });
-      if (dug > planned + 1e-9) {
-        rows.push({
-          label: 'Footing as dug',
-          value: cuYd(dug / CUFT_PER_CUYD),
-          note: `${dec((dug - planned) / CUFT_PER_CUYD, 2)} yd more than planned. The order below uses this.`,
-        });
-        warnings.push('Ordering for the footing as dug. Many crews still add a little extra on footings to be safe.');
+      // Footing length along the edge, and how much to take off for corners where two runs overlap.
+      let edgeFt: number;
+      let overlaps: number;
+      if (sides) {
+        edgeFt = sides.reduce((a, s, i) => a + (footOn(i) ? s.len : 0), 0);
+        overlaps = sides.filter((_, i) => footOn(i) && footOn((i + 1) % 4)).length;
+        corners = overlaps;
       } else {
-        warnings.push('Footings are rarely dug even. Most crews order extra on footings to be safe. Measure the trench and put the extra in “Dug wider by” and “Dug deeper by”.');
+        if (inp.has('fPerim')) edgeFt = inp.num('fPerim');
+        else if (rects.length === 1) edgeFt = 2 * (rects[0].length + rects[0].width);
+        else return { error: 'Enter the footing length (around the outside). It can’t be figured from several areas.' };
+        // Any closed slab has 4 more outside corners than inside ones.
+        overlaps = 4;
+        corners = inp.has('corners') ? inp.count('corners') : 4;
       }
-      totalCuFt += Math.max(dug, planned);
+      hasFooting = edgeFt > 0;
+      if (!hasFooting) {
+        warnings.push('No side has a footing: every side is against the house. Turn on “Footing along the house too” if it needs one.');
+      } else {
+        // Centerline = edge length − one footing width per overlapping corner (a closed rectangle: perimeter − 4 × width).
+        centerline = edgeFt - overlaps * w;
+        if (centerline <= 0) return { error: 'The footing is too wide for that slab.' };
+        const planned = centerline * w * Math.max(0, d - t);
+        const w2 = w + inp.num('dugW') / 12;
+        const d2 = d + inp.num('dugD') / 12;
+        const dug = Math.max(0, edgeFt - overlaps * w2) * w2 * Math.max(0, d2 - t);
+        rows.push({ label: 'Slab', value: cuYd(slabCuFt / CUFT_PER_CUYD) });
+        rows.push({
+          label: 'Exterior footing',
+          value: cuYd(planned / CUFT_PER_CUYD),
+          note: `${feet(edgeFt)} of edge · ${inches(w * 12)} wide × ${inches(d * 12)} deep, below the slab only`,
+        });
+        if (dug > planned + 1e-9) {
+          rows.push({
+            label: 'Footing as dug',
+            value: cuYd(dug / CUFT_PER_CUYD),
+            note: `${dec((dug - planned) / CUFT_PER_CUYD, 2)} yd more than planned. The order below uses this.`,
+          });
+          warnings.push('Ordering for the footing as dug. Many crews still add a little extra on footings to be safe.');
+        } else {
+          warnings.push('Footings are rarely dug even. Most crews order extra on footings to be safe. Measure the trench and put the extra in “Dug wider by” and “Dug deeper by”.');
+        }
+        totalCuFt += Math.max(dug, planned);
+      }
     }
 
     // ---- Interior footings ----
@@ -159,7 +244,7 @@ export const slab: Tool = {
       if (inp.num('iLength') <= 0 || iW <= 0 || iD <= 0) return { error: 'Interior footing length, width and depth must be more than 0.' };
       if (iD <= t) warnings.push('An interior footing isn’t deeper than the slab. Measure its depth from the top of the slab.');
       const iCuFt = inp.num('iLength') * iW * Math.max(0, iD - t);
-      if (!footing) rows.push({ label: 'Slab', value: cuYd(slabCuFt / CUFT_PER_CUYD) });
+      if (!hasFooting) rows.push({ label: 'Slab', value: cuYd(slabCuFt / CUFT_PER_CUYD) });
       rows.push({ label: 'Interior footings', value: cuYd(iCuFt / CUFT_PER_CUYD), note: `${feet(inp.num('iLength'))} · below the slab only` });
       totalCuFt += iCuFt;
     }
@@ -168,28 +253,32 @@ export const slab: Tool = {
 
     // ---- Rebar ----
     const slabRebar = inp.on('slabRebar');
-    const footBars = footing && inp.on('footBars');
-    if (slabRebar || footBars) {
-      const stockFt = Number(inp.choice('stockLength'));
+    const footBars = hasFooting && inp.on('footBars');
+    const dowelSides = sides ? sides.filter((s) => s.kind === 'dowels') : [];
+    if (slabRebar || footBars || dowelSides.length) {
+      const stockFt = Number(inp.choice('stockLength')) || 20;
       const lapFor = (bar: Bar) => (inp.has('lap') ? inp.num('lap') : lapIn(bar)) / 12;
       const sticks = new Map<number, number>();
       const addSticks = (bar: Bar, n: number) => sticks.set(bar.size, (sticks.get(bar.size) ?? 0) + n);
       let totalLb = 0;
+      // A slab bar sits at mid-slab; a bent-down leg reaches to 3" off the bottom of the footing.
+      const legFt = Math.max(0, d - t / 2 - COVER_IN / 12);
+
       if (slabRebar) {
         const bar = getBar(inp.choice('barSize'));
         const spacing = inp.num('spacing');
         const lapFt = lapFor(bar);
         if (spacing <= 0) return { error: 'On center must be more than 0.' };
         if (lapFt >= stockFt) return { error: `The lap must be shorter than a ${stockFt}' stick.` };
-        const tie = footing ? inp.choice('edgeTie') : 'none';
-        // A bar sits at mid-slab; a bent-down leg reaches to 3" off the bottom of the footing.
-        const legFt = Math.max(0, d - t / 2 - COVER_IN / 12);
+        const tie = hasFooting ? inp.choice('edgeTie') : 'none';
+        // Bars bend down only where there's a footing under that side.
+        const leg = (i: number) => (tie === 'bend' && (!sides || footOn(i)) ? legFt : 0);
         let bars = 0;
         let laps = 0;
         let ft = 0;
         const pieces: { lengthFt: number; count: number }[] = [];
         for (const r of rects) {
-          const m = mat(r.length, r.width, spacing, stockFt, lapFt, tie === 'bend' ? legFt : 0);
+          const m = mat(r.length, r.width, spacing, stockFt, lapFt, { top: leg(0), right: leg(1), bottom: leg(2), left: leg(3) });
           bars += m.bars;
           laps += m.laps;
           ft += m.totalFt;
@@ -197,10 +286,13 @@ export const slab: Tool = {
         }
         if (pieces.some((p) => p.lengthFt > stockFt + 1e-9)) return { error: `A bar piece is longer than a ${stockFt}' stick. Try a longer stick.` };
         let slabSticks = laps + sticksToCut(pieces, stockFt);
+        const bentWhere = sides ? sides.filter((_, i) => leg(i) > 0).map((s) => s.name.toLowerCase()) : [];
         rows.push({
           label: 'Slab bars',
           value: feet(ft),
-          note: `${commas(bars)} bars, #${bar.size} at ${dec(spacing)}" both ways · ${commas(laps)} laps${tie === 'bend' && legFt > 0 ? ` · each end bent down ${inches(legFt * 12)} into the footing` : ''}`,
+          note: `${commas(bars)} bars, #${bar.size} at ${dec(spacing)}" both ways · ${commas(laps)} laps${
+            tie === 'bend' && legFt > 0 ? ` · ends bent down ${inches(legFt * 12)} into the footing${sides ? ` (${bentWhere.join(', ')})` : ''}` : ''
+          }`,
         });
         if (tie === 'lbars') {
           const n = countAlong(centerline * 12, spacing);
@@ -223,7 +315,7 @@ export const slab: Tool = {
         rows.push({
           label: 'Footing bars',
           value: feet(r.totalFt),
-          note: `${lines} #${bar.size} bars around · ${commas(r.cornerBars)} corner L-bars ${ftIn(r.cornerBarFt)} (${inches(lapFt * 12)} legs) · ${commas(r.laps)} laps`,
+          note: `${lines} #${bar.size} bars along the footing · ${commas(r.cornerBars)} corner L-bars ${ftIn(r.cornerBarFt)} (${inches(lapFt * 12)} legs) · ${commas(r.laps)} laps`,
         });
         addSticks(bar, r.sticks);
         totalLb += r.lb;
@@ -233,6 +325,22 @@ export const slab: Tool = {
           addSticks(bar, ri.sticks);
           totalLb += ri.lb;
         }
+      }
+
+      if (dowelSides.length) {
+        const bar = getBar(inp.choice('dowelSize'));
+        const spacing = inp.num('dowelSpacing');
+        const len = inp.len('dowelLength');
+        if (spacing <= 0) return { error: 'Dowel spacing must be more than 0.' };
+        if (len <= 0 || len > stockFt) return { error: `Dowel length must be more than 0 and fit in a ${stockFt}' stick.` };
+        const n = dowelSides.reduce((a, s) => a + dowelCount(s.len, spacing), 0);
+        rows.push({
+          label: 'Dowels',
+          value: `${commas(n)} × ${ftIn(len)}`,
+          note: `#${bar.size} every ${dec(spacing)}" along the ${dowelSides.map((s) => s.name.toLowerCase()).join(' and ')} · drill and epoxy about ${inches((len * 12) / 2)} into the house`,
+        });
+        addSticks(bar, sticksToCut([{ lengthFt: len, count: n }], stockFt));
+        totalLb += weightLb(bar, n * len);
       }
 
       for (const [size, n] of [...sticks].sort((a, b) => a[0] - b[0])) rows.push({ label: `#${size} sticks`, value: `${commas(n)} × ${stockFt}'` });

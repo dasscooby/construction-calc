@@ -192,13 +192,23 @@ export function isoSvg(p: IsoInput): string {
 // Slab extras: footing line and rebar on the plan, a see-through 3D slab with its thickened edge,
 // and a section through the edge.
 
+export interface SlabSide {
+  kind: 'form' | 'house' | 'dowels';
+  /** Thickened edge along this side */
+  footing: boolean;
+}
+
 export interface SlabPlanExtras {
-  /** Footing width (ft): dashed line this far in from the edge */
+  /** Footing width (ft) */
   footingFt?: number;
-  /** Slab rebar on center (ft): light grid */
+  /** Slab rebar on center (ft): grid */
   rebarFt?: number;
-  /** Bars in the footing: drawn as lines running around inside the footing */
+  /** Bars in the footing: drawn as lines running along inside the footing */
   footingBars?: number;
+  /** Top, right, bottom, left. Omit for a slab with a footing all the way around. */
+  sides?: SlabSide[];
+  /** Dowel spacing (ft) on sides marked House + dowels */
+  dowelFt?: number;
 }
 
 /** Bar positions between two edges: one at each end, none farther apart than the spacing. */
@@ -207,7 +217,38 @@ function barLines(from: number, to: number, spacing: number): number[] {
   return Array.from({ length: spaces + 1 }, (_, i) => from + ((to - from) * i) / spaces);
 }
 
-/** Blueprint plan of a rectangular slab with its footing line, footing bars and rebar grid. */
+/**
+ * The four sides of a rectangle walked clockwise (y down): top, right, bottom, left.
+ * at(i, along, inset) is a point `along` ft from the side's start and `inset` ft in from the edge
+ * (negative = outside). len(i) is the side's length.
+ */
+function rectSides(b: { minX: number; minY: number; maxX: number; maxY: number }) {
+  const starts = [
+    { x: b.minX, y: b.minY, dx: 1, dy: 0 },
+    { x: b.maxX, y: b.minY, dx: 0, dy: 1 },
+    { x: b.maxX, y: b.maxY, dx: -1, dy: 0 },
+    { x: b.minX, y: b.maxY, dx: 0, dy: -1 },
+  ];
+  const lens = [b.maxX - b.minX, b.maxY - b.minY, b.maxX - b.minX, b.maxY - b.minY];
+  return {
+    len: (i: number) => lens[i],
+    // Inside is to the right of the walking direction: (−dy, dx).
+    at: (i: number, along: number, inset: number): Pt => ({
+      x: starts[i].x + starts[i].dx * along - starts[i].dy * inset,
+      y: starts[i].y + starts[i].dy * along + starts[i].dx * inset,
+    }),
+  };
+}
+
+/** For a run inset `inset` from side i: where it starts and stops so it meets the runs on the neighbouring sides. */
+function runEnds(sides: SlabSide[] | undefined, i: number, len: number, inset: number): [number, number] {
+  if (!sides) return [inset, len - inset];
+  const prev = sides[(i + 3) % 4].footing;
+  const next = sides[(i + 1) % 4].footing;
+  return [prev ? inset : 0, next ? len - inset : len];
+}
+
+/** Blueprint plan of a rectangular slab: footing line and bars, rebar grid, the house and dowels. */
 export function slabPlanSvg(p: PlanInput & SlabPlanExtras): string {
   const base = planSvg(p);
   const b = bounds(p.outer);
@@ -219,56 +260,115 @@ export function slabPlanSvg(p: PlanInput & SlabPlanExtras): string {
   const ox = pad + (W - 2 * pad - spanX * s) / 2;
   const X = (x: number) => n(ox + (x - b.minX) * s);
   const Y = (y: number) => n(pad + (y - b.minY) * s);
+  const seg = (a: Pt, c: Pt, style: string) => `<line x1="${X(a.x)}" y1="${Y(a.y)}" x2="${X(c.x)}" y2="${Y(c.y)}" ${style}/>`;
+  const R = rectSides(b);
+  const sides = p.sides;
+  const footingOn = (i: number) => (sides ? sides[i].footing : true);
   const cover = 3 / 12;
-  const parts: string[] = [];
+  const out: string[] = [];
+
+  // Rebar grid.
   if (p.rebarFt && p.rebarFt > 0) {
-    for (const x of barLines(b.minX + cover, b.maxX - cover, p.rebarFt)) {
-      parts.push(`<line x1="${X(x)}" y1="${Y(b.minY + cover)}" x2="${X(x)}" y2="${Y(b.maxY - cover)}"/>`);
-    }
-    for (const y of barLines(b.minY + cover, b.maxY - cover, p.rebarFt)) {
-      parts.push(`<line x1="${X(b.minX + cover)}" y1="${Y(y)}" x2="${X(b.maxX - cover)}" y2="${Y(y)}"/>`);
-    }
+    const g: string[] = [];
+    for (const x of barLines(b.minX + cover, b.maxX - cover, p.rebarFt)) g.push(seg({ x, y: b.minY + cover }, { x, y: b.maxY - cover }, ''));
+    for (const y of barLines(b.minY + cover, b.maxY - cover, p.rebarFt)) g.push(seg({ x: b.minX + cover, y }, { x: b.maxX - cover, y }, ''));
+    out.push(`<g stroke="#ffb347" stroke-width="1" opacity="0.8">${g.join('')}</g>`);
   }
-  const grid = parts.length ? `<g stroke="#ffb347" stroke-width="1" opacity="0.8">${parts.join('')}</g>` : '';
-  let footing = '';
+
+  // Footing: dashed inside edge and the bars, on the sides that have it.
   if (p.footingFt && p.footingFt > 0) {
     const f = p.footingFt;
-    const rect = (inset: number, style: string) =>
-      `<rect x="${X(b.minX + inset)}" y="${Y(b.minY + inset)}" width="${n((spanX - 2 * inset) * s)}" height="${n((spanY - 2 * inset) * s)}" fill="none" ${style}/>`;
-    footing = rect(f, 'stroke="#ffffff" stroke-width="1.5" stroke-dasharray="8 6"');
     const nBars = Math.min(p.footingBars ?? 0, 3);
-    for (let i = 0; i < nBars; i++) footing += rect((f * (i + 1)) / (nBars + 1), 'stroke="#ff7a00" stroke-width="2"');
-    footing += `<text x="${n(Number(X(b.minX + f)) + 6)}" y="${n(Number(Y(b.minY + f)) + 18)}" font-family="Helvetica, Arial, sans-serif" font-size="12" fill="#ffffff">${esc(`${n(f * 12)}" footing`)}</text>`;
+    for (let i = 0; i < 4; i++) {
+      if (!footingOn(i)) continue;
+      const [a0, a1] = runEnds(sides, i, R.len(i), f);
+      out.push(seg(R.at(i, a0, f), R.at(i, a1, f), 'stroke="#ffffff" stroke-width="1.5" stroke-dasharray="8 6"'));
+      for (let k = 0; k < nBars; k++) {
+        const inset = (f * (k + 1)) / (nBars + 1);
+        const [b0, b1] = runEnds(sides, i, R.len(i), inset);
+        out.push(seg(R.at(i, b0, inset), R.at(i, b1, inset), 'stroke="#ff7a00" stroke-width="2"'));
+      }
+    }
+    const first = [0, 2].find(footingOn) ?? [1, 3].find(footingOn);
+    if (first !== undefined) {
+      const at = first % 2 === 0 ? R.at(first, first === 0 ? f + 1 : R.len(first) - f - 9, f + (first === 2 ? 1.5 : 0)) : R.at(first, R.len(first) / 2, f + 1);
+      out.push(`<text x="${n(Number(X(at.x)) + 6)}" y="${n(Number(Y(at.y)) + 16)}" font-family="Helvetica, Arial, sans-serif" font-size="12" fill="#ffffff">${esc(`${n(f * 12)}" footing`)}</text>`);
+    }
   }
-  // Under the wall-length labels so they stay readable.
+
+  // The house: a hatched wall outside each house side, and the dowels across the joint.
+  if (sides) {
+    const near = 34 / s; // past the dimension labels
+    const far = 60 / s;
+    for (let i = 0; i < 4; i++) {
+      if (sides[i].kind === 'form') continue;
+      const L = R.len(i);
+      const corners = [R.at(i, 0, -near), R.at(i, L, -near), R.at(i, L, -far), R.at(i, 0, -far)];
+      out.push(`<polygon points="${corners.map((q) => `${X(q.x)},${Y(q.y)}`).join(' ')}" fill="rgba(255,255,255,0.18)" stroke="#ffffff" stroke-width="1.5"/>`);
+      // Hatching.
+      const h: string[] = [];
+      const step = 14 / s;
+      for (let a = step; a < L; a += step) h.push(seg(R.at(i, a, -near), R.at(i, Math.min(L, a + (far - near)), -far), ''));
+      out.push(`<g stroke="#ffffff" stroke-width="0.8" opacity="0.6">${h.join('')}</g>`);
+      const mid = R.at(i, L / 2, -(near + far) / 2);
+      const vertical = i % 2 === 1;
+      out.push(
+        `<text x="${X(mid.x)}" y="${n(Number(Y(mid.y)) + 5)}" text-anchor="middle" font-family="Helvetica, Arial, sans-serif" font-size="13" font-weight="700" fill="#ffffff"${
+          vertical ? ` transform="rotate(-90 ${X(mid.x)} ${Y(mid.y)})"` : ''
+        }>HOUSE${sides[i].kind === 'dowels' ? ' · DOWELS' : ''}</text>`,
+      );
+      if (sides[i].kind === 'dowels' && p.dowelFt && p.dowelFt > 0) {
+        const d: string[] = [];
+        for (const a of barLines(0.5, L - 0.5, p.dowelFt)) d.push(seg(R.at(i, a, -10 / s), R.at(i, a, 16 / s), ''));
+        out.push(`<g stroke="#ff7a00" stroke-width="2.5" stroke-linecap="round">${d.join('')}</g>`);
+      }
+    }
+  }
   const marker = '<g font-family="Helvetica, Arial, sans-serif" font-size="15"';
-  return base.replace(marker, `${grid}${footing}${marker}`);
+  return base.replace(marker, `${out.join('')}${marker}`);
 }
 
 export interface IsoSlabInput {
   outer: Pt[];
-  /** Slab thickness, ft */
+  /** Slab thickness, ft (already stretched for the drawing) */
   thick: number;
-  /** Thickened edge: width and total depth (top of slab to bottom), ft */
+  /** Thickened edge: width (ft) and total depth (ft, stretched) */
   footing?: { width: number; depth: number };
   /** Slab rebar on center, ft */
   rebarFt?: number;
   /** Small caption, like "Height exaggerated" */
   note?: string;
-  /** Bars running around inside the footing: how far in from the outside (ft) and how high (ft, same scale as depth) */
+  /** Bars along inside the footing: how far in from the outside (ft) and how high (ft, stretched) */
   footingBars?: { inset: number; z: number }[];
-  /** Slab bars bent down into the footing: how far down the legs reach (z, ft) */
+  /** Slab bars bent down into the footing: how far down the legs reach (z, stretched) */
   bentLegsTo?: number;
+  /** Top, right, bottom, left */
+  sides?: SlabSide[];
+  /** Dowel spacing (ft) */
+  dowelFt?: number;
 }
 
 type P3 = [number, number, number];
 
-/** A slab in 3D: full-depth edges where there's a footing, and a see-through top showing the footing and rebar. */
+/** A slab in 3D: see-through top with the rebar, the thickened edge, the house and dowels. */
 export function isoSlabSvg(p: IsoSlabInput): string {
   const depth = p.footing ? Math.max(p.footing.depth, p.thick) : p.thick;
+  const houseH = depth + Math.max(depth * 1.6, 1.5);
   const proj = ([x, y, z]: P3) => ({ x: (x - y) * C30, y: (x + y) * S30 - z });
   const b0 = bounds(p.outer);
-  const pb = bounds(p.outer.flatMap((q) => [proj([q.x, q.y, 0]), proj([q.x, q.y, depth])]));
+  const sides = p.sides;
+  const R = rectSides(b0);
+  const footingOn = (i: number) => !!p.footing && (sides ? sides[i].footing : true);
+  const HW = 1.2; // house wall thickness drawn, ft
+  const houseAt = (i: number) => !!sides && sides[i].kind !== 'form';
+  // Fit everything, house walls included.
+  const fit: P3[] = p.outer.flatMap((q): P3[] => [
+    [q.x, q.y, 0],
+    [q.x, q.y, houseAt(0) || houseAt(1) || houseAt(2) || houseAt(3) ? houseH : depth],
+    [q.x - HW, q.y - HW, 0],
+    [q.x + HW, q.y + HW, 0],
+  ]);
+  const pb = bounds(fit.map(proj));
   const W = 760;
   const pad = 30;
   const s = Math.min((W - 2 * pad) / Math.max(pb.maxX - pb.minX, 1), 380 / Math.max(pb.maxY - pb.minY, 1));
@@ -279,66 +379,105 @@ export function isoSlabSvg(p: IsoSlabInput): string {
   };
   const poly = (pts: P3[], fill: string, extra = '') =>
     `<polygon points="${pts.map(([x, y, z]) => pt(x, y, z)).join(' ')}" fill="${fill}" stroke="#5f5b55" stroke-width="0.8" stroke-linejoin="round"${extra}/>`;
+  const line = (a: P3, c: P3) => `<polyline points="${pt(...a)} ${pt(...c)}"/>`;
   const out: string[] = [];
-  const N = p.outer.length;
 
-  // The footing ring under the slab, seen through the top: its two inside faces that face the viewer.
+  // A house wall outside side i: the face toward the slab plus the top (far sides), or the outer face (near sides).
+  const houseWall = (i: number, nearSide: boolean) => {
+    const L = R.len(i);
+    const a = R.at(i, -0.0, 0);
+    const c = R.at(i, L, 0);
+    const a2 = R.at(i, 0, -HW);
+    const c2 = R.at(i, L, -HW);
+    const fill = nearSide ? ' fill-opacity="0.28"' : '';
+    if (nearSide) out.push(poly([[a2.x, a2.y, 0], [c2.x, c2.y, 0], [c2.x, c2.y, houseH], [a2.x, a2.y, houseH]], '#7d8a96', fill));
+    else out.push(poly([[a.x, a.y, 0], [c.x, c.y, 0], [c.x, c.y, houseH], [a.x, a.y, houseH]], '#9aa5af'));
+    out.push(poly([[a.x, a.y, houseH], [c.x, c.y, houseH], [c2.x, c2.y, houseH], [a2.x, a2.y, houseH]], '#c3cbd2', fill));
+    if (!nearSide) {
+      const mid = R.at(i, L / 2, -HW / 2);
+      const q = proj([mid.x, mid.y, houseH]);
+      out.push(`<text x="${n(pad + (q.x - pb.minX) * s)}" y="${n(pad + (q.y - pb.minY) * s - 6)}" text-anchor="middle" font-family="Helvetica, Arial, sans-serif" font-size="13" font-weight="700" fill="#4a5560">HOUSE</text>`);
+    }
+  };
+  // Far sides (top, left) sit behind the slab; near sides (right, bottom) in front of it.
+  const FAR = [0, 3];
+  const NEAR = [1, 2];
+  for (const i of FAR) if (houseAt(i)) houseWall(i, false);
+
+  // The footing under the slab (seen through the top): inside faces of the far sides.
   if (p.footing) {
     const f = p.footing.width;
     const zTop = depth - p.thick;
-    const a = { x: b0.minX + f, y: b0.minY + f };
-    const c = { x: b0.maxX - f, y: b0.minY + f };
-    const d = { x: b0.minX + f, y: b0.maxY - f };
-    out.push(poly([[a.x, a.y, 0], [c.x, c.y, 0], [c.x, c.y, zTop], [a.x, a.y, zTop]], '#a9a49b'));
-    out.push(poly([[d.x, d.y, 0], [a.x, a.y, 0], [a.x, a.y, zTop], [d.x, d.y, zTop]], '#9b968d'));
+    for (const i of FAR) {
+      if (!footingOn(i)) continue;
+      const [a0, a1] = runEnds(sides, i, R.len(i), f);
+      const a = R.at(i, a0, f);
+      const c = R.at(i, a1, f);
+      out.push(poly([[a.x, a.y, 0], [c.x, c.y, 0], [c.x, c.y, zTop], [a.x, a.y, zTop]], i === 0 ? '#a9a49b' : '#9b968d'));
+    }
   }
-  // Outside faces toward the viewer, full depth.
-  for (let i = 0; i < N; i++) {
+  // Outside faces toward the viewer, full depth where there's a footing, slab thickness elsewhere.
+  for (let i = 0; i < 4; i++) {
     const a = p.outer[i];
-    const c = p.outer[(i + 1) % N];
+    const c = p.outer[(i + 1) % 4];
     const nx = c.y - a.y;
     const ny = -(c.x - a.x);
     if (nx + ny <= 1e-9) continue;
-    out.push(poly([[a.x, a.y, 0], [c.x, c.y, 0], [c.x, c.y, depth], [a.x, a.y, depth]], nx >= ny ? '#b9b5ad' : '#8f8b84'));
-    if (p.footing) {
-      // Where the slab ends and the footing starts.
-      out.push(`<polyline points="${pt(a.x, a.y, depth - p.thick)} ${pt(c.x, c.y, depth - p.thick)}" fill="none" stroke="#6b675f" stroke-width="0.8" stroke-dasharray="5 4"/>`);
-    }
+    const bottom = footingOn(i) ? 0 : depth - p.thick;
+    out.push(poly([[a.x, a.y, bottom], [c.x, c.y, bottom], [c.x, c.y, depth], [a.x, a.y, depth]], nx >= ny ? '#b9b5ad' : '#8f8b84'));
+    if (footingOn(i)) out.push(`<polyline points="${pt(a.x, a.y, depth - p.thick)} ${pt(c.x, c.y, depth - p.thick)}" fill="none" stroke="#6b675f" stroke-width="0.8" stroke-dasharray="5 4"/>`);
   }
   // Top of the slab, a little see-through.
-  out.push(poly(p.outer.map((q): P3 => [q.x, q.y, depth]), '#d9d6cf', ` fill-opacity="${p.footing ? 0.55 : 0.85}"`));
-  // Rebar grid at mid-slab.
+  out.push(poly(p.outer.map((q): P3 => [q.x, q.y, depth]), '#d9d6cf', ` fill-opacity="${p.footing ? 0.55 : 0.8}"`));
+
+  // Rebar grid at mid-slab, with legs bent down on the footing sides.
+  const zBar = depth - p.thick / 2;
   if (p.rebarFt && p.rebarFt > 0) {
     const c = 3 / 12;
-    const z = depth - p.thick / 2;
-    const segs: string[] = [];
-    for (const x of barLines(b0.minX + c, b0.maxX - c, p.rebarFt)) segs.push(`<polyline points="${pt(x, b0.minY + c, z)} ${pt(x, b0.maxY - c, z)}"/>`);
-    for (const y of barLines(b0.minY + c, b0.maxY - c, p.rebarFt)) segs.push(`<polyline points="${pt(b0.minX + c, y, z)} ${pt(b0.maxX - c, y, z)}"/>`);
-    // Legs bent down into the footing at every bar end.
+    const g: string[] = [];
+    const xs = barLines(b0.minX + c, b0.maxX - c, p.rebarFt);
+    const ys = barLines(b0.minY + c, b0.maxY - c, p.rebarFt);
+    for (const x of xs) g.push(line([x, b0.minY + c, zBar], [x, b0.maxY - c, zBar]));
+    for (const y of ys) g.push(line([b0.minX + c, y, zBar], [b0.maxX - c, y, zBar]));
     if (p.bentLegsTo !== undefined) {
-      for (const x of barLines(b0.minX + c, b0.maxX - c, p.rebarFt)) {
-        segs.push(`<polyline points="${pt(x, b0.minY + c, z)} ${pt(x, b0.minY + c, p.bentLegsTo)}"/>`);
-        segs.push(`<polyline points="${pt(x, b0.maxY - c, z)} ${pt(x, b0.maxY - c, p.bentLegsTo)}"/>`);
+      const to = p.bentLegsTo;
+      for (const x of xs) {
+        if (footingOn(0)) g.push(line([x, b0.minY + c, zBar], [x, b0.minY + c, to]));
+        if (footingOn(2)) g.push(line([x, b0.maxY - c, zBar], [x, b0.maxY - c, to]));
       }
-      for (const y of barLines(b0.minY + c, b0.maxY - c, p.rebarFt)) {
-        segs.push(`<polyline points="${pt(b0.minX + c, y, z)} ${pt(b0.minX + c, y, p.bentLegsTo)}"/>`);
-        segs.push(`<polyline points="${pt(b0.maxX - c, y, z)} ${pt(b0.maxX - c, y, p.bentLegsTo)}"/>`);
+      for (const y of ys) {
+        if (footingOn(3)) g.push(line([b0.minX + c, y, zBar], [b0.minX + c, y, to]));
+        if (footingOn(1)) g.push(line([b0.maxX - c, y, zBar], [b0.maxX - c, y, to]));
       }
     }
-    out.push(`<g fill="none" stroke="#b5501c" stroke-width="1.1" opacity="0.85">${segs.join('')}</g>`);
+    out.push(`<g fill="none" stroke="#b5501c" stroke-width="1.1" opacity="0.85">${g.join('')}</g>`);
   }
-  // Footing bars, all the way around.
+  // Footing bars along the footing sides.
   for (const bar of p.footingBars ?? []) {
-    const i = bar.inset;
-    const ring: P3[] = [
-      [b0.minX + i, b0.minY + i, bar.z],
-      [b0.maxX - i, b0.minY + i, bar.z],
-      [b0.maxX - i, b0.maxY - i, bar.z],
-      [b0.minX + i, b0.maxY - i, bar.z],
-      [b0.minX + i, b0.minY + i, bar.z],
-    ];
-    out.push(`<polyline points="${ring.map(([x, y, zz]) => pt(x, y, zz)).join(' ')}" fill="none" stroke="#8a2e00" stroke-width="2.2" stroke-linejoin="round"/>`);
+    const g: string[] = [];
+    for (let i = 0; i < 4; i++) {
+      if (!footingOn(i)) continue;
+      const [a0, a1] = runEnds(sides, i, R.len(i), bar.inset);
+      const a = R.at(i, a0, bar.inset);
+      const c = R.at(i, a1, bar.inset);
+      g.push(line([a.x, a.y, bar.z], [c.x, c.y, bar.z]));
+    }
+    out.push(`<g fill="none" stroke="#8a2e00" stroke-width="2.2" stroke-linecap="round">${g.join('')}</g>`);
   }
+  // Dowels: from inside the house wall into the slab.
+  if (sides && p.dowelFt && p.dowelFt > 0) {
+    const g: string[] = [];
+    for (let i = 0; i < 4; i++) {
+      if (sides[i].kind !== 'dowels') continue;
+      for (const a of barLines(0.5, R.len(i) - 0.5, p.dowelFt)) {
+        const o = R.at(i, a, -HW * 0.6);
+        const e = R.at(i, a, 1.2);
+        g.push(line([o.x, o.y, zBar], [e.x, e.y, zBar]));
+      }
+    }
+    out.push(`<g fill="none" stroke="#e05a00" stroke-width="2.4" stroke-linecap="round">${g.join('')}</g>`);
+  }
+  for (const i of NEAR) if (houseAt(i)) houseWall(i, true);
   if (p.note) out.push(`<text x="${W - 14}" y="${H - 12}" text-anchor="end" font-family="Helvetica, Arial, sans-serif" font-size="12" fill="#666">${esc(p.note)}</text>`);
   return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${W} ${H}" width="100%" role="img" aria-label="3D view"><rect width="${W}" height="${H}" fill="#f4f6f8"/>${out.join('')}</svg>`;
 }
@@ -410,4 +549,53 @@ export function sectionSvg(p: SectionInput): string {
   if (p.slabBars) legend.push(p.tie === 'bend' ? `#${p.slabBarSize} slab bars bent down into the footing` : p.tie === 'lbars' ? 'L-bars tie the slab to the footing' : 'Slab bars stop at the edge');
   legend.forEach((l, i) => parts.push(`<text x="${W - 20}" y="${H - 20 - i * 20}" text-anchor="end" font-size="13">${esc(l)}</text>`));
   return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${W} ${H}" width="100%" role="img" aria-label="Edge detail"><rect width="${W}" height="${H}" fill="#ffffff"/><g font-family="Helvetica, Arial, sans-serif" fill="#222">${parts.join('')}</g></svg>`;
+}
+
+export interface HouseSectionInput {
+  slabIn: number;
+  /** Dowels drilled into the house: size and whole length (in); 0 length = no dowels */
+  dowelSize: number;
+  dowelIn: number;
+  /** A thickened edge along the house too */
+  footing?: { widthIn: number; depthIn: number };
+}
+
+/** Section where the slab meets the house: the house foundation, the slab against it, and a dowel drilled in. */
+export function houseSectionSvg(p: HouseSectionInput): string {
+  const W = 760;
+  const H = 360;
+  const depthIn = p.footing ? Math.max(p.footing.depthIn, p.slabIn) : p.slabIn;
+  const k = Math.min(9, 240 / Math.max(depthIn + 26, 1)); // pixels per inch
+  const x0 = 250; // face of the house foundation
+  const y0 = 40 + 12 * k; // top of slab, leaving room for the wall above it
+  const X = (inch: number) => x0 + inch * k;
+  const Y = (inch: number) => y0 + inch * k;
+  const parts: string[] = [];
+  // House foundation wall (8" shown), running above and below the slab.
+  const wallTop = -10;
+  const wallBottom = depthIn + 16;
+  parts.push(`<rect x="${n(X(-8))}" y="${n(Y(wallTop))}" width="${n(8 * k)}" height="${n((wallBottom - wallTop) * k)}" fill="#c3cbd2" stroke="#3b3a37" stroke-width="2"/>`);
+  for (let yy = wallTop + 4; yy < wallBottom; yy += 3) {
+    parts.push(`<line x1="${n(X(-8))}" y1="${n(Y(yy))}" x2="${n(X(0))}" y2="${n(Y(yy - 4))}" stroke="#8a96a1" stroke-width="1"/>`);
+  }
+  parts.push(`<text x="${n(X(-4))}" y="${n(Y(wallTop) - 8)}" text-anchor="middle" font-size="13" font-weight="700">HOUSE</text>`);
+  // Slab (and footing) against it.
+  const run = 56;
+  const slab = p.footing
+    ? `M${n(X(0))} ${n(Y(0))} L${n(X(run))} ${n(Y(0))} L${n(X(run))} ${n(Y(p.slabIn))} L${n(X(p.footing.widthIn))} ${n(Y(p.slabIn))} L${n(X(p.footing.widthIn))} ${n(Y(depthIn))} L${n(X(0))} ${n(Y(depthIn))} Z`
+    : `M${n(X(0))} ${n(Y(0))} L${n(X(run))} ${n(Y(0))} L${n(X(run))} ${n(Y(p.slabIn))} L${n(X(0))} ${n(Y(p.slabIn))} Z`;
+  parts.push(`<path d="${slab}" fill="#d9d6cf" stroke="#3b3a37" stroke-width="2"/>`);
+  // Dowel at mid-slab: about half drilled into the house.
+  if (p.dowelIn > 0) {
+    const half = p.dowelIn / 2;
+    const yb = p.slabIn / 2;
+    const sw = Math.max(3, (p.dowelSize / 8) * k * 0.8);
+    parts.push(`<line x1="${n(X(-Math.min(half, 7)))}" y1="${n(Y(yb))}" x2="${n(X(p.dowelIn - Math.min(half, 7)))}" y2="${n(Y(yb))}" stroke="#e05a00" stroke-width="${n(sw)}" stroke-linecap="round"/>`);
+    parts.push(`<text x="${n(X(-8) - 10)}" y="${n(Y(yb) + 5)}" text-anchor="end" font-size="13">Drill + epoxy ${n(Math.min(half, 7))}"</text>`);
+    parts.push(`<text x="${n(X(p.dowelIn - Math.min(half, 7)) + 8)}" y="${n(Y(0) - 10)}" font-size="13">${n(p.dowelIn - Math.min(half, 7))}" in the slab</text>`);
+  }
+  parts.push(`<text x="${n(X(run) + 8)}" y="${n(Y(p.slabIn / 2) + 5)}" font-size="14" font-weight="700">${n(p.slabIn)}" slab</text>`);
+  const legend = p.dowelIn > 0 ? `#${p.dowelSize} dowels, ${n(p.dowelIn)}" long, drilled and epoxied into the house` : 'Poured against the house, no dowels';
+  parts.push(`<text x="${W - 20}" y="${H - 20}" text-anchor="end" font-size="13">${esc(legend)}</text>`);
+  return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${W} ${H}" width="100%" role="img" aria-label="House detail"><rect width="${W}" height="${H}" fill="#ffffff"/><g font-family="Helvetica, Arial, sans-serif" fill="#222">${parts.join('')}</g></svg>`;
 }
