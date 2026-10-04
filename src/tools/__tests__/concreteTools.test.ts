@@ -274,3 +274,8 @@ In: 11 × 2' + 1' + 8" + 6"`);
     expect(runTool(tool('wall-forms'), {}).status).toBe('missing');
   });
 });
+
+test('bag counts only on small pours (2 yd or less)', () => {
+  expect(rowValue(runTool(tool('slab'), { areas: [[10, 10]] }), '80 lb bags')).toBe('62');
+  expect(rowValue(runTool(tool('slab'), { areas: [[40, 30]] }), '80 lb bags')).toBeUndefined();
+});

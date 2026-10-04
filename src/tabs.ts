@@ -10,4 +10,5 @@ export const TABS: Record<TabId, { name: string; title?: string; groups?: ToolGr
   rebar: { name: 'Rebar', title: 'Rebar', groups: REBAR_GROUPS },
   site: { name: 'Site', title: 'Site & Layout', groups: SITE_GROUPS },
   engineer: { name: 'Engineer', title: 'Engineering', groups: ENGINEERING_GROUPS },
+  jobs: { name: 'Jobs' },
 };

@@ -8,7 +8,7 @@ import { AccentId, ACCENTS, applyTheme, Mode, TEXT_SIZES, TextSize } from '../th
 import type { RawValues } from '../tools/run';
 import type { Tool } from '../tools/types';
 
-export const TAB_IDS = ['calc', 'concrete', 'rebar', 'site', 'engineer'] as const;
+export const TAB_IDS = ['calc', 'concrete', 'rebar', 'site', 'engineer', 'jobs'] as const;
 export type TabId = (typeof TAB_IDS)[number];
 
 export interface Settings {

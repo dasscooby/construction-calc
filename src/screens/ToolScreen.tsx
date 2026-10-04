@@ -3,6 +3,7 @@ import {
   BackHandler,
   Keyboard,
   KeyboardAvoidingView,
+  Modal,
   Platform,
   Pressable,
   ScrollView,
@@ -15,10 +16,12 @@ import {
 
 import { RawArea, RawBarRow, RawLength, RawStockRow, RawValue, RawValues, RawWallRow, RunResult, WALL_ENDS, defaultRaw, runTool } from '../tools/run';
 import { history } from '../lib/history';
+import { jobStore, useJobs } from '../lib/jobs';
 import { companyLine, userDefaults, useSettings } from '../lib/settings';
 import { shareText } from '../tools/share';
 import { BarListField, Field, Tool } from '../tools/types';
 import { colors, onThemeChange, themed } from '../theme';
+import type { JobLink } from './ToolsTab';
 
 const SHARE_LABEL = Platform.OS === 'ios' ? 'Share or save to Notes' : 'Share these numbers';
 
@@ -32,9 +35,12 @@ interface Props {
   onBack: () => void;
   /** This tab is showing (the Android back button only acts on the tab you're looking at) */
   active: boolean;
+  /** Opened from a job (or just added to one): changes can be saved back to it */
+  jobLink?: JobLink;
+  onJobLink: (link: JobLink | undefined) => void;
 }
 
-export default function ToolScreen({ tool, raw, onChange, onBack, active }: Props) {
+export default function ToolScreen({ tool, raw, onChange, onBack, active, jobLink, onJobLink }: Props) {
   const prefs = useSettings();
   const result = useMemo(() => runTool(tool, raw), [tool, raw]);
   const set = (key: string, value: RawValue) => onChange({ ...raw, [key]: value });
@@ -98,6 +104,7 @@ export default function ToolScreen({ tool, raw, onChange, onBack, active }: Prop
         {hasInches && <Text style={styles.hint}>Inches can be 6, 6.5, or 6 1/2</Text>}
         <Results result={result} />
         <ShareButton text={text} onShare={save} />
+        {text ? <JobButtons tool={tool} raw={raw} title={tool.title} jobLink={jobLink} onJobLink={onJobLink} /> : null}
         {tool.notes?.map((n, i) => (
           <Text key={i} style={styles.note}>
             • {n}
@@ -148,6 +155,106 @@ export function ShareButton({ text, onShare }: { text: string | null; onShare?: 
     <Pressable onPress={share} style={({ pressed }) => [styles.shareBtn, pressed && styles.sharePressed]} accessibilityRole="button">
       <Text style={styles.shareText}>{copied ? 'Copied ✓' : SHARE_LABEL}</Text>
     </Pressable>
+  );
+}
+
+/** "Add to job", or "Save changes to <job>" when this tool was opened from a job. */
+function JobButtons({
+  tool,
+  raw,
+  title,
+  jobLink,
+  onJobLink,
+}: {
+  tool: Tool;
+  raw: RawValues;
+  title: string;
+  jobLink?: JobLink;
+  onJobLink: (link: JobLink | undefined) => void;
+}) {
+  const jobs = useJobs();
+  const [picking, setPicking] = useState(false);
+  const [newName, setNewName] = useState('');
+  const [done, setDone] = useState('');
+  const linkedJob = jobLink && jobs.find((j) => j.id === jobLink.jobId && j.items.some((it) => it.id === jobLink.itemId));
+  const flash = (msg: string) => {
+    setDone(msg);
+    setTimeout(() => setDone(''), 2200);
+  };
+  const addTo = (jobId: string, name: string) => {
+    jobStore.addItem(jobId, { toolId: tool.id, title, raw });
+    setPicking(false);
+    setNewName('');
+    flash(`Added to ${name} ✓`);
+  };
+
+  return (
+    <View>
+      {linkedJob ? (
+        <Pressable
+          onPress={() => {
+            jobStore.editItem(linkedJob.id, jobLink!.itemId, { raw });
+            flash(`Saved to ${linkedJob.name} ✓`);
+          }}
+          style={({ pressed }) => [styles.shareBtn, pressed && styles.sharePressed]}
+          accessibilityRole="button"
+        >
+          <Text style={styles.shareText}>{done || `Save changes to ${linkedJob.name}`}</Text>
+        </Pressable>
+      ) : null}
+      <Pressable onPress={() => setPicking(true)} style={({ pressed }) => [styles.shareBtn, pressed && styles.sharePressed]} accessibilityRole="button">
+        <Text style={styles.shareText}>{!linkedJob && done ? done : linkedJob ? 'Add to another job' : 'Add to job'}</Text>
+      </Pressable>
+
+      <Modal visible={picking} transparent animationType="slide" onRequestClose={() => setPicking(false)}>
+        <View style={styles.sheetBackdrop}>
+          <View style={styles.sheet}>
+            <View style={styles.sheetHead}>
+              <Text style={styles.sheetTitle}>Add to job</Text>
+              <Pressable onPress={() => setPicking(false)} style={styles.clearBtn} accessibilityRole="button">
+                <Text style={styles.clearText}>Cancel</Text>
+              </Pressable>
+            </View>
+            <ScrollView keyboardShouldPersistTaps="handled" contentContainerStyle={styles.sheetBody}>
+              <View style={styles.inputRow}>
+                <TextInput
+                  style={styles.input}
+                  value={newName}
+                  onChangeText={setNewName}
+                  placeholder="New job name"
+                  placeholderTextColor={colors.faint}
+                  accessibilityLabel="New job name"
+                  returnKeyType="done"
+                />
+                <Pressable
+                  onPress={() => {
+                    const name = newName.trim() || 'New job';
+                    const id = jobStore.create(name);
+                    addTo(id, name);
+                  }}
+                  style={styles.newJobBtn}
+                  accessibilityRole="button"
+                >
+                  <Text style={styles.newJobText}>+ New</Text>
+                </Pressable>
+              </View>
+              {jobs.map((j) => (
+                <Pressable
+                  key={j.id}
+                  onPress={() => addTo(j.id, j.name)}
+                  style={({ pressed }) => [styles.jobRow, pressed && styles.sharePressed]}
+                  accessibilityRole="button"
+                  accessibilityLabel={`Add to ${j.name}`}
+                >
+                  <Text style={styles.jobName}>{j.name}</Text>
+                  <Text style={styles.jobMeta}>{j.items.length} in it</Text>
+                </Pressable>
+              ))}
+            </ScrollView>
+          </View>
+        </View>
+      </Modal>
+    </View>
   );
 }
 
@@ -558,6 +665,16 @@ const getStyles = themed(() => ({
   resultNote: { fontSize: 14, color: colors.subtext, marginTop: 2 },
   empty: { fontSize: 18, fontWeight: '600', color: colors.subtext, textAlign: 'center', paddingVertical: 14 },
   errorText: { color: colors.error },
+  sheetBackdrop: { flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'flex-end' },
+  sheet: { backgroundColor: colors.panel, borderTopLeftRadius: 22, borderTopRightRadius: 22, maxHeight: '75%' },
+  sheetHead: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', padding: 16, borderBottomWidth: hairline, borderBottomColor: colors.border },
+  sheetTitle: { fontSize: 22, fontWeight: '800', color: colors.text },
+  sheetBody: { padding: 16, paddingBottom: 40 },
+  newJobBtn: { backgroundColor: colors.accent, borderRadius: 14, height: 54, paddingHorizontal: 16, justifyContent: 'center', marginLeft: 8 },
+  newJobText: { fontSize: 17, fontWeight: '800', color: colors.accentText },
+  jobRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', backgroundColor: colors.panel2, borderRadius: 14, padding: 14, marginTop: 10 },
+  jobName: { fontSize: 18, fontWeight: '700', color: colors.text, flexShrink: 1 },
+  jobMeta: { fontSize: 14, color: colors.subtext, marginLeft: 8 },
   shareBtn: { backgroundColor: colors.panel2, borderRadius: 14, paddingVertical: 14, alignItems: 'center', marginBottom: 14 },
   sharePressed: { opacity: 0.7 },
   shareText: { fontSize: 17, fontWeight: '700', color: colors.accent },

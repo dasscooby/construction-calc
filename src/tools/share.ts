@@ -18,7 +18,7 @@ const lengthText = (r: RawLength): string | null => {
 };
 
 /** What was typed in one field, or null if it was left blank. */
-function fieldText(f: Field, v: RawValues[string]): string | null {
+export function fieldText(f: Field, v: RawValues[string]): string | null {
   switch (f.kind) {
     case 'length':
       return lengthText(v as RawLength);

@@ -14,3 +14,6 @@ export const SITE_GROUPS: ToolGroup[] = [
   { heading: 'Layout', tools: LAYOUT_TOOLS },
 ];
 export const ENGINEERING_GROUPS: ToolGroup[] = [{ tools: ENGINEERING_TOOLS }];
+
+/** Every tool, for looking one up by id (History, jobs). */
+export const ALL_TOOLS = [...CONCRETE_TOOLS, ...REBAR_TOOLS, ...SITE_TOOLS, ...LAYOUT_TOOLS, ...ENGINEERING_TOOLS];

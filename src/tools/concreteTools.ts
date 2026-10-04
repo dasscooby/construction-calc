@@ -14,6 +14,7 @@ import { commas, commasTrim, cuYd, dec, ftIn, money, sqFt } from './format';
 import { Field, Inputs, ResultRow, Tool } from './types';
 
 const CUFT_PER_CUYD = 27;
+const MAX_BAG_YD = 2;
 
 // Every concrete tool ends with waste %, truck size and price.
 const ORDER_FIELDS: Field[] = [
@@ -43,7 +44,8 @@ function concreteRows(baseCuFt: number, inp: Inputs, bags = true): ResultRow[] {
       note: t.trucks === 1 ? `${dec(r.orderCuYd)} yd` : `${t.trucks - 1} full (${dec(truck)} yd) + last load ${dec(t.lastLoad)} yd`,
     });
   }
-  if (bags) {
+  // Bags only make sense on small pours; past 2 yards you're ordering a truck.
+  if (bags && r.cuYd <= MAX_BAG_YD) {
     for (const b of r.bags.slice().reverse()) rows.push({ label: `${b.lb} lb bags`, value: commas(b.count) });
   }
   rows.push({ label: 'Before waste', value: `${dec(r.baseCuYd, 2)} cu yd`, note: `${commasTrim(r.baseCuFt, 1)} cu ft` });

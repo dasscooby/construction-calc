@@ -7,6 +7,7 @@ import { HistoryEntry } from './src/lib/history';
 import { TabId, useSettings } from './src/lib/settings';
 import CalculatorScreen from './src/screens/CalculatorScreen';
 import HistoryScreen from './src/screens/HistoryScreen';
+import JobsScreen from './src/screens/JobsScreen';
 import SettingsScreen from './src/screens/SettingsScreen';
 import ToolsTab, { OpenRequest } from './src/screens/ToolsTab';
 import { TABS } from './src/tabs';
@@ -28,18 +29,21 @@ export default function App() {
   const [, setLook] = useState(0);
   useEffect(() => onThemeChange(() => setLook((n) => n + 1)), []);
 
-  // From History: jump to the tool's tab and open it with the saved numbers.
-  const openEntry = (e: HistoryEntry) => {
-    const id = (Object.keys(TABS) as TabId[]).find((k) => TABS[k].groups?.some((g) => g.tools.some((t) => t.id === e.toolId)));
+  // From History or a job: jump to the tool's tab and open it with the saved numbers.
+  const openTool = (toolId: string, raw: HistoryEntry['raw'], jobLink?: OpenRequest['jobLink']) => {
+    const id = (Object.keys(TABS) as TabId[]).find((k) => TABS[k].groups?.some((g) => g.tools.some((t) => t.id === toolId)));
     if (!id) return;
-    setRequest({ tab: id, req: { toolId: e.toolId, raw: e.raw, n: Date.now() } });
+    picked.current = true;
+    setRequest({ tab: id, req: { toolId, raw, n: Date.now(), jobLink } });
     setTab(id);
     setOverlay(null);
   };
+  const openEntry = (e: HistoryEntry) => openTool(e.toolId, e.raw);
 
   // All tabs stay mounted so numbers aren't lost when switching tabs.
   const screen = (id: TabId) => {
     const t = TABS[id];
+    if (id === 'jobs') return <JobsScreen onOpenItem={(job, item) => openTool(item.toolId, item.raw, { jobId: job.id, itemId: item.id })} />;
     if (!t.groups) return <CalculatorScreen />;
     return (
       <ToolsTab
@@ -115,11 +119,11 @@ const getStyles = themed(() => ({
     alignItems: 'center',
     justifyContent: 'center',
     marginVertical: 6,
-    marginHorizontal: 3,
+    marginHorizontal: 2,
     borderRadius: 999,
   },
   tabActive: { backgroundColor: colors.panel2 },
-  tabText: { fontSize: 15, fontWeight: '600', color: colors.subtext },
+  tabText: { fontSize: 14, fontWeight: '600', color: colors.subtext },
   tabTextActive: { color: colors.accent, fontWeight: '800' },
 }), { scaleText: false });
 

@@ -13,11 +13,18 @@ export interface ToolGroup {
   tools: Tool[];
 }
 
-/** Open this tool with these numbers in the boxes (from History). `n` changes on every request. */
+/** A tool opened from a job: "Save changes" writes back to this item. */
+export interface JobLink {
+  jobId: string;
+  itemId: string;
+}
+
+/** Open this tool with these numbers in the boxes (from History or a job). `n` changes on every request. */
 export interface OpenRequest {
   toolId: string;
   raw: RawValues;
   n: number;
+  jobLink?: JobLink;
 }
 
 interface Props {
@@ -35,6 +42,7 @@ export default function ToolsTab({ title, groups, active, onOpenHistory, onOpenS
   const [openId, setOpenId] = useState<string | null>(null);
   const [raws, setRaws] = useState<Record<string, RawValues>>({});
   const [loaded, setLoaded] = useState(false);
+  const [links, setLinks] = useState<Record<string, JobLink | undefined>>({});
   const all = groups.flatMap((g) => g.tools);
   const tool = all.find((t) => t.id === openId);
   const saveKey = `tools-${title}`;
@@ -61,6 +69,7 @@ export default function ToolsTab({ title, groups, active, onOpenHistory, onOpenS
     const t = all.find((x) => x.id === request.toolId);
     if (!t) return;
     setRaws((prev) => ({ ...prev, [t.id]: restoreRaw(t, request.raw) }));
+    setLinks((prev) => ({ ...prev, [t.id]: request.jobLink }));
     setOpenId(t.id);
   }, [request?.n]); // each new request
 
@@ -85,6 +94,8 @@ export default function ToolsTab({ title, groups, active, onOpenHistory, onOpenS
         onChange={(r) => setRaws((prev) => ({ ...prev, [tool.id]: r }))}
         onBack={() => setOpenId(null)}
         active={active}
+        jobLink={links[tool.id]}
+        onJobLink={(link) => setLinks((prev) => ({ ...prev, [tool.id]: link }))}
       />
     );
   }
