@@ -63,3 +63,5 @@ export const lb = (n: number) => `${commas(n)} lb`;
 export const tons = (n: number) => `${dec(n, 2)} tons`;
 export const pct = (n: number, decimals = 1) => `${dec(n, decimals)}%`;
 export const deg = (n: number) => `${dec(n, 2)}°`;
+/** 1234.5 → "$1,234.50" */
+export const money = (n: number) => `$${commas(n, 2)}`;

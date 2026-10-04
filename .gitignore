@@ -42,3 +42,6 @@ yarn-error.*
 # generated native folders
 /ios
 /android
+
+# App Store listing with personal contact info - keep private
+store.config.json

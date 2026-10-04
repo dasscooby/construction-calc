@@ -130,3 +130,64 @@ describe('trucks', () => {
     expect(truckLoads(0, 10)).toEqual({ trucks: 0, lastLoad: 0 });
   });
 });
+
+describe('concrete cost', () => {
+  test('price per yard × the order: 1.50 yd × $150 = $225.00', () => {
+    const r = runTool(tool('slab'), { areas: [[10, 10]], price: 150 });
+    expect(rowValue(r, 'Concrete cost')).toBe('$225.00');
+  });
+
+  test('no price, no cost row', () => {
+    expect(rowValue(runTool(tool('slab'), { areas: [[10, 10]] }), 'Concrete cost')).toBeUndefined();
+  });
+});
+
+describe('control joints', () => {
+  // 40 x 30, 4": max 10' → 4 panels × 3 panels at 10' each. Saw cut 3 × 30 + 2 × 40 = 170 ft.
+  test('40 x 30 slab, 4" thick', () => {
+    const r = runTool(tool('control-joints'), { length: 40, width: 30 });
+    expect(rowValue(r, 'Joints along length')).toBe(`every 10' 0"`);
+    expect(rowValue(r, 'Joints along width')).toBe(`every 10' 0"`);
+    expect(rowValue(r, 'Panels')).toBe('12');
+    expect(rowValue(r, 'Saw cut')).toBe('170 ft');
+    expect(rowValue(r, 'Cut depth')).toBe('1"');
+    if (r.status === 'ok') expect(r.result.warnings).toEqual([]);
+  });
+
+  test('6" slab allows 15\'; 5" cut depth is 1-1/4"', () => {
+    expect(rowValue(runTool(tool('control-joints'), { length: 30, width: 30, thick: 0.5 }), 'Joints along length')).toBe(`every 15' 0"`);
+    expect(rowValue(runTool(tool('control-joints'), { length: 30, width: 30, thick: { ft: '', in: '5' } }), 'Cut depth')).toBe('1-1/4"');
+  });
+
+  test('long skinny panels and too-far spacing get warnings', () => {
+    // 20 x 12: 10' × 6' panels, 1.67 to 1
+    const skinny = runTool(tool('control-joints'), { length: 20, width: 12 });
+    expect(skinny.status === 'ok' && skinny.result.warnings?.[0]).toMatch(/long and skinny/);
+    const far = runTool(tool('control-joints'), { length: 28, width: 28, max: 14 });
+    expect(far.status === 'ok' && far.result.warnings?.some((w) => w.includes('farther apart'))).toBe(true);
+  });
+});
+
+describe('forms & stakes', () => {
+  // 40 x 30 = 140 ft of 2x4. 140 / 16 = 8.75 → 9 boards.
+  // Stakes: 40' side = 10 + 1 = 11, 30' side = 8 + 1 = 9 → 2 × 11 + 2 × 9 = 40
+  test('40 x 30 slab, 4" forms', () => {
+    const r = runTool(tool('forms'), { length: 40, width: 30 });
+    expect(rowValue(r, 'Form length')).toBe('140 ft');
+    expect(rowValue(r, 'Rows of boards')).toBeUndefined();
+    expect(rowValue(r, 'Boards')).toBe(`9 × 16' 2x4`);
+    expect(rowValue(r, 'Stakes')).toBe('40');
+  });
+
+  test('24" beam edge in 2x12 is 2 rows; total form length overrides', () => {
+    // 100 ft × 2 rows = 200 ft / 16 = 12.5 → 13 boards; stakes 100 / 4 + 1 = 26
+    const r = runTool(tool('forms'), { formLF: 100, height: 2, board: '12' });
+    expect(rowValue(r, 'Rows of boards')).toBe('2 high');
+    expect(rowValue(r, 'Boards')).toBe(`13 × 16' 2x12`);
+    expect(rowValue(r, 'Stakes')).toBe('26');
+  });
+
+  test('needs a size', () => {
+    expect(runTool(tool('forms'), {}).status).toBe('invalid');
+  });
+});

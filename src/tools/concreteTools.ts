@@ -10,15 +10,16 @@ import {
   stepsCuFt,
   truckLoads,
 } from '../lib/concrete';
-import { commas, commasTrim, cuYd, dec, ftIn, sqFt } from './format';
+import { commas, commasTrim, cuYd, dec, ftIn, inches, money, sqFt } from './format';
 import { Field, Inputs, ResultRow, Tool } from './types';
 
 const CUFT_PER_CUYD = 27;
 
-// Every concrete tool ends with waste % and truck size.
+// Every concrete tool ends with waste %, truck size and price.
 const ORDER_FIELDS: Field[] = [
   { key: 'waste', label: 'Waste', kind: 'number', unit: '%', default: '10', optional: true },
   { key: 'truck', label: 'Truck size', kind: 'number', unit: 'yd', default: '10', optional: true },
+  { key: 'price', label: 'Price per yard', kind: 'number', unit: '$/yd', optional: true },
 ];
 
 /** The standard answer block: yards with waste, order amount, trucks, bags, and the before-waste number. */
@@ -30,6 +31,9 @@ function concreteRows(baseCuFt: number, inp: Inputs, bags = true): ResultRow[] {
     { label: 'Cubic feet', value: commasTrim(r.cuFt, 1) },
     { label: 'Order', value: `${r.orderCuYd.toFixed(2)} yd`, big: true, note: 'Rounded up to the next ¼ yard' },
   ];
+  if (inp.num('price') > 0) {
+    rows.push({ label: 'Concrete cost', value: money(r.orderCuYd * inp.num('price')), note: `${r.orderCuYd.toFixed(2)} yd × ${money(inp.num('price'))}` });
+  }
   const truck = inp.num('truck');
   if (truck > 0 && r.orderCuYd > 0) {
     const t = truckLoads(r.orderCuYd, truck);
@@ -194,4 +198,114 @@ const steps: Tool = {
   },
 };
 
-export const CONCRETE_TOOLS: Tool[] = [slab, slabBeams, footings, piers, steps];
+// Joint spacing: 2-1/2 × the slab thickness (inches) in feet, never over 15'.
+// ACI 302.1R / PCA give 24–36 × the thickness; 30× is the middle of that range.
+const JOINT_FT_PER_IN = 2.5;
+const MAX_JOINT_FT = 15;
+// Panels longer than 1-1/2 times their width tend to crack across the middle (ACI 302.1R).
+const MAX_PANEL_RATIO = 1.5;
+
+const controlJoints: Tool = {
+  id: 'control-joints',
+  title: 'Control Joints',
+  blurb: 'Joint spacing, panels, feet of saw cut',
+  fields: [
+    { key: 'length', label: 'Slab length', kind: 'length' },
+    { key: 'width', label: 'Slab width', kind: 'length' },
+    { key: 'thick', label: 'Thickness', kind: 'length', default: { in: '4' } },
+    { key: 'max', label: 'Max spacing', kind: 'number', unit: 'ft', optional: true, help: 'Blank = 10\' on 4", 12-1/2\' on 5", 15\' on 6"' },
+  ],
+  compute: (inp) => {
+    const L = inp.len('length');
+    const W = inp.len('width');
+    const thickIn = inp.len('thick') * 12;
+    if (L <= 0 || W <= 0) return { error: 'Length and width must be more than 0.' };
+    if (thickIn <= 0) return { error: 'Thickness must be more than 0.' };
+    const max = inp.has('max') ? inp.num('max') : Math.min(MAX_JOINT_FT, JOINT_FT_PER_IN * thickIn);
+    if (max <= 0) return { error: 'Max spacing must be more than 0.' };
+
+    const acrossLength = Math.ceil(L / max - 1e-9); // panels along the length
+    const acrossWidth = Math.ceil(W / max - 1e-9);
+    const sL = L / acrossLength;
+    const sW = W / acrossWidth;
+    const cutFt = (acrossLength - 1) * W + (acrossWidth - 1) * L;
+    const warnings: string[] = [];
+    if (Math.max(sL, sW) / Math.min(sL, sW) > MAX_PANEL_RATIO) {
+      warnings.push('Panels are long and skinny (more than 1-1/2 to 1). Add a joint so they’re closer to square.');
+    }
+    if (inp.has('max') && inp.num('max') > JOINT_FT_PER_IN * thickIn + 1e-9) {
+      warnings.push(`That’s farther apart than 2-1/2 × the thickness (${dec(JOINT_FT_PER_IN * thickIn, 1)}'). Expect random cracks.`);
+    }
+    return {
+      rows: [
+        { label: 'Joints along length', value: `every ${ftIn(sL)}`, big: true, note: `${acrossLength - 1} joints` },
+        { label: 'Joints along width', value: `every ${ftIn(sW)}`, big: true, note: `${acrossWidth - 1} joints` },
+        { label: 'Panels', value: commas(acrossLength * acrossWidth) },
+        { label: 'Saw cut', value: `${commasTrim(cutFt, 1)} ft` },
+        { label: 'Cut depth', value: inches(thickIn / 4, 8), note: '¼ of the thickness' },
+      ],
+      warnings,
+    };
+  },
+  notes: ['Cut as soon as the saw won’t ravel the edges, within the same day.'],
+};
+
+// Nominal board widths (in) → actual width. Form rows are figured by nominal width, the way crews stack them.
+const FORM_BOARDS = [
+  { value: '4', label: '2x4' },
+  { value: '6', label: '2x6' },
+  { value: '8', label: '2x8' },
+  { value: '10', label: '2x10' },
+  { value: '12', label: '2x12' },
+];
+
+const forms: Tool = {
+  id: 'forms',
+  title: 'Forms & Stakes',
+  blurb: 'Form boards and stakes around a slab',
+  fields: [
+    { key: 'length', label: 'Slab length', kind: 'length', optional: true },
+    { key: 'width', label: 'Slab width', kind: 'length', optional: true },
+    { key: 'formLF', label: 'Or total form length', kind: 'number', unit: 'ft', optional: true, help: 'For odd shapes. Used instead of length and width.' },
+    { key: 'height', label: 'Form height', kind: 'length', default: { in: '4' } },
+    { key: 'board', label: 'Board size', kind: 'choice', options: FORM_BOARDS, default: '4' },
+    { key: 'boardLength', label: 'Board length', kind: 'choice', options: [12, 16, 20].map((n) => ({ value: String(n), label: `${n}'` })), default: '16' },
+    { key: 'stakeSpacing', label: 'Stakes every', kind: 'number', unit: 'ft', default: '4' },
+  ],
+  compute: (inp) => {
+    const spacing = inp.num('stakeSpacing');
+    if (spacing <= 0) return { error: 'Stake spacing must be more than 0.' };
+    let sides: number[];
+    if (inp.has('formLF')) {
+      if (inp.num('formLF') <= 0) return { error: 'Form length must be more than 0.' };
+      sides = [inp.num('formLF')];
+    } else {
+      if (!inp.has('length') || !inp.has('width')) return { error: 'Enter the slab length and width, or the total form length.' };
+      const L = inp.len('length');
+      const W = inp.len('width');
+      if (L <= 0 || W <= 0) return { error: 'Length and width must be more than 0.' };
+      sides = [L, W, L, W];
+    }
+    const heightIn = inp.len('height') * 12;
+    if (heightIn <= 0) return { error: 'Form height must be more than 0.' };
+
+    const lf = sides.reduce((a, b) => a + b, 0);
+    const nominal = Number(inp.choice('board'));
+    const label = FORM_BOARDS.find((b) => b.value === inp.choice('board'))!.label;
+    const rows = Math.ceil(heightIn / nominal - 1e-9);
+    const boardFt = Number(inp.choice('boardLength'));
+    const boards = Math.ceil((lf * rows) / boardFt - 1e-9);
+    // A stake at each end/corner of every side, then no farther apart than the spacing.
+    const stakes = sides.reduce((sum, s) => sum + Math.ceil(s / spacing - 1e-9) + 1, 0);
+
+    const result: ResultRow[] = [{ label: 'Form length', value: `${commasTrim(lf, 1)} ft` }];
+    if (rows > 1) result.push({ label: 'Rows of boards', value: `${rows} high` });
+    result.push(
+      { label: 'Boards', value: `${commas(boards)} × ${boardFt}' ${label}`, big: true },
+      { label: 'Stakes', value: commas(stakes), big: true, note: `At every corner and every ${dec(spacing, 1)}'` },
+    );
+    return { rows: result };
+  },
+};
+
+export const CONCRETE_TOOLS: Tool[] = [slab, slabBeams, footings, piers, steps, controlJoints, forms];

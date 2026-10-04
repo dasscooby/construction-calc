@@ -1,10 +1,11 @@
-import { useMemo } from 'react';
+import { useMemo, useState } from 'react';
 import {
   Keyboard,
   KeyboardAvoidingView,
   Platform,
   Pressable,
   ScrollView,
+  Share,
   StyleSheet,
   Text,
   TextInput,
@@ -12,6 +13,7 @@ import {
 } from 'react-native';
 
 import { RawArea, RawBarRow, RawLength, RawValue, RawValues, RunResult, defaultRaw, runTool } from '../tools/run';
+import { shareText } from '../tools/share';
 import { BarListField, Field, Tool } from '../tools/types';
 import { colors } from '../theme';
 
@@ -62,6 +64,7 @@ export default function ToolScreen({ tool, raw, onChange, onBack }: Props) {
         ))}
         {hasInches && <Text style={styles.hint}>Inches can be 6, 6.5, or 6 1/2</Text>}
         <Results result={result} />
+        <ShareButton text={shareText(tool, raw, result)} />
         {tool.notes?.map((n, i) => (
           <Text key={i} style={styles.note}>
             • {n}
@@ -89,6 +92,28 @@ export default function ToolScreen({ tool, raw, onChange, onBack }: Props) {
         )}
       </View>
     </KeyboardAvoidingView>
+  );
+}
+
+/** Text or email the numbers. On a computer browser with no share menu, copies them instead. */
+function ShareButton({ text }: { text: string | null }) {
+  const [copied, setCopied] = useState(false);
+  if (!text) return null;
+  const share = async () => {
+    const nav = typeof navigator !== 'undefined' ? navigator : undefined;
+    if (Platform.OS === 'web' && !nav?.share) {
+      if (!nav?.clipboard) return;
+      await nav.clipboard.writeText(text).catch(() => {});
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+      return;
+    }
+    await Share.share({ message: text }).catch(() => {}); // closing the share menu isn't an error
+  };
+  return (
+    <Pressable onPress={share} style={({ pressed }) => [styles.shareBtn, pressed && styles.sharePressed]} accessibilityRole="button">
+      <Text style={styles.shareText}>{copied ? 'Copied ✓' : 'Share these numbers'}</Text>
+    </Pressable>
   );
 }
 
@@ -375,6 +400,9 @@ const styles = StyleSheet.create({
   resultNote: { fontSize: 14, color: colors.subtext, marginTop: 2 },
   empty: { fontSize: 18, fontWeight: '600', color: colors.subtext, textAlign: 'center', paddingVertical: 14 },
   errorText: { color: colors.error },
+  shareBtn: { backgroundColor: colors.panel2, borderRadius: 14, paddingVertical: 14, alignItems: 'center', marginBottom: 14 },
+  sharePressed: { opacity: 0.7 },
+  shareText: { fontSize: 17, fontWeight: '700', color: colors.accent },
   note: { fontSize: 14, color: colors.subtext, marginBottom: 6, lineHeight: 20 },
 
   footer: {
