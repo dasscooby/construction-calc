@@ -4,7 +4,9 @@
 import { ftIn } from '../tools/format';
 import { bounds, Pt } from './geometry';
 
-const esc = (s: string) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+// Text inside the drawings. No XML entities: the phone's SVG reader shows them literally (&quot;),
+// so the few characters that would break the SVG are swapped for look-alikes instead.
+const esc = (s: string) => s.replace(/&/g, '+').replace(/</g, '‹').replace(/>/g, '›');
 const n = (v: number) => Math.round(v * 10) / 10;
 const path = (pts: Pt[]) => `M${pts.map((p) => `${n(p.x)} ${n(p.y)}`).join(' L')} Z`;
 
@@ -72,9 +74,9 @@ export function planSvg(p: PlanInput): string {
 ${walls}
 <g font-family="Helvetica, Arial, sans-serif" font-size="15" font-weight="700" fill="#ffffff">${dims.join('')}</g>
 <g font-family="Helvetica, Arial, sans-serif" fill="#ffffff">
-<rect x="${W - 260}" y="${H - 58}" width="250" height="48" fill="none" stroke="#ffffff" stroke-width="1"/>
-<text x="${W - 250}" y="${H - 38}" font-size="14" font-weight="700">${esc(p.title)}</text>
-<text x="${W - 250}" y="${H - 19}" font-size="11">${esc(p.subtitle)}</text>
+<rect x="${W - 400}" y="${H - 58}" width="390" height="48" fill="none" stroke="#ffffff" stroke-width="1"/>
+<text x="${W - 390}" y="${H - 38}" font-size="14" font-weight="700">${esc(p.title)}</text>
+<text x="${W - 390}" y="${H - 19}" font-size="11">${esc(p.subtitle)}</text>
 </g>
 </svg>`;
 }
@@ -227,7 +229,7 @@ export function slabPlanSvg(p: PlanInput & SlabPlanExtras): string {
       parts.push(`<line x1="${X(b.minX + cover)}" y1="${Y(y)}" x2="${X(b.maxX - cover)}" y2="${Y(y)}"/>`);
     }
   }
-  const grid = parts.length ? `<g stroke="#ffb347" stroke-width="0.8" opacity="0.55">${parts.join('')}</g>` : '';
+  const grid = parts.length ? `<g stroke="#ffb347" stroke-width="1" opacity="0.8">${parts.join('')}</g>` : '';
   let footing = '';
   if (p.footingFt && p.footingFt > 0) {
     const f = p.footingFt;
@@ -253,6 +255,10 @@ export interface IsoSlabInput {
   rebarFt?: number;
   /** Small caption, like "Height exaggerated" */
   note?: string;
+  /** Bars running around inside the footing: how far in from the outside (ft) and how high (ft, same scale as depth) */
+  footingBars?: { inset: number; z: number }[];
+  /** Slab bars bent down into the footing: how far down the legs reach (z, ft) */
+  bentLegsTo?: number;
 }
 
 type P3 = [number, number, number];
@@ -308,7 +314,30 @@ export function isoSlabSvg(p: IsoSlabInput): string {
     const segs: string[] = [];
     for (const x of barLines(b0.minX + c, b0.maxX - c, p.rebarFt)) segs.push(`<polyline points="${pt(x, b0.minY + c, z)} ${pt(x, b0.maxY - c, z)}"/>`);
     for (const y of barLines(b0.minY + c, b0.maxY - c, p.rebarFt)) segs.push(`<polyline points="${pt(b0.minX + c, y, z)} ${pt(b0.maxX - c, y, z)}"/>`);
-    out.push(`<g fill="none" stroke="#c0622b" stroke-width="0.7" opacity="0.6">${segs.join('')}</g>`);
+    // Legs bent down into the footing at every bar end.
+    if (p.bentLegsTo !== undefined) {
+      for (const x of barLines(b0.minX + c, b0.maxX - c, p.rebarFt)) {
+        segs.push(`<polyline points="${pt(x, b0.minY + c, z)} ${pt(x, b0.minY + c, p.bentLegsTo)}"/>`);
+        segs.push(`<polyline points="${pt(x, b0.maxY - c, z)} ${pt(x, b0.maxY - c, p.bentLegsTo)}"/>`);
+      }
+      for (const y of barLines(b0.minY + c, b0.maxY - c, p.rebarFt)) {
+        segs.push(`<polyline points="${pt(b0.minX + c, y, z)} ${pt(b0.minX + c, y, p.bentLegsTo)}"/>`);
+        segs.push(`<polyline points="${pt(b0.maxX - c, y, z)} ${pt(b0.maxX - c, y, p.bentLegsTo)}"/>`);
+      }
+    }
+    out.push(`<g fill="none" stroke="#b5501c" stroke-width="1.1" opacity="0.85">${segs.join('')}</g>`);
+  }
+  // Footing bars, all the way around.
+  for (const bar of p.footingBars ?? []) {
+    const i = bar.inset;
+    const ring: P3[] = [
+      [b0.minX + i, b0.minY + i, bar.z],
+      [b0.maxX - i, b0.minY + i, bar.z],
+      [b0.maxX - i, b0.maxY - i, bar.z],
+      [b0.minX + i, b0.maxY - i, bar.z],
+      [b0.minX + i, b0.minY + i, bar.z],
+    ];
+    out.push(`<polyline points="${ring.map(([x, y, zz]) => pt(x, y, zz)).join(' ')}" fill="none" stroke="#8a2e00" stroke-width="2.2" stroke-linejoin="round"/>`);
   }
   if (p.note) out.push(`<text x="${W - 14}" y="${H - 12}" text-anchor="end" font-family="Helvetica, Arial, sans-serif" font-size="12" fill="#666">${esc(p.note)}</text>`);
   return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${W} ${H}" width="100%" role="img" aria-label="3D view"><rect width="${W}" height="${H}" fill="#f4f6f8"/>${out.join('')}</svg>`;

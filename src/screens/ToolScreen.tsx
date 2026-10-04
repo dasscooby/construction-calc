@@ -33,6 +33,8 @@ import { feel } from '../lib/feel';
 import { history } from '../lib/history';
 import { jobStore, useJobs } from '../lib/jobs';
 import { companyLine, userDefaults, useSettings } from '../lib/settings';
+import { toolDrawings } from '../report/report';
+import DrawingView from './DrawingView';
 import { shareText } from '../tools/share';
 import { BarListField, Field, Tool } from '../tools/types';
 import { colors, onThemeChange, themed } from '../theme';
@@ -69,6 +71,8 @@ export default function ToolScreen({ tool, raw, onChange, onBack, active, jobLin
 
   const main = result.status === 'ok' ? result.result.rows.filter((r) => r.big).slice(0, 2) : [];
   const text = shareText(tool, raw, result, companyLine(prefs));
+  // Plan / 3D / edge drawings for tools that have a shape (Slab, Wall Forms).
+  const drawings = useMemo(() => (result.status === 'ok' ? toolDrawings(tool.id, raw, tool.title) : null), [result, tool, raw]);
   // Anything with an answer goes into History when you leave the tool or share it.
   const save = () => {
     if (!text) return;
@@ -120,6 +124,7 @@ export default function ToolScreen({ tool, raw, onChange, onBack, active, jobLin
           ))}
         {hasInches && <Text style={styles.hint}>Inches can be 6, 6.5, or 6 1/2</Text>}
         <Results result={result} />
+        {drawings ? <DrawingView drawings={drawings} /> : null}
         <ShareButton text={text} onShare={save} />
         {text ? <JobButtons tool={tool} raw={raw} title={tool.title} jobLink={jobLink} onJobLink={onJobLink} /> : null}
         {tool.notes?.map((n, i) => (

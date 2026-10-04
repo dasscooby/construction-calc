@@ -5,7 +5,7 @@ import type { Job, JobItem } from '../lib/jobs';
 import { companyLine, Settings } from '../lib/settings';
 import { ALL_TOOLS, migrateItem } from '../tools';
 import { commas, cuYd, dec, money } from '../tools/format';
-import { isShown, parseLength, parseNumber, RawArea, RawWallRow, restoreRaw, runTool, RunResult } from '../tools/run';
+import { isShown, parseLength, parseNumber, RawArea, RawValues, RawWallRow, restoreRaw, runTool, RunResult } from '../tools/run';
 import { fieldText } from '../tools/share';
 import type { ResultRow, Tool } from '../tools/types';
 import { isoSlabSvg, isoSvg, planSvg, sectionSvg, sideLabels, slabPlanSvg } from './drawings';
@@ -107,91 +107,122 @@ export function jobTotals(items: FiguredItem[]): Totals {
   return t;
 }
 
+export interface Drawings {
+  plan: string;
+  iso: string;
+  section?: string;
+}
+
+/** Plan and 3D view of a Wall Forms foundation (raw = the tool's boxes). Null until the walls close up. */
+export function wallFormsDrawings(raw: RawValues, title: string, date: string, slabThickFt = 0): Drawings | null {
+  const tool = ALL_TOOLS.find((t) => t.id === 'wall-forms')!;
+  const run = runTool(tool, raw);
+  if (run.status !== 'ok') return null;
+  const rows = (raw.walls as RawWallRow[]).map((r) => ({ length: parseLength(r.length) ?? 0, ends: r.ends })).filter((r) => r.length > 0);
+  const outline = wallOutline(rows);
+  if (!outline || !outline.closed) return null;
+  const t = (parseNumber(String(raw.thick)) ?? 8) / 12;
+  const inner = insetOutline(outline.points, t);
+  const heightText = run.result.rows.find((r) => r.label === 'Wall height')?.value ?? `4'`;
+  const hFt = parseHeight(heightText) || 4;
+  return {
+    plan: planSvg({ outer: outline.points, inner, labels: sideLabels(outline.points), title, subtitle: `${dec(t * 12)}" walls, ${heightText} tall · ${date}` }),
+    iso: isoSvg({ outer: outline.points, inner, height: hFt, slabThick: slabThickFt || undefined }),
+  };
+}
+
+/** Plan, 3D view and edge detail of a one-piece Slab, with its footing and rebar. Null for odd shapes. */
+export function slabDrawings(raw: RawValues, title: string, date: string): Drawings | null {
+  const filled = (raw.areas as RawArea[]).filter((a) => parseLength(a.length) !== null);
+  if (filled.length !== 1) return null;
+  const L = parseLength(filled[0].length) ?? 0;
+  const Wd = parseLength(filled[0].width) ?? 0;
+  if (!(L > 0 && Wd > 0)) return null;
+  const outer: Pt[] = [
+    { x: 0, y: 0 },
+    { x: L, y: 0 },
+    { x: L, y: Wd },
+    { x: 0, y: Wd },
+  ];
+  const thick = parseLength(raw.thick as never) ?? 4 / 12;
+  if (!(thick > 0)) return null;
+  const on = (k: string) => raw[k] === '1';
+  const footing = on('footing');
+  const fW = footing ? parseLength(raw.fWidth as never) ?? 1 : 0;
+  const fD = footing ? Math.max(parseLength(raw.fDepth as never) ?? 16 / 12, thick) : 0;
+  const slabRebar = on('slabRebar');
+  const spacingFt = slabRebar ? (parseNumber(String(raw.spacing)) ?? 0) / 12 : 0;
+  const footBars = footing && on('footBars') ? Number(raw.fBars) || 0 : 0;
+  const tie = (footing && slabRebar ? raw.edgeTie : 'none') as 'bend' | 'lbars' | 'none';
+  // Slabs are thin next to their size; stretch the height so the edge and footing show in 3D.
+  const realDepth = footing ? fD : thick;
+  const z = Math.max(1, Math.max(L, Wd) / 10 / realDepth);
+  // Footing bars: 2 on the bottom 3" up, the rest near the top of the trench (as in the edge detail).
+  const inch = 1 / 12;
+  const bars: { inset: number; z: number }[] = [];
+  if (footBars > 0) {
+    const bottom = Math.min(2, footBars);
+    const spread = (count: number) =>
+      Array.from({ length: count }, (_, i) => (count === 1 ? fW / 2 : 3 * inch + ((fW - 6 * inch) * i) / (count - 1)));
+    for (const inset of spread(bottom)) bars.push({ inset, z: 3 * inch * z });
+    const topFromTop = Math.max(thick + 3 * inch, fD * 0.45);
+    for (const inset of spread(footBars - bottom)) bars.push({ inset, z: (fD - topFromTop) * z });
+  }
+  const parts = [`${dec(thick * 12)}" slab`];
+  if (footing) parts.push(`${dec(fW * 12)}" × ${dec(fD * 12)}" edge`);
+  if (slabRebar) parts.push(`#${String(raw.barSize)} at ${dec(spacingFt * 12)}"`);
+  return {
+    plan: slabPlanSvg({
+      outer,
+      labels: sideLabels(outer),
+      title,
+      subtitle: `${parts.join(' · ')} · ${date}`,
+      footingFt: footing ? fW : undefined,
+      rebarFt: spacingFt || undefined,
+      footingBars: footBars,
+    }),
+    iso: isoSlabSvg({
+      outer,
+      thick: thick * z,
+      footing: footing ? { width: fW, depth: fD * z } : undefined,
+      rebarFt: spacingFt || undefined,
+      footingBars: bars,
+      bentLegsTo: tie === 'bend' ? 4 * inch * z : undefined,
+      note: z > 1.5 ? 'Height exaggerated to show the edge and rebar' : undefined,
+    }),
+    section: footing
+      ? sectionSvg({
+          slabIn: thick * 12,
+          footWIn: fW * 12,
+          footDIn: fD * 12,
+          bars: footBars,
+          barSize: Number(raw.fBarSize) || 4,
+          tie,
+          slabBars: slabRebar,
+          slabBarSize: Number(raw.barSize) || 4,
+        })
+      : undefined,
+  };
+}
+
+/** Drawings for one tool's numbers (the tool screen shows these under the answers). */
+export function toolDrawings(toolId: string, raw: RawValues, title: string): Drawings | null {
+  const date = new Date().toLocaleDateString();
+  if (toolId === 'slab') return slabDrawings(raw, title, date);
+  if (toolId === 'wall-forms') return wallFormsDrawings(raw, title, date);
+  return null;
+}
+
 /** The plan and 3D view: from Wall Forms walls if the job has them, else from a one-piece slab. */
-export function jobDrawings(job: Job, items: FiguredItem[]): { plan: string; iso: string; section?: string } | null {
+export function jobDrawings(job: Job, items: FiguredItem[]): Drawings | null {
   const walls = items.find((f) => f.tool.id === 'wall-forms' && f.result.status === 'ok');
   const slab = items.find((f) => f.tool.id === 'slab' && f.result.status === 'ok');
-  const title = job.name;
   const date = new Date(job.createdAt).toLocaleDateString();
   if (walls) {
-    const raw = restoreRaw(walls.tool, walls.item.raw);
-    const run = runTool(walls.tool, raw);
-    if (run.status !== 'ok') return null;
-    // Re-read the walls the same way the tool does.
-    const rows = (raw.walls as RawWallRow[])
-      .map((r) => ({ length: parseLength(r.length) ?? 0, ends: r.ends }))
-      .filter((r) => r.length > 0);
-    const outline = wallOutline(rows);
-    if (!outline || !outline.closed) return null;
-    const t = (parseNumber(String(raw.thick)) ?? 8) / 12;
-    const inner = insetOutline(outline.points, t);
-    const heightText = run.result.rows.find((r) => r.label === 'Wall height')?.value ?? `4'`;
-    const hFt = parseHeight(heightText) || 4;
-    const slabThick = slab ? parseHeight(slab.inputs.find((i) => i.label.toLowerCase().includes('thickness'))?.value ?? '') : 0;
-    return {
-      plan: planSvg({ outer: outline.points, inner, labels: sideLabels(outline.points), title, subtitle: `${dec(t * 12)}" walls, ${heightText} tall · ${date}` }),
-      iso: isoSvg({ outer: outline.points, inner, height: hFt, slabThick: slabThick || undefined }),
-    };
+    const slabThick = slab ? parseLength(restoreRaw(slab.tool, slab.item.raw).thick as never) ?? 0 : 0;
+    return wallFormsDrawings(restoreRaw(walls.tool, walls.item.raw), job.name, date, slabThick);
   }
-  if (slab) {
-    const raw = restoreRaw(slab.tool, slab.item.raw);
-    const filled = (raw.areas as RawArea[]).filter((a) => parseLength(a.length) !== null);
-    if (filled.length !== 1) return null;
-    const L = parseLength(filled[0].length) ?? 0;
-    const Wd = parseLength(filled[0].width) ?? 0;
-    if (!(L > 0 && Wd > 0)) return null;
-    const outer: Pt[] = [
-      { x: 0, y: 0 },
-      { x: L, y: 0 },
-      { x: L, y: Wd },
-      { x: 0, y: Wd },
-    ];
-    const thick = parseLength(raw.thick as never) ?? 4 / 12;
-    const on = (k: string) => raw[k] === '1';
-    const footing = slab.tool.id === 'slab' && on('footing');
-    const fW = footing ? parseLength(raw.fWidth as never) ?? 1 : 0;
-    const fD = footing ? parseLength(raw.fDepth as never) ?? 16 / 12 : 0;
-    const slabRebar = on('slabRebar');
-    const spacingFt = slabRebar ? (parseNumber(String(raw.spacing)) ?? 0) / 12 : 0;
-    const footBars = footing && on('footBars') ? Number(raw.fBars) || 0 : 0;
-    const tie = (footing && slabRebar ? raw.edgeTie : 'none') as 'bend' | 'lbars' | 'none';
-    // Slabs are thin next to their size; stretch the height so the edge and footing show in 3D.
-    const realDepth = footing ? Math.max(fD, thick) : thick;
-    const z = Math.max(1, Math.max(L, Wd) / 10 / realDepth);
-    const parts = [`${dec(thick * 12)}" slab`];
-    if (footing) parts.push(`${dec(fW * 12)}" × ${dec(fD * 12)}" edge`);
-    if (slabRebar) parts.push(`#${String(raw.barSize)} at ${dec(spacingFt * 12)}"`);
-    return {
-      plan: slabPlanSvg({
-        outer,
-        labels: sideLabels(outer),
-        title,
-        subtitle: `${parts.join(' · ')} · ${date}`,
-        footingFt: footing ? fW : undefined,
-        rebarFt: spacingFt || undefined,
-        footingBars: footBars,
-      }),
-      iso: isoSlabSvg({
-        outer,
-        thick: thick * z,
-        footing: footing ? { width: fW, depth: fD * z } : undefined,
-        rebarFt: spacingFt || undefined,
-        note: z > 1.5 ? 'Height exaggerated to show the edge' : undefined,
-      }),
-      section: footing
-        ? sectionSvg({
-            slabIn: thick * 12,
-            footWIn: fW * 12,
-            footDIn: fD * 12,
-            bars: footBars,
-            barSize: Number(raw.fBarSize) || 4,
-            tie,
-            slabBars: slabRebar,
-            slabBarSize: Number(raw.barSize) || 4,
-          })
-        : undefined,
-    };
-  }
+  if (slab) return slabDrawings(restoreRaw(slab.tool, slab.item.raw), job.name, date);
   return null;
 }
 
