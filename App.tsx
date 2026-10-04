@@ -16,6 +16,7 @@ import JobsScreen from './src/screens/JobsScreen';
 import SettingsScreen from './src/screens/SettingsScreen';
 import ToolsTab, { OpenRequest } from './src/screens/ToolsTab';
 import { TABS } from './src/tabs';
+import { migrateItem } from './src/tools';
 import { colors, mode, onThemeChange, themed } from './src/theme';
 
 // iPhone tab icons (SF Symbols). Web and Android show the names only.
@@ -52,7 +53,8 @@ export default function App() {
   useEffect(() => onThemeChange(() => setLook((n) => n + 1)), []);
 
   // From History or a job: jump to the tool's tab and open it with the saved numbers.
-  const openTool = (toolId: string, raw: HistoryEntry['raw'], jobLink?: OpenRequest['jobLink']) => {
+  const openTool = (oldId: string, oldRaw: HistoryEntry['raw'], jobLink?: OpenRequest['jobLink']) => {
+    const { toolId, raw } = migrateItem(oldId, oldRaw) as { toolId: string; raw: HistoryEntry['raw'] };
     const id = (Object.keys(TABS) as TabId[]).find((k) => TABS[k].groups?.some((g) => g.tools.some((t) => t.id === toolId)));
     if (!id) return;
     picked.current = true;

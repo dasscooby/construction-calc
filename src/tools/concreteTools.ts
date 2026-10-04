@@ -13,107 +13,8 @@ import {
 import { commas, commasTrim, cuYd, dec, ftIn, money, sqFt } from './format';
 import { Field, Inputs, ResultRow, Tool } from './types';
 
-const CUFT_PER_CUYD = 27;
-const MAX_BAG_YD = 2;
-
-// Every concrete tool ends with waste %, truck size and price.
-const ORDER_FIELDS: Field[] = [
-  { key: 'waste', label: 'Waste', kind: 'number', unit: '%', default: '10', optional: true },
-  { key: 'truck', label: 'Truck size', kind: 'number', unit: 'yd', default: '10', optional: true },
-  { key: 'price', label: 'Price per yard', kind: 'number', unit: '$/yd', optional: true },
-];
-
-/** The standard answer block: yards with waste, order amount, trucks, bags, and the before-waste number. */
-function concreteRows(baseCuFt: number, inp: Inputs, bags = true): ResultRow[] {
-  const waste = inp.num('waste');
-  const r = concreteResult(baseCuFt, waste);
-  const rows: ResultRow[] = [
-    { label: 'Cubic yards', value: dec(r.cuYd, 2), big: true, note: `With ${dec(waste, 1)}% waste` },
-    { label: 'Cubic feet', value: commasTrim(r.cuFt, 1) },
-    { label: 'Order', value: `${r.orderCuYd.toFixed(2)} yd`, big: true, note: 'Rounded up to the next ¼ yard' },
-  ];
-  if (inp.num('price') > 0) {
-    rows.push({ label: 'Concrete cost', value: money(r.orderCuYd * inp.num('price')), note: `${r.orderCuYd.toFixed(2)} yd × ${money(inp.num('price'))}` });
-  }
-  const truck = inp.num('truck');
-  if (truck > 0 && r.orderCuYd > 0) {
-    const t = truckLoads(r.orderCuYd, truck);
-    rows.push({
-      label: 'Trucks',
-      value: t.trucks === 1 ? '1 truck' : `${t.trucks} trucks`,
-      note: t.trucks === 1 ? `${dec(r.orderCuYd)} yd` : `${t.trucks - 1} full (${dec(truck)} yd) + last load ${dec(t.lastLoad)} yd`,
-    });
-  }
-  // Bags only make sense on small pours; past 2 yards you're ordering a truck.
-  if (bags && r.cuYd <= MAX_BAG_YD) {
-    for (const b of r.bags.slice().reverse()) rows.push({ label: `${b.lb} lb bags`, value: commas(b.count) });
-  }
-  rows.push({ label: 'Before waste', value: `${dec(r.baseCuYd, 2)} cu yd`, note: `${commasTrim(r.baseCuFt, 1)} cu ft` });
-  return rows;
-}
-
-const slab: Tool = {
-  id: 'slab',
-  title: 'Slab',
-  blurb: 'Length × width × thickness',
-  fields: [
-    { key: 'areas', label: 'Slab size', kind: 'areas', help: 'Add more areas for L-shaped slabs' },
-    { key: 'thick', label: 'Thickness', kind: 'length', default: { in: '4' } },
-    ...ORDER_FIELDS,
-  ],
-  compute: (inp) => {
-    const area = inp.areas('areas').reduce((sum, r) => sum + r.length * r.width, 0);
-    return { rows: [{ label: 'Slab area', value: sqFt(area) }, ...concreteRows(area * inp.len('thick'), inp)] };
-  },
-};
-
-const slabBeams: Tool = {
-  id: 'slab-beams',
-  title: 'Slab + Beams',
-  blurb: 'Slab and its beams poured together (monolithic)',
-  fields: [
-    { key: 'areas', label: 'Slab size', kind: 'areas', help: 'Add more areas for L-shaped slabs' },
-    { key: 'thick', label: 'Slab thickness', kind: 'length', default: { in: '4' } },
-    { key: 'perim', label: 'Perimeter beam length', kind: 'number', unit: 'ft', optional: true, help: 'Distance around the outside. Blank = figured for you.' },
-    { key: 'pWidth', label: 'Perimeter beam width', kind: 'length', default: { in: '12' } },
-    { key: 'pDepth', label: 'Perimeter beam depth', kind: 'length', default: { in: '24' }, help: 'Top of slab to bottom of beam' },
-    { key: 'interior', label: 'Interior beams, total length', kind: 'number', unit: 'ft', optional: true },
-    { key: 'iWidth', label: 'Interior beam width', kind: 'length', default: { in: '12' } },
-    { key: 'iDepth', label: 'Interior beam depth', kind: 'length', default: { in: '24' }, help: 'Top of slab to bottom of beam' },
-    ...ORDER_FIELDS,
-  ],
-  compute: (inp) => {
-    const rects = inp.areas('areas');
-    const area = rects.reduce((sum, r) => sum + r.length * r.width, 0);
-    const t = inp.len('thick');
-    let perim = inp.num('perim');
-    if (!inp.has('perim')) {
-      if (rects.length > 1) return { error: 'Enter the perimeter beam length (it can’t be figured from several areas).' };
-      perim = 2 * (rects[0].length + rects[0].width);
-    }
-    const pWidth = inp.len('pWidth');
-    const centerline = perimeterBeamCenterline(perim, pWidth);
-    if (centerline < 0) return { error: 'The perimeter is too short for that beam width.' };
-    const slabCuFt = area * t;
-    const perimCuFt = beamBelowSlabCuFt(centerline, pWidth, inp.len('pDepth'), t);
-    const intCuFt = beamBelowSlabCuFt(inp.num('interior'), inp.len('iWidth'), inp.len('iDepth'), t);
-    const warnings: string[] = [];
-    if (inp.len('pDepth') <= t || (inp.has('interior') && inp.len('iDepth') <= t)) {
-      warnings.push('A beam isn’t deeper than the slab. Measure beam depth from the top of the slab.');
-    }
-    return {
-      rows: [
-        { label: 'Slab area', value: sqFt(area) },
-        { label: 'Slab', value: cuYd(slabCuFt / CUFT_PER_CUYD) },
-        { label: 'Perimeter beam', value: cuYd(perimCuFt / CUFT_PER_CUYD), note: `${dec(perim, 1)} ft around` },
-        { label: 'Interior beams', value: cuYd(intCuFt / CUFT_PER_CUYD) },
-        ...concreteRows(slabCuFt + perimCuFt + intCuFt, inp, false),
-      ],
-      warnings,
-    };
-  },
-  notes: ['Beams only add the part below the slab. Corners aren’t counted twice.'],
-};
+import { concreteRows, CUFT_PER_CUYD, ORDER_FIELDS } from './concreteShared';
+import { slab } from './slabTool';
 
 const footings: Tool = {
   id: 'footings',
@@ -219,6 +120,14 @@ const forms: Tool = {
     { key: 'formLF', label: 'Or total form length', kind: 'number', unit: 'ft', optional: true, help: 'For odd shapes. Used instead of length and width.' },
     { key: 'height', label: 'Form height', kind: 'length', default: { in: '4' } },
     { key: 'board', label: 'Board size', kind: 'choice', options: FORM_BOARDS, default: '4' },
+    {
+      key: 'topBoard',
+      label: 'Board on top',
+      kind: 'choice',
+      options: [{ value: '', label: 'None' }, ...FORM_BOARDS],
+      default: '',
+      help: 'Like a 2x4 on a 2x12 to keep the top straight',
+    },
     { key: 'boardLength', label: 'Board length', kind: 'choice', options: [12, 16, 20].map((n) => ({ value: String(n), label: `${n}'` })), default: '16' },
     { key: 'stakeSpacing', label: 'Stakes every', kind: 'number', unit: 'ft', default: '4' },
   ],
@@ -240,21 +149,31 @@ const forms: Tool = {
     if (heightIn <= 0) return { error: 'Form height must be more than 0.' };
 
     const lf = sides.reduce((a, b) => a + b, 0);
+    const boardFt = Number(inp.choice('boardLength'));
     const nominal = Number(inp.choice('board'));
     const label = FORM_BOARDS.find((b) => b.value === inp.choice('board'))!.label;
-    const rows = Math.ceil(heightIn / nominal - 1e-9);
-    const boardFt = Number(inp.choice('boardLength'));
+    const topNominal = Number(inp.choice('topBoard')) || 0;
+    const topLabel = FORM_BOARDS.find((b) => b.value === inp.choice('topBoard'))?.label;
+    // The top board sits on the stack; the main boards fill the rest of the height (at least one row).
+    const rows = Math.max(1, Math.ceil((heightIn - topNominal) / nominal - 1e-9));
     const boards = Math.ceil((lf * rows) / boardFt - 1e-9);
+    const topBoards = topNominal ? Math.ceil(lf / boardFt - 1e-9) : 0;
+    const stackIn = rows * nominal + topNominal;
+    const warnings: string[] = [];
+    if (topNominal && stackIn > heightIn + 1e-9) {
+      warnings.push(`Those boards stack to ${dec(stackIn)}", taller than the ${dec(heightIn)}" form. Set the form height to match, or pick smaller boards.`);
+    }
     // A stake at each end/corner of every side, then no farther apart than the spacing.
     const stakes = sides.reduce((sum, s) => sum + Math.ceil(s / spacing - 1e-9) + 1, 0);
 
     const result: ResultRow[] = [{ label: 'Form length', value: `${commasTrim(lf, 1)} ft` }];
-    if (rows > 1) result.push({ label: 'Rows of boards', value: `${rows} high` });
-    result.push(
-      { label: 'Boards', value: `${commas(boards)} × ${boardFt}' ${label}`, big: true },
-      { label: 'Stakes', value: commas(stakes), big: true, note: `At every corner and every ${dec(spacing, 1)}'` },
-    );
-    return { rows: result };
+    if (rows > 1 || topNominal) {
+      result.push({ label: 'Rows of boards', value: `${rows + (topNominal ? 1 : 0)} high`, note: topLabel ? `${rows} × ${label} + ${topLabel} on top` : undefined });
+    }
+    result.push({ label: 'Boards', value: `${commas(boards)} × ${boardFt}' ${label}`, big: true });
+    if (topNominal) result.push({ label: 'Top boards', value: `${commas(topBoards)} × ${boardFt}' ${topLabel}`, big: true });
+    result.push({ label: 'Stakes', value: commas(stakes), big: true, note: `At every corner and every ${dec(spacing, 1)}'` });
+    return { rows: result, warnings };
   },
 };
 
@@ -494,4 +413,4 @@ const wallForms: Tool = {
   notes: ['Both sides of the wall. Lengths are rounded to the nearest inch.'],
 };
 
-export const CONCRETE_TOOLS: Tool[] = [slab, slabBeams, footings, piers, steps, forms, wallForms];
+export const CONCRETE_TOOLS: Tool[] = [slab, footings, piers, steps, forms, wallForms];

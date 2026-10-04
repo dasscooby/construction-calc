@@ -8,7 +8,7 @@
 //   Order: 25.75 yd
 
 import { ftIn, inches } from './format';
-import { RawArea, RawBarRow, RawLength, RawStockRow, RawValues, RawWallRow, parseLength, parseNumber, RunResult } from './run';
+import { isShown, RawArea, RawBarRow, RawLength, RawStockRow, RawValues, RawWallRow, parseLength, parseNumber, RunResult } from './run';
 import { Field, Tool } from './types';
 
 const lengthText = (r: RawLength): string | null => {
@@ -31,6 +31,8 @@ export function fieldText(f: Field, v: RawValues[string]): string | null {
     }
     case 'count':
       return (v as string).trim() || null;
+    case 'toggle':
+      return v === '1' ? 'Yes' : null;
     case 'choice':
       return f.options.find((o) => o.value === v)?.label ?? null;
     case 'multi': {
@@ -71,6 +73,7 @@ export function shareText(tool: Tool, raw: RawValues, result: RunResult, footer 
   if (result.status !== 'ok') return null;
   const lines = [`${tool.title} – Construction Calc`, ''];
   for (const f of tool.fields) {
+    if (!isShown(f, raw)) continue;
     const t = fieldText(f, raw[f.key]);
     if (t !== null) lines.push(`${f.label}: ${t}`);
   }

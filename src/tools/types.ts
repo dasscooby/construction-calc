@@ -15,6 +15,10 @@ interface FieldBase {
   optional?: boolean;
   /** Clear leaves this box alone (things like what you own, not the job) */
   sticky?: boolean;
+  /** Only shown (and only used) when these switches are on */
+  showIf?: string[];
+  /** Only shown when at least one of these switches is on */
+  showIfAny?: string[];
 }
 
 /** Feet + inches boxes. compute() receives FEET. Boxes accept 6, 6.5, 6 1/2, 6-1/2, 1/2. */
@@ -52,6 +56,12 @@ export interface MultiChoiceField extends FieldBase {
   default: string[];
 }
 
+/** An on/off switch, like "Exterior footing". Other fields can hang off it with showIf. */
+export interface ToggleField extends FieldBase {
+  kind: 'toggle';
+  default?: boolean;
+}
+
 /** Rows of sizes (inches) and how many you own. Blank "how many" = plenty. */
 export interface StockField extends FieldBase {
   kind: 'stock';
@@ -86,7 +96,8 @@ export type Field =
   | AreasField
   | BarListField
   | WallsField
-  | StockField;
+  | StockField
+  | ToggleField;
 
 export interface Rect {
   length: number; // feet
@@ -133,8 +144,10 @@ export interface Inputs {
   walls(key: string): WallRow[];
   /** Stock field: the filled-in rows. */
   stock(key: string): StockRow[];
-  /** True if the field was filled in. */
+  /** True if the field was filled in (a switch: true if it's on). */
   has(key: string): boolean;
+  /** Switch field: on or off. */
+  on(key: string): boolean;
 }
 
 export interface ResultRow {

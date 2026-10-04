@@ -1,6 +1,7 @@
 import { fillerSet, layoutFace } from '../concreteTools';
 import { belledPierCuFt, bellHeightFt, perimeterBeamCenterline, truckLoads } from '../../lib/concrete';
 import { CONCRETE_TOOLS } from '../concreteTools';
+import { migrateItem } from '..';
 import { rowValue, runTool } from '../run';
 
 const tool = (id: string) => CONCRETE_TOOLS.find((t) => t.id === id)!;
@@ -30,42 +31,88 @@ describe('slab', () => {
   });
 });
 
-describe('slab + grade beams', () => {
-  // 40 x 30 slab, 4" thick, 12" x 24" perimeter beam:
+describe('slab with an exterior footing (mono pour)', () => {
+  // 40 x 30 slab, 4" thick, 12" x 24" thickened edge:
   //   slab      1200 sq ft × 1/3 ft                 = 400 cu ft   = 14.81 cu yd
-  //   perimeter 140 ft → centerline 140 − 4 = 136 ft
-  //   beam      136 × 1 × (2 − 1/3)                 = 226.67 cu ft = 8.40 cu yd
-  //   total     626.67 cu ft = 23.21 cu yd; +10% = 25.53 → order 25.75 → 3 trucks, last 5.75
-  test('monolithic slab with a perimeter beam', () => {
-    const r = runTool(tool('slab-beams'), { areas: [[40, 30]] });
+  //   footing   140 ft around → centerline 140 − 4 = 136 ft
+  //             136 × 1 × (2 − 1/3)                 = 226.67 cu ft = 8.40 cu yd
+  //   total     626.67 cu ft = 23.21 cu yd; +10% = 25.53 → order 25.75
+  const mono = { areas: [[40, 30]] as [number, number][], footing: true, fDepth: 2 };
+
+  test('slab plus the edge, below the slab only', () => {
+    const r = runTool(tool('slab'), mono);
     expect(rowValue(r, 'Slab')).toBe('14.81 cu yd');
-    expect(rowValue(r, 'Perimeter beam')).toBe('8.4 cu yd');
-    expect(rowValue(r, 'Interior beams')).toBe('0 cu yd');
+    expect(rowValue(r, 'Exterior footing')).toBe('8.4 cu yd');
     expect(rowValue(r, 'Before waste')).toBe('23.21 cu yd');
-    expect(rowValue(r, 'Cubic yards')).toBe('25.53');
     expect(rowValue(r, 'Order')).toBe('25.75 yd');
-    expect(rowValue(r, 'Trucks')).toBe('3 trucks');
-    if (r.status === 'ok') expect(r.result.rows.find((x) => x.label === 'Trucks')!.note).toBe('2 full (10 yd) + last load 5.75 yd');
+    expect(r.status === 'ok' && r.result.warnings?.[0]).toMatch(/rarely dug even/);
   });
 
-  test('interior beams: 60 ft of 12" x 24" = 60 × 1 × 5/3 = 100 cu ft = 3.7 cu yd', () => {
-    const r = runTool(tool('slab-beams'), { areas: [[40, 30]], interior: 60 });
-    expect(rowValue(r, 'Interior beams')).toBe('3.7 cu yd');
+  test('dug 2" wider and 2" deeper: the order uses the footing as dug', () => {
+    // 14" × 26": centerline 140 − 4.667 = 135.33 × 1.1667 × (26 − 4)/12 = 289.46 cu ft = 10.72 yd
+    const r = runTool(tool('slab'), { ...mono, dugW: 2, dugD: 2 });
+    expect(rowValue(r, 'Exterior footing')).toBe('8.4 cu yd');
+    expect(rowValue(r, 'Footing as dug')).toBe('10.72 cu yd');
+    expect(rowValue(r, 'Before waste')).toBe('25.54 cu yd'); // 400 + 289.46 = 689.46 cu ft
+    expect(r.status === 'ok' && r.result.warnings?.[0]).toMatch(/as dug/);
   });
 
-  test('several areas need the perimeter typed in', () => {
-    expect(runTool(tool('slab-beams'), { areas: [[40, 30], [10, 10]] }).status).toBe('invalid');
-    const r = runTool(tool('slab-beams'), { areas: [[40, 30], [10, 10]], perim: 160 });
-    expect(rowValue(r, 'Perimeter beam')).toBe('9.63 cu yd'); // (160 − 4) × 1 × 5/3 = 260 cu ft
+  test('interior footings: 60 ft of 12" x 24" = 60 × 1 × 5/3 = 100 cu ft = 3.7 cu yd', () => {
+    const r = runTool(tool('slab'), { ...mono, interior: true, iLength: 60, iDepth: 2 });
+    expect(rowValue(r, 'Interior footings')).toBe('3.7 cu yd');
   });
 
-  test('warns when the beam is not deeper than the slab', () => {
-    const r = runTool(tool('slab-beams'), { areas: [[40, 30]], pDepth: { ft: '', in: '4' } });
-    expect(r.status === 'ok' && r.result.warnings?.length).toBe(1);
+  test('several areas need the footing length typed in', () => {
+    expect(runTool(tool('slab'), { ...mono, areas: [[40, 30], [10, 10]] }).status).toBe('invalid');
+    const r = runTool(tool('slab'), { ...mono, areas: [[40, 30], [10, 10]], fPerim: 160, corners: 6 });
+    expect(rowValue(r, 'Exterior footing')).toBe('9.63 cu yd'); // (160 − 4) × 1 × 5/3 = 260 cu ft
   });
 
-  test('centerline rule', () => {
-    expect(perimeterBeamCenterline(140, 1)).toBe(136);
+  test('switches off = a plain slab, no footing rows', () => {
+    const r = runTool(tool('slab'), { areas: [[40, 30]], fDepth: 2 });
+    expect(rowValue(r, 'Exterior footing')).toBeUndefined();
+    expect(rowValue(r, 'Before waste')).toBe('14.81 cu yd');
+  });
+});
+
+describe('slab rebar, footing bars and tying the slab to the edge', () => {
+  const mono = { areas: [[40, 30]] as [number, number][], footing: true, fDepth: 2, slabRebar: true, footBars: true };
+
+  test('slab bars bent down into a 24" footing: legs reach 3" off the bottom', () => {
+    // bar at mid-slab (2") → down to 21": 24 − 2 − 3 = 19"
+    const r = runTool(tool('slab'), mono);
+    if (r.status !== 'ok') throw new Error(r.status);
+    const bars = r.result.rows.find((x) => x.label === 'Slab bars')!;
+    expect(bars.note).toContain('49 bars, #4 at 18" both ways');
+    expect(bars.note).toContain('each end bent down 19"');
+    // 49 bars × 2 ends × 19" = 155.17 ft more steel than not bending
+    const flat = runTool(tool('slab'), { ...mono, edgeTie: 'none' });
+    const ft = (x: ReturnType<typeof runTool>) => (x.status === 'ok' ? Number(x.result.rows.find((y) => y.label === 'Slab bars')!.value.replace(/[^\d.]/g, '')) : 0);
+    expect(ft(r) - ft(flat)).toBeGreaterThan(155);
+  });
+
+  test('footing bars: 3 #4 around with an L-bar per bar at each of the 4 corners', () => {
+    const r = runTool(tool('slab'), mono);
+    if (r.status !== 'ok') throw new Error(r.status);
+    const fb = r.result.rows.find((x) => x.label === 'Footing bars')!;
+    expect(fb.note).toContain('3 #4 bars around');
+    expect(fb.note).toContain(`12 corner L-bars 3' 4" (20" legs)`);
+    expect(rowValue(r, '#4 sticks')).toMatch(/^\d+ × 20'$/);
+    expect(rowValue(r, 'Rebar weight')).toMatch(/ lb$/);
+  });
+
+  test('L-bars at the edge instead of bending', () => {
+    const r = runTool(tool('slab'), { ...mono, edgeTie: 'lbars' });
+    // centerline 136 ft = 1632" at 18" → 91 spaces → 92 L-bars, 20" + 19" = 3' 3"
+    expect(rowValue(r, 'Edge L-bars')).toBe(`92 × 3' 3"`);
+  });
+});
+
+describe('old Slab + Beams calculations', () => {
+  test('open as a Slab with the footing switched on', () => {
+    const m = migrateItem('slab-beams', { areas: [], pWidth: { ft: '', in: '12' }, pDepth: { ft: '2', in: '' }, perim: '', interior: '60' });
+    expect(m.toolId).toBe('slab');
+    expect(m.raw).toMatchObject({ footing: '1', fWidth: { ft: '', in: '12' }, fDepth: { ft: '2', in: '' }, interior: '1', iLength: '60' });
   });
 });
 
@@ -164,6 +211,18 @@ describe('forms & stakes', () => {
 
   test('needs a size', () => {
     expect(runTool(tool('forms'), {}).status).toBe('invalid');
+  });
+
+  test('a 2x4 on top of a 2x12 for a 16" footing edge', () => {
+    // 140 ft: 1 row of 2x12 (16 − 4 = 12") + the 2x4 → 9 of each at 16'
+    const r = runTool(tool('forms'), { length: 40, width: 30, height: { ft: '', in: '16' }, board: '12', topBoard: '4' });
+    expect(rowValue(r, 'Rows of boards')).toBe('2 high');
+    expect(rowValue(r, 'Boards')).toBe(`9 × 16' 2x12`);
+    expect(rowValue(r, 'Top boards')).toBe(`9 × 16' 2x4`);
+    expect(r.status === 'ok' && r.result.warnings).toEqual([]);
+    // 2x12 + 2x6 is 18": taller than a 16" form, so it warns
+    const tall = runTool(tool('forms'), { length: 40, width: 30, height: { ft: '', in: '16' }, board: '12', topBoard: '6' });
+    expect(tall.status === 'ok' && tall.result.warnings?.[0]).toMatch(/stack to 18"/);
   });
 });
 

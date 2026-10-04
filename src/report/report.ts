@@ -3,12 +3,12 @@
 
 import type { Job, JobItem } from '../lib/jobs';
 import { companyLine, Settings } from '../lib/settings';
-import { ALL_TOOLS } from '../tools';
+import { ALL_TOOLS, migrateItem } from '../tools';
 import { commas, cuYd, dec, money } from '../tools/format';
-import { parseLength, parseNumber, RawArea, RawWallRow, restoreRaw, runTool, RunResult } from '../tools/run';
+import { isShown, parseLength, parseNumber, RawArea, RawWallRow, restoreRaw, runTool, RunResult } from '../tools/run';
 import { fieldText } from '../tools/share';
 import type { ResultRow, Tool } from '../tools/types';
-import { isoSvg, planSvg, sideLabels } from './drawings';
+import { isoSlabSvg, isoSvg, planSvg, sectionSvg, sideLabels, slabPlanSvg } from './drawings';
 import { insetOutline, Pt, wallOutline } from './geometry';
 
 export interface FiguredItem {
@@ -41,10 +41,12 @@ const add = (m: Map<string, number>, k: string, n: number) => m.set(k, (m.get(k)
 export function figureItems(job: Job): FiguredItem[] {
   const out: FiguredItem[] = [];
   for (const item of job.items) {
-    const tool = ALL_TOOLS.find((t) => t.id === item.toolId);
+    const m = migrateItem(item.toolId, item.raw);
+    const tool = ALL_TOOLS.find((t) => t.id === m.toolId);
     if (!tool) continue; // a tool that was removed in an update
-    const raw = restoreRaw(tool, item.raw);
+    const raw = restoreRaw(tool, m.raw);
     const inputs = tool.fields.flatMap((f) => {
+      if (!isShown(f, raw)) return [];
       const v = fieldText(f, raw[f.key]);
       return v === null ? [] : [{ label: f.label, value: v }];
     });
@@ -88,6 +90,12 @@ export function jobTotals(items: FiguredItem[]): Totals {
       t.ties += numberIn(row('Ties')?.value ?? '0');
     }
     if (row('Weight') && / lb$/.test(row('Weight')!.value)) t.rebarLb += numberIn(row('Weight')!.value);
+    if (row('Rebar weight')) t.rebarLb += numberIn(row('Rebar weight')!.value);
+    for (const r of rows) {
+      const size = r.label.match(/^#(\d+) sticks$/);
+      const m = r.value.match(/^([\d,]+) × (\d+)'$/);
+      if (size && m) add(t.sticks, `#${size[1]} ${m[2]}' sticks`, numberIn(m[1]));
+    }
     const sticks = row('Sticks to order');
     if (sticks) {
       const m = sticks.value.match(/^([\d,]+) × (\d+)'$/);
@@ -100,9 +108,9 @@ export function jobTotals(items: FiguredItem[]): Totals {
 }
 
 /** The plan and 3D view: from Wall Forms walls if the job has them, else from a one-piece slab. */
-export function jobDrawings(job: Job, items: FiguredItem[]): { plan: string; iso: string } | null {
+export function jobDrawings(job: Job, items: FiguredItem[]): { plan: string; iso: string; section?: string } | null {
   const walls = items.find((f) => f.tool.id === 'wall-forms' && f.result.status === 'ok');
-  const slab = items.find((f) => (f.tool.id === 'slab' || f.tool.id === 'slab-beams') && f.result.status === 'ok');
+  const slab = items.find((f) => f.tool.id === 'slab' && f.result.status === 'ok');
   const title = job.name;
   const date = new Date(job.createdAt).toLocaleDateString();
   if (walls) {
@@ -138,11 +146,50 @@ export function jobDrawings(job: Job, items: FiguredItem[]): { plan: string; iso
       { x: L, y: Wd },
       { x: 0, y: Wd },
     ];
-    const thick = parseHeight(slab.inputs.find((i) => i.label.toLowerCase().includes('thickness'))?.value ?? '') || 4 / 12;
+    const thick = parseLength(raw.thick as never) ?? 4 / 12;
+    const on = (k: string) => raw[k] === '1';
+    const footing = slab.tool.id === 'slab' && on('footing');
+    const fW = footing ? parseLength(raw.fWidth as never) ?? 1 : 0;
+    const fD = footing ? parseLength(raw.fDepth as never) ?? 16 / 12 : 0;
+    const slabRebar = on('slabRebar');
+    const spacingFt = slabRebar ? (parseNumber(String(raw.spacing)) ?? 0) / 12 : 0;
+    const footBars = footing && on('footBars') ? Number(raw.fBars) || 0 : 0;
+    const tie = (footing && slabRebar ? raw.edgeTie : 'none') as 'bend' | 'lbars' | 'none';
+    // Slabs are thin next to their size; stretch the height so the edge and footing show in 3D.
+    const realDepth = footing ? Math.max(fD, thick) : thick;
+    const z = Math.max(1, Math.max(L, Wd) / 10 / realDepth);
+    const parts = [`${dec(thick * 12)}" slab`];
+    if (footing) parts.push(`${dec(fW * 12)}" × ${dec(fD * 12)}" edge`);
+    if (slabRebar) parts.push(`#${String(raw.barSize)} at ${dec(spacingFt * 12)}"`);
     return {
-      plan: planSvg({ outer, labels: sideLabels(outer), title, subtitle: `${dec(thick * 12)}" slab · ${date}` }),
-      // Exaggerate the thickness a little so the slab reads as 3D.
-      iso: isoSvg({ outer, height: Math.max(thick, Math.max(L, Wd) / 40) }),
+      plan: slabPlanSvg({
+        outer,
+        labels: sideLabels(outer),
+        title,
+        subtitle: `${parts.join(' · ')} · ${date}`,
+        footingFt: footing ? fW : undefined,
+        rebarFt: spacingFt || undefined,
+        footingBars: footBars,
+      }),
+      iso: isoSlabSvg({
+        outer,
+        thick: thick * z,
+        footing: footing ? { width: fW, depth: fD * z } : undefined,
+        rebarFt: spacingFt || undefined,
+        note: z > 1.5 ? 'Height exaggerated to show the edge' : undefined,
+      }),
+      section: footing
+        ? sectionSvg({
+            slabIn: thick * 12,
+            footWIn: fW * 12,
+            footDIn: fD * 12,
+            bars: footBars,
+            barSize: Number(raw.fBarSize) || 4,
+            tie,
+            slabBars: slabRebar,
+            slabBarSize: Number(raw.barSize) || 4,
+          })
+        : undefined,
     };
   }
   return null;
@@ -241,6 +288,7 @@ export function buildReport(job: Job, s: Settings, opts: { now?: Date; scans?: s
 ${company ? `<div class="co">${esc(company).replace(/ · /g, '<br>')}</div>` : ''}</div>
 ${sum.length ? `<h2>Order summary</h2><table class="sum">${sum.map((r) => `<tr><td>${esc(r.label)}</td><td class="v">${esc(r.value)}</td></tr>`).join('')}</table>` : ''}
 ${drawings ? `<h2>Plan</h2><div class="draw">${drawings.plan}</div><h2>3D view</h2><div class="draw">${drawings.iso}</div>` : ''}
+${drawings?.section ? `<h2>Edge detail</h2><div class="draw">${drawings.section}</div>` : ''}
 ${items.length ? `<h2>Details</h2>${itemHtml}` : '<p>Nothing added to this job yet.</p>'}
 ${job.notes ? `<h2>Notes</h2><div class="notes">${esc(job.notes)}</div>` : ''}
 ${scans.map((src, i) => `<div class="scan"><h2>Plans · page ${i + 1}</h2><img src="${src}" alt="Plan page ${i + 1}"></div>`).join('')}

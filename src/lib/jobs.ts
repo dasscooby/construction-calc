@@ -86,7 +86,7 @@ export const jobStore = {
   addItem(jobId: string, item: Omit<JobItem, 'id' | 'at' | 'label'> & { label?: string }) {
     update(jobId, (j) => ({ ...j, items: [...j.items, { ...item, label: item.label ?? '', id: newId(), at: Date.now() }] }));
   },
-  editItem(jobId: string, itemId: string, patch: Partial<Pick<JobItem, 'label' | 'raw'>>) {
+  editItem(jobId: string, itemId: string, patch: Partial<Pick<JobItem, 'label' | 'raw' | 'toolId' | 'title'>>) {
     update(jobId, (j) => ({ ...j, items: j.items.map((it) => (it.id === itemId ? { ...it, ...patch } : it)) }));
   },
   removeItem(jobId: string, itemId: string) {

@@ -64,6 +64,9 @@ export function defaultRaw(tool: Tool, overrides: RawValues = {}): RawValues {
       case 'stock':
         raw[f.key] = f.defaultSizes.map((size) => ({ size, qty: '' }));
         break;
+      case 'toggle':
+        raw[f.key] = f.default ? '1' : '';
+        break;
       case 'choice':
         raw[f.key] = f.default;
         break;
@@ -103,6 +106,7 @@ export function restoreRaw(tool: Tool, saved: unknown): RawValues {
     } else if (f.kind === 'stock' && Array.isArray(v) && v.every((r) => typeof r?.size === 'string' && typeof r?.qty === 'string')) {
       raw[f.key] = v as RawStockRow[];
     } else if (f.kind === 'choice' && f.options.some((o) => o.value === v)) raw[f.key] = v as string;
+    else if (f.kind === 'toggle' && (v === '1' || v === '')) raw[f.key] = v;
     else if (f.kind === 'multi' && typeof v === 'string' && v.split(',').every((x) => x === '' || f.options.some((o) => o.value === x))) {
       raw[f.key] = v;
     }
@@ -132,8 +136,9 @@ export type LooseValue =
   | [number, WallEnds][]
   | [number, number | null][];
 
-function normalize(f: Field, v: LooseValue | undefined): RawValue | undefined {
+function normalize(f: Field, v: LooseValue | boolean | undefined): RawValue | undefined {
   if (v === undefined) return undefined;
+  if (typeof v === 'boolean') return v ? '1' : '';
   if (typeof v === 'number') return f.kind === 'length' ? { ft: String(v), in: '' } : String(v);
   if (f.kind === 'areas' && Array.isArray(v) && v.length && Array.isArray(v[0])) {
     return (v as [number, number][]).map(([l, w]) => ({
@@ -153,7 +158,12 @@ function normalize(f: Field, v: LooseValue | undefined): RawValue | undefined {
   return v as RawValue;
 }
 
-export function runTool(tool: Tool, values: Record<string, LooseValue>): RunResult {
+/** Fields hidden behind a switch that's off. */
+export function isShown(f: Field, raw: RawValues): boolean {
+  return (!f.showIf || f.showIf.every((k) => raw[k] === '1')) && (!f.showIfAny || f.showIfAny.some((k) => raw[k] === '1'));
+}
+
+export function runTool(tool: Tool, values: Record<string, LooseValue | boolean>): RunResult {
   const raw: RawValues = { ...defaultRaw(tool) };
   for (const f of tool.fields) {
     const v = normalize(f, values[f.key]);
@@ -163,6 +173,10 @@ export function runTool(tool: Tool, values: Record<string, LooseValue>): RunResu
   const parsed: Record<string, Parsed> = {};
   for (const f of tool.fields) {
     const v = raw[f.key];
+    if (!isShown(f, raw)) {
+      parsed[f.key] = null; // switched off: treated as blank
+      continue;
+    }
     let value: Parsed = null;
     let blank = false;
     switch (f.kind) {
@@ -192,6 +206,9 @@ export function runTool(tool: Tool, values: Record<string, LooseValue>): RunResu
       }
       case 'choice':
         value = v as string;
+        break;
+      case 'toggle':
+        value = v === '1' ? 'on' : null;
         break;
       case 'multi': {
         const picked = (v as string).split(',').filter(Boolean);
@@ -258,7 +275,7 @@ export function runTool(tool: Tool, values: Record<string, LooseValue>): RunResu
         break;
       }
     }
-    if (blank && !f.optional) return { status: 'missing', message: `${f.kind === 'multi' ? 'Pick' : 'Enter'} ${f.label.toLowerCase()}` };
+    if (blank && !f.optional && f.kind !== 'toggle') return { status: 'missing', message: `${f.kind === 'multi' ? 'Pick' : 'Enter'} ${f.label.toLowerCase()}` };
     parsed[f.key] = value;
   }
 
@@ -277,6 +294,7 @@ export function runTool(tool: Tool, values: Record<string, LooseValue>): RunResu
     walls: (k) => (get(k) as WallRow[] | null) ?? [],
     stock: (k) => (get(k) as StockRow[] | null) ?? [],
     has: (k) => get(k) !== null,
+    on: (k) => get(k) === 'on',
   };
 
   const out: ComputeOutput = tool.compute(inputs);

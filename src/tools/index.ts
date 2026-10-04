@@ -17,3 +17,25 @@ export const ENGINEERING_GROUPS: ToolGroup[] = [{ tools: ENGINEERING_TOOLS }];
 
 /** Every tool, for looking one up by id (History, jobs). */
 export const ALL_TOOLS = [...CONCRETE_TOOLS, ...REBAR_TOOLS, ...SITE_TOOLS, ...LAYOUT_TOOLS, ...ENGINEERING_TOOLS];
+
+/**
+ * Saved calculations from tools that were replaced: Slab + Beams became Slab with its
+ * "Exterior footing" (and "Interior footings") switches on.
+ */
+export function migrateItem(toolId: string, raw: Record<string, unknown>): { toolId: string; raw: Record<string, unknown> } {
+  if (toolId !== 'slab-beams') return { toolId, raw };
+  const str = (v: unknown) => (typeof v === 'string' ? v : '');
+  const interior = str(raw.interior).trim();
+  return {
+    toolId: 'slab',
+    raw: {
+      ...raw,
+      footing: '1',
+      fWidth: raw.pWidth,
+      fDepth: raw.pDepth,
+      fPerim: str(raw.perim),
+      interior: interior ? '1' : '',
+      iLength: interior,
+    },
+  };
+}

@@ -9,12 +9,26 @@ import {
   ScrollView,
   Share,
   StyleSheet,
+  Switch,
   Text,
   TextInput,
   View,
 } from 'react-native';
 
-import { RawArea, RawBarRow, RawLength, RawStockRow, RawValue, RawValues, RawWallRow, RunResult, WALL_ENDS, defaultRaw, runTool } from '../tools/run';
+import {
+  isShown,
+  RawArea,
+  RawBarRow,
+  RawLength,
+  RawStockRow,
+  RawValue,
+  RawValues,
+  RawWallRow,
+  RunResult,
+  WALL_ENDS,
+  defaultRaw,
+  runTool,
+} from '../tools/run';
 import { feel } from '../lib/feel';
 import { history } from '../lib/history';
 import { jobStore, useJobs } from '../lib/jobs';
@@ -99,9 +113,11 @@ export default function ToolScreen({ tool, raw, onChange, onBack, active, jobLin
         keyboardShouldPersistTaps="handled"
         keyboardDismissMode="on-drag"
       >
-        {tool.fields.map((f) => (
-          <FieldInput key={f.key} field={f} value={raw[f.key]} onChange={(v) => set(f.key, v)} />
-        ))}
+        {tool.fields
+          .filter((f) => isShown(f, raw))
+          .map((f) => (
+            <FieldInput key={f.key} field={f} value={raw[f.key]} onChange={(v) => set(f.key, v)} />
+          ))}
         {hasInches && <Text style={styles.hint}>Inches can be 6, 6.5, or 6 1/2</Text>}
         <Results result={result} />
         <ShareButton text={text} onShare={save} />
@@ -195,7 +211,7 @@ function JobButtons({
       {linkedJob ? (
         <Pressable
           onPress={() => {
-            jobStore.editItem(linkedJob.id, jobLink!.itemId, { raw });
+            jobStore.editItem(linkedJob.id, jobLink!.itemId, { raw, toolId: tool.id, title: tool.title });
             feel.success();
             flash(`Saved to ${linkedJob.name} ✓`);
           }}
@@ -293,6 +309,37 @@ function Results({ result }: { result: RunResult }) {
 }
 
 function FieldInput({ field, value, onChange }: { field: Field; value: RawValue; onChange: (v: RawValue) => void }) {
+  if (field.kind === 'toggle') {
+    const on = value === '1';
+    return (
+      <Pressable
+        onPress={() => {
+          feel.tap();
+          onChange(on ? '' : '1');
+        }}
+        style={[styles.toggleRow, on && styles.toggleRowOn]}
+        accessibilityRole="switch"
+        accessibilityState={{ checked: on }}
+        accessibilityLabel={field.label}
+      >
+        <View style={styles.toggleText}>
+          <Text style={styles.label}>{field.label}</Text>
+          {field.help ? <Text style={styles.help}>{field.help}</Text> : null}
+        </View>
+        <Switch
+          value={on}
+          onValueChange={(v) => {
+            feel.tap();
+            onChange(v ? '1' : '');
+          }}
+          trackColor={{ true: colors.accent, false: colors.panel2 }}
+          thumbColor="#FFFFFF"
+          {...{ activeThumbColor: '#FFFFFF' }}
+          accessibilityLabel={field.label}
+        />
+      </Pressable>
+    );
+  }
   return (
     <View style={styles.field}>
       <Text style={styles.label}>
@@ -611,6 +658,18 @@ const getStyles = themed(() => ({
   content: { padding: 14, paddingBottom: 30 },
 
   field: { marginBottom: 16 },
+  toggleRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: colors.panel,
+    borderRadius: 14,
+    paddingVertical: 10,
+    paddingHorizontal: 14,
+    marginBottom: 16,
+    marginTop: 4,
+  },
+  toggleRowOn: { borderWidth: 1, borderColor: colors.accent },
+  toggleText: { flex: 1, marginRight: 10 },
   label: { fontSize: 17, fontWeight: '700', color: colors.text, marginBottom: 4 },
   optional: { fontSize: 13, fontWeight: '500', color: colors.subtext },
   help: { fontSize: 14, color: colors.subtext, marginBottom: 6 },
