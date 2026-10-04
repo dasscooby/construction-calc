@@ -5,6 +5,7 @@ import { feel } from '../lib/feel';
 import { dayLabel, timeLabel } from '../lib/history';
 import { Job, JobItem, jobStore, PriceLine, useJobs, yardsIn } from '../lib/jobs';
 import { deleteJobScans, deleteScanFile, scanPages, scannerAvailable, scansForReport } from '../lib/scanner';
+import { pickPlanFileWeb, PlanRead, PlanSlab, readPlan, slabToRaw } from '../lib/planReader';
 import { useSettings } from '../lib/settings';
 import { dec } from '../tools/format';
 import { liveActivitiesSupported } from '../widgets/bridge';
@@ -232,6 +233,8 @@ function JobDetail({ job, onBack, onOpenItem }: { job: Job; onBack: () => void; 
           ))
         )}
 
+        <PlanReader job={job} />
+
         {(canScan || (job.scans?.length ?? 0) > 0) && (
           <>
             <Text style={styles.section}>Plans</Text>
@@ -370,6 +373,114 @@ function PourCard({ job, orderYd, truckYd }: { job: Job; orderYd: number; truckY
   );
 }
 
+/**
+ * Read a plan: pick a PDF or picture (web) or one of the scanned pages (phone app), and the slabs
+ * on it come back ready to add to the job as Slab Layouts.
+ */
+function PlanReader({ job }: { job: Job }) {
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState('');
+  const [found, setFound] = useState<PlanRead | null>(null);
+  const [added, setAdded] = useState<number[]>([]);
+  const run = async (get: () => Promise<{ data: string; mediaType: string } | null>) => {
+    setError('');
+    const file = await get();
+    if (!file) return;
+    setBusy(true);
+    try {
+      const r = await readPlan(file.data, file.mediaType);
+      setFound(r);
+      setAdded([]);
+      if (!r.slabs.length && !r.notes.length) setError('Couldn’t find slab sizes on that page.');
+      else feel.success();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Couldn’t read the plan.');
+    }
+    setBusy(false);
+  };
+  const scans = job.scans ?? [];
+  const fromScan = (uri: string) => async () => {
+    const [url] = await scansForReport([uri]);
+    return url ? { data: url.slice(url.indexOf(',') + 1), mediaType: 'image/jpeg' } : null;
+  };
+  const summary = (s: PlanSlab) =>
+    [
+      `${s.sides.length} sides`,
+      s.thickness_in ? `${s.thickness_in}" slab` : '',
+      s.footing ? `${s.footing.width_in}" × ${s.footing.depth_in}" edge` : '',
+      s.rebar ? `#${s.rebar.size} at ${s.rebar.spacing_in}"` : '',
+      s.dowels ? `#${s.dowels.size} dowels` : '',
+    ]
+      .filter(Boolean)
+      .join(' · ');
+
+  return (
+    <>
+      <Text style={styles.section}>Read a plan</Text>
+      {Platform.OS === 'web' ? (
+        <Pressable onPress={() => void run(pickPlanFileWeb)} disabled={busy} style={styles.secondary} accessibilityRole="button">
+          <Text style={styles.secondaryText}>{busy ? 'Reading the plan…' : 'Pick a PDF or picture'}</Text>
+        </Pressable>
+      ) : scans.length ? (
+        <View style={styles.sendRow}>
+          {scans.slice(0, 4).map((uri, i) => (
+            <Pressable key={uri} onPress={() => void run(fromScan(uri))} disabled={busy} style={[styles.smallBtn, styles.readBtn]} accessibilityRole="button">
+              <Text style={styles.smallBtnText}>Page {i + 1}</Text>
+            </Pressable>
+          ))}
+        </View>
+      ) : (
+        <Text style={styles.help}>Scan the plans below, then come back here to read them.</Text>
+      )}
+      {busy && Platform.OS !== 'web' ? <Text style={styles.help}>Reading the plan…</Text> : null}
+      {error ? <Text style={styles.warn}>{error}</Text> : null}
+      {found && (found.slabs.length > 0 || found.notes.length > 0) ? (
+        <View style={styles.card}>
+          <Text style={styles.label}>On the plan</Text>
+          {found.slabs.map((s, i) => (
+            <View key={i} style={styles.line}>
+              <Text style={styles.cardTitle}>{s.name || `Slab ${i + 1}`}</Text>
+              <Text style={styles.cardSub}>{summary(s)}</Text>
+              <Pressable
+                onPress={() => {
+                  feel.tap();
+                  jobStore.addItem(job.id, { toolId: 'slab-layout', title: 'Slab Layout', label: s.name || `Slab ${i + 1}`, raw: slabToRaw(s) });
+                  setAdded((a) => [...a, i]);
+                }}
+                disabled={added.includes(i)}
+                style={[styles.smallBtn, styles.lineGap]}
+                accessibilityRole="button"
+              >
+                <Text style={styles.smallBtnText}>{added.includes(i) ? 'Added. Open it below to check.' : 'Add to job'}</Text>
+              </Pressable>
+            </View>
+          ))}
+          {found.notes.length ? (
+            <View style={styles.line}>
+              {found.notes.map((n, i) => (
+                <Text key={i} style={styles.cardSub}>
+                  • {n}
+                </Text>
+              ))}
+              <Pressable
+                onPress={() => {
+                  jobStore.edit(job.id, { notes: [job.notes.trim(), ...found.notes.map((n) => `• ${n}`)].filter(Boolean).join('\n') });
+                  setFound({ ...found, notes: [] });
+                }}
+                style={[styles.smallBtn, styles.lineGap]}
+                accessibilityRole="button"
+              >
+                <Text style={styles.smallBtnText}>Add to notes</Text>
+              </Pressable>
+            </View>
+          ) : null}
+          {found.unsure.length ? <Text style={styles.warn}>Check these: {found.unsure.join(' · ')}</Text> : null}
+        </View>
+      ) : null}
+    </>
+  );
+}
+
 /** Customer and price lines for the bid and the final bill. */
 function Prices({ job, figured }: { job: Job; figured: FiguredItem[] }) {
   const lines = job.lines ?? [];
@@ -481,6 +592,7 @@ const getStyles = themed(() => ({
   lineAmt: { flex: 1, minWidth: 0, textAlign: 'right', fontSize: 16, fontWeight: '700', color: colors.text },
   lineX: { paddingHorizontal: 10, paddingVertical: 8 },
   lineGap: { marginTop: 10 },
+  readBtn: { marginBottom: 12 },
   page: { flex: 1, backgroundColor: colors.bg },
   content: { padding: 14, paddingBottom: 40 },
   header: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 8, paddingVertical: 6, borderBottomWidth: 0.5, borderBottomColor: colors.border },
