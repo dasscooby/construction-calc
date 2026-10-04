@@ -61,6 +61,8 @@ export interface Side {
   kind: SideKind;
 }
 export const SIDE_KEYS = ['sideTop', 'sideRight', 'sideBottom', 'sideLeft'] as const;
+/** Corner k sits at the end of side k (clockwise from the top). */
+export const CORNER_KEYS = ['tr', 'br', 'bl', 'tl'] as const;
 
 /** The four sides of a one-piece slab, clockwise from the top (as the plan draws it). */
 export function sidesOf(r: { length: number; width: number }, kindOf: (key: string) => SideKind): Side[] {
@@ -96,6 +98,22 @@ export const slab: Tool = {
   fields: [
     { key: 'areas', label: 'Slab size', kind: 'areas', help: 'Add more areas for L-shaped slabs' },
     { key: 'thick', label: 'Thickness', kind: 'length', default: { in: '4' } },
+
+    { key: 'rounded', label: 'Rounded corners', kind: 'toggle', help: 'Radius corners (one-piece slab)' },
+    { key: 'radius', label: 'Radius', kind: 'length', default: { ft: '2' }, showIf: ['rounded'] },
+    {
+      key: 'roundCorners',
+      label: 'Which corners',
+      kind: 'multi',
+      options: [
+        { value: 'tr', label: 'Top right' },
+        { value: 'br', label: 'Bottom right' },
+        { value: 'bl', label: 'Bottom left' },
+        { value: 'tl', label: 'Top left' },
+      ],
+      default: ['tr', 'br', 'bl', 'tl'],
+      showIf: ['rounded'],
+    },
 
     { key: 'footing', label: 'Exterior footing', kind: 'toggle', help: 'Thickened edge around the outside (mono pour)' },
     { key: 'fWidth', label: 'Footing width', kind: 'length', default: { in: '12' }, showIf: ['footing'] },
@@ -154,21 +172,51 @@ export const slab: Tool = {
   ],
   compute: (inp) => {
     const rects = inp.areas('areas');
-    const area = rects.reduce((sum, r) => sum + r.length * r.width, 0);
     const t = inp.len('thick');
     if (t <= 0) return { error: 'Thickness must be more than 0.' };
+    const one = rects.length === 1 ? rects[0] : null;
+    // Side lengths clockwise from the top (one-piece slab): top and bottom run the length.
+    const lens = one ? [one.length, one.width, one.length, one.width] : [];
+
+    // ---- Rounded corners (one-piece slab). Corner k is at the end of side k: top right, bottom right, bottom left, top left.
+    const radii = [0, 0, 0, 0];
+    if (inp.on('rounded')) {
+      if (!one) return { error: 'Rounded corners work on a one-piece slab. Use one area.' };
+      const r = inp.len('radius');
+      if (r <= 0) return { error: 'The radius must be more than 0.' };
+      if (r > Math.min(one.length, one.width) / 2 + 1e-9) return { error: `The radius can’t be more than half the slab’s width (${ftIn(Math.min(one.length, one.width) / 2)}).` };
+      for (const c of inp.picks('roundCorners')) radii[CORNER_KEYS.indexOf(c as (typeof CORNER_KEYS)[number])] = r;
+    }
+    const rounded = radii.filter((r) => r > 0);
+    // Each rounded corner trims a square minus a quarter circle.
+    const area = rects.reduce((sum, r) => sum + r.length * r.width, 0) - rounded.reduce((a, r) => a + r * r * (1 - Math.PI / 4), 0);
     const rows: ResultRow[] = [{ label: 'Slab area', value: sqFt(area) }];
     const warnings: string[] = [];
     const slabCuFt = area * t;
     let totalCuFt = slabCuFt;
+    if (rounded.length) {
+      rows.push({
+        label: 'Rounded corners',
+        value: `${rounded.length} × ${ftIn(rounded[0])} radius`,
+        note: `${feet(rounded.reduce((a, r) => a + (Math.PI / 2) * r, 0))} of curved edge (bender board)`,
+      });
+    }
+    /** Straight part of side i, between the curves at its two ends. */
+    const straight = (i: number) => lens[i] - radii[(i + 3) % 4] - radii[i];
+    const arc = (k: number) => (Math.PI / 2) * radii[k];
 
     // ---- Sides: formed, or poured against a house (with or without dowels) ----
     const edges = inp.on('edges');
     let sides: Side[] | null = null;
     if (edges) {
-      if (rects.length !== 1) return { error: 'Marking sides works on a one-piece slab. Use one area.' };
-      sides = sidesOf(rects[0], (k) => inp.choice(k) as SideKind);
-      const formed = sides.filter((s) => s.kind === 'form').reduce((a, s) => a + s.len, 0);
+      if (!one) return { error: 'Marking sides works on a one-piece slab. Use one area.' };
+      sides = sidesOf(one, (k) => inp.choice(k) as SideKind);
+      for (let k = 0; k < 4; k++) {
+        if (radii[k] > 0 && (sides[k].kind !== 'form' || sides[(k + 1) % 4].kind !== 'form')) {
+          return { error: 'A corner next to the house can’t be rounded. Pick only corners between two formed sides.' };
+        }
+      }
+      const formed = sides.reduce((a, s, i) => a + (s.kind === 'form' ? straight(i) : 0), 0) + [0, 1, 2, 3].reduce((a, k) => a + arc(k), 0);
       const house = sides.filter((s) => s.kind !== 'form');
       rows.push({
         label: 'Forms',
@@ -190,32 +238,42 @@ export const slab: Tool = {
       d = inp.len('fDepth');
       if (w <= 0 || d <= 0) return { error: 'Footing width and depth must be more than 0.' };
       if (d <= t) warnings.push('The footing isn’t deeper than the slab. Measure footing depth from the top of the slab.');
-      // Footing length along the edge, and how much to take off for corners where two runs overlap.
+      if (rounded.some((r) => r < w - 1e-9)) return { error: 'Make the corner radius at least the footing width so the footing can follow the curve.' };
+      // Footing along its centerline, for a footing this wide.
       let edgeFt: number;
-      let overlaps: number;
-      if (sides) {
-        edgeFt = sides.reduce((a, s, i) => a + (footOn(i) ? s.len : 0), 0);
-        overlaps = sides.filter((_, i) => footOn(i) && footOn((i + 1) % 4)).length;
-        corners = overlaps;
+      let centerlineFor: (width: number) => number;
+      if (one && !inp.has('fPerim')) {
+        // Straight runs where there's a footing; square corners where two runs meet overlap by one width;
+        // rounded corners follow the curve (centerline radius = r − width/2).
+        const both = (k: number) => footOn(k) && footOn((k + 1) % 4);
+        edgeFt = [0, 1, 2, 3].reduce((a, i) => a + (footOn(i) ? straight(i) : 0) + (both(i) ? arc(i) : 0), 0);
+        centerlineFor = (width) =>
+          [0, 1, 2, 3].reduce(
+            (a, k) =>
+              a +
+              (footOn(k) ? straight(k) : 0) -
+              (both(k) && radii[k] === 0 ? width : 0) +
+              (both(k) && radii[k] > 0 ? (Math.PI / 2) * (radii[k] - width / 2) : 0),
+            0,
+          );
+        corners = [0, 1, 2, 3].filter((k) => both(k) && radii[k] === 0).length;
       } else {
         if (inp.has('fPerim')) edgeFt = inp.num('fPerim');
-        else if (rects.length === 1) edgeFt = 2 * (rects[0].length + rects[0].width);
         else return { error: 'Enter the footing length (around the outside). It can’t be figured from several areas.' };
         // Any closed slab has 4 more outside corners than inside ones.
-        overlaps = 4;
+        centerlineFor = (width) => edgeFt - 4 * width;
         corners = inp.has('corners') ? inp.count('corners') : 4;
       }
       hasFooting = edgeFt > 0;
       if (!hasFooting) {
         warnings.push('No side has a footing: every side is against the house. Turn on “Footing along the house too” if it needs one.');
       } else {
-        // Centerline = edge length − one footing width per overlapping corner (a closed rectangle: perimeter − 4 × width).
-        centerline = edgeFt - overlaps * w;
+        centerline = centerlineFor(w);
         if (centerline <= 0) return { error: 'The footing is too wide for that slab.' };
         const planned = centerline * w * Math.max(0, d - t);
         const w2 = w + inp.num('dugW') / 12;
         const d2 = d + inp.num('dugD') / 12;
-        const dug = Math.max(0, edgeFt - overlaps * w2) * w2 * Math.max(0, d2 - t);
+        const dug = Math.max(0, centerlineFor(w2)) * w2 * Math.max(0, d2 - t);
         rows.push({ label: 'Slab', value: cuYd(slabCuFt / CUFT_PER_CUYD) });
         rows.push({
           label: 'Exterior footing',
@@ -315,7 +373,9 @@ export const slab: Tool = {
         rows.push({
           label: 'Footing bars',
           value: feet(r.totalFt),
-          note: `${lines} #${bar.size} bars along the footing · ${commas(r.cornerBars)} corner L-bars ${ftIn(r.cornerBarFt)} (${inches(lapFt * 12)} legs) · ${commas(r.laps)} laps`,
+          note: `${lines} #${bar.size} bars along the footing · ${commas(r.cornerBars)} corner L-bars ${ftIn(r.cornerBarFt)} (${inches(lapFt * 12)} legs)${
+            rounded.length ? ` · bent around the ${rounded.length} rounded ${rounded.length === 1 ? 'corner' : 'corners'}` : ''
+          } · ${commas(r.laps)} laps`,
         });
         addSticks(bar, r.sticks);
         totalLb += r.lb;

@@ -152,6 +152,42 @@ describe('slab sides: against the house, dowels', () => {
   });
 });
 
+describe('rounded corners', () => {
+  // 40 x 30 with all four corners at a 2' radius
+  const round = { areas: [[40, 30]] as [number, number][], rounded: true, radius: 2 };
+
+  test('area loses a square minus a quarter circle at each corner', () => {
+    // 1200 − 4 × 4 × (1 − π/4) = 1196.57
+    const r = runTool(tool('slab'), round);
+    expect(rowValue(r, 'Slab area')).toBe('1,196.6 sq ft');
+    expect(rowValue(r, 'Rounded corners')).toBe(`4 × 2' 0" radius`);
+    if (r.status === 'ok') expect(r.result.rows.find((x) => x.label === 'Rounded corners')!.note).toBe('12.6 ft of curved edge (bender board)');
+  });
+
+  test('the footing follows the curve along its centerline', () => {
+    // straight 36 + 26 + 36 + 26 = 124, arcs 4 × π/2 × (2 − 0.5) = 9.42 → 133.42 ft × 1 × 5/3 = 222.4 cu ft
+    const r = runTool(tool('slab'), { ...round, footing: true, fDepth: 2, footBars: true });
+    expect(rowValue(r, 'Exterior footing')).toBe('8.24 cu yd');
+    if (r.status !== 'ok') throw new Error(r.status);
+    expect(r.result.rows.find((x) => x.label === 'Exterior footing')!.note).toContain('136.6 ft of edge');
+    const bars = r.result.rows.find((x) => x.label === 'Footing bars')!.note!;
+    expect(bars).toContain('0 corner L-bars');
+    expect(bars).toContain('bent around the 4 rounded corners');
+  });
+
+  test('only some corners: forms count the curves', () => {
+    const r = runTool(tool('slab'), { ...round, roundCorners: 'tr,br', edges: true });
+    // straight 38 + 26 + 38 + 30 = 132, arcs 2 × π = 6.28 → 138.3 ft
+    expect(rowValue(r, 'Forms')).toBe('138.3 ft');
+  });
+
+  test('radius smaller than the footing, or next to the house, is refused', () => {
+    expect(runTool(tool('slab'), { ...round, radius: 0.5, footing: true }).status).toBe('invalid');
+    expect(runTool(tool('slab'), { ...round, edges: true, sideTop: 'house' }).status).toBe('invalid');
+    expect(runTool(tool('slab'), { ...round, areas: [[40, 30], [10, 10]] }).status).toBe('invalid');
+  });
+});
+
 describe('old Slab + Beams calculations', () => {
   test('open as a Slab with the footing switched on', () => {
     const m = migrateItem('slab-beams', { areas: [], pWidth: { ft: '', in: '12' }, pDepth: { ft: '2', in: '' }, perim: '', interior: '60' });

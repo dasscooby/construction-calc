@@ -209,7 +209,11 @@ export interface SlabPlanExtras {
   sides?: SlabSide[];
   /** Dowel spacing (ft) on sides marked House + dowels */
   dowelFt?: number;
+  /** Corner radii (ft), corner k at the end of side k: top right, bottom right, bottom left, top left */
+  radii?: number[];
 }
+
+type Box = { minX: number; minY: number; maxX: number; maxY: number };
 
 /** Bar positions between two edges: one at each end, none farther apart than the spacing. */
 function barLines(from: number, to: number, spacing: number): number[] {
@@ -222,7 +226,7 @@ function barLines(from: number, to: number, spacing: number): number[] {
  * at(i, along, inset) is a point `along` ft from the side's start and `inset` ft in from the edge
  * (negative = outside). len(i) is the side's length.
  */
-function rectSides(b: { minX: number; minY: number; maxX: number; maxY: number }) {
+function rectSides(b: Box) {
   const starts = [
     { x: b.minX, y: b.minY, dx: 1, dy: 0 },
     { x: b.maxX, y: b.minY, dx: 0, dy: 1 },
@@ -240,15 +244,73 @@ function rectSides(b: { minX: number; minY: number; maxX: number; maxY: number }
   };
 }
 
-/** For a run inset `inset` from side i: where it starts and stops so it meets the runs on the neighbouring sides. */
-function runEnds(sides: SlabSide[] | undefined, i: number, len: number, inset: number): [number, number] {
-  if (!sides) return [inset, len - inset];
-  const prev = sides[(i + 3) % 4].footing;
-  const next = sides[(i + 1) % 4].footing;
-  return [prev ? inset : 0, next ? len - inset : len];
+const OUT = [
+  { x: 0, y: -1 },
+  { x: 1, y: 0 },
+  { x: 0, y: 1 },
+  { x: -1, y: 0 },
+];
+
+/**
+ * A rectangle with rounded corners, moved in by `inset`. arcs[k] are the points around corner k
+ * (one point for a square corner). The outline is all the arcs in order; the edge from the last
+ * point of arc k to the first point of arc k+1 is the straight part of side k+1.
+ */
+export function roundedRect(b: Box, radii: number[], inset = 0, steps = 10): { points: Pt[]; arcs: Pt[][] } {
+  const C = [
+    { x: b.maxX, y: b.minY },
+    { x: b.maxX, y: b.maxY },
+    { x: b.minX, y: b.maxY },
+    { x: b.minX, y: b.minY },
+  ];
+  const arcs = C.map((c, k) => {
+    const o1 = OUT[k];
+    const o2 = OUT[(k + 1) % 4];
+    const r = radii[k] ?? 0;
+    if (r <= 0) return [{ x: c.x - inset * (o1.x + o2.x), y: c.y - inset * (o1.y + o2.y) }];
+    const center = { x: c.x - r * (o1.x + o2.x), y: c.y - r * (o1.y + o2.y) };
+    const rr = Math.max(0, r - inset);
+    const a1 = Math.atan2(o1.y, o1.x);
+    return Array.from({ length: steps + 1 }, (_, j) => {
+      const a = a1 + ((Math.PI / 2) * j) / steps;
+      return { x: center.x + rr * Math.cos(a), y: center.y + rr * Math.sin(a) };
+    });
+  });
+  return { points: arcs.flat(), arcs };
 }
 
-/** Blueprint plan of a rectangular slab: footing line and bars, rebar grid, the house and dowels. */
+/**
+ * Lines `inset` in from the edge along the sides that have a footing, following rounded corners.
+ * Where a footing side meets a side without one (the house), the line runs out to the edge.
+ */
+function footingRuns(b: Box, radii: number[], inset: number, footingOn: (i: number) => boolean): Pt[][] {
+  const R = rectSides(b);
+  const { arcs } = roundedRect(b, radii, inset);
+  const runs: Pt[][] = [];
+  for (let i = 0; i < 4; i++) {
+    if (!footingOn(i)) continue;
+    const prev = (i + 3) % 4;
+    const start = footingOn(prev) ? arcs[prev][arcs[prev].length - 1] : R.at(i, 0, inset);
+    const end = footingOn((i + 1) % 4) ? arcs[i][0] : R.at(i, R.len(i), inset);
+    runs.push([start, end]);
+    if (footingOn((i + 1) % 4) && arcs[i].length > 1) runs.push(arcs[i]);
+  }
+  return runs;
+}
+
+/** Edge labels for a rounded outline: the full side length on each straight part, nothing on the curves. */
+export function roundedLabels(b: Box, radii: number[]): string[] {
+  const { arcs } = roundedRect(b, radii);
+  const sideLen = [b.maxX - b.minX, b.maxY - b.minY, b.maxX - b.minX, b.maxY - b.minY];
+  const labels: string[] = [];
+  arcs.forEach((arc, k) => {
+    for (let j = 0; j < arc.length - 1; j++) labels.push('');
+    labels.push(ftIn(sideLen[(k + 1) % 4]));
+  });
+  return labels;
+}
+
+/** Blueprint plan of a slab: footing line and bars, rebar grid, rounded corners, the house and dowels. */
 export function slabPlanSvg(p: PlanInput & SlabPlanExtras): string {
   const base = planSvg(p);
   const b = bounds(p.outer);
@@ -261,39 +323,52 @@ export function slabPlanSvg(p: PlanInput & SlabPlanExtras): string {
   const X = (x: number) => n(ox + (x - b.minX) * s);
   const Y = (y: number) => n(pad + (y - b.minY) * s);
   const seg = (a: Pt, c: Pt, style: string) => `<line x1="${X(a.x)}" y1="${Y(a.y)}" x2="${X(c.x)}" y2="${Y(c.y)}" ${style}/>`;
+  const pl = (pts: Pt[], style: string) => `<polyline points="${pts.map((q) => `${X(q.x)},${Y(q.y)}`).join(' ')}" fill="none" ${style}/>`;
   const R = rectSides(b);
   const sides = p.sides;
+  const radii = p.radii ?? [0, 0, 0, 0];
   const footingOn = (i: number) => (sides ? sides[i].footing : true);
   const cover = 3 / 12;
   const out: string[] = [];
 
-  // Rebar grid.
+  // Rebar grid, trimmed to the slab's outline (rounded corners).
   if (p.rebarFt && p.rebarFt > 0) {
     const g: string[] = [];
     for (const x of barLines(b.minX + cover, b.maxX - cover, p.rebarFt)) g.push(seg({ x, y: b.minY + cover }, { x, y: b.maxY - cover }, ''));
     for (const y of barLines(b.minY + cover, b.maxY - cover, p.rebarFt)) g.push(seg({ x: b.minX + cover, y }, { x: b.maxX - cover, y }, ''));
-    out.push(`<g stroke="#ffb347" stroke-width="1" opacity="0.8">${g.join('')}</g>`);
+    const clip = roundedRect(b, radii, cover).points.map((q) => `${X(q.x)},${Y(q.y)}`).join(' ');
+    out.push(`<defs><clipPath id="slabclip"><polygon points="${clip}"/></clipPath></defs>`);
+    out.push(`<g stroke="#ffb347" stroke-width="1" opacity="0.8" clip-path="url(#slabclip)">${g.join('')}</g>`);
   }
 
-  // Footing: dashed inside edge and the bars, on the sides that have it.
+  // Footing: dashed inside edge and the bars, on the sides that have it, around the curves.
   if (p.footingFt && p.footingFt > 0) {
     const f = p.footingFt;
+    for (const run of footingRuns(b, radii, f, footingOn)) out.push(pl(run, 'stroke="#ffffff" stroke-width="1.5" stroke-dasharray="8 6"'));
     const nBars = Math.min(p.footingBars ?? 0, 3);
-    for (let i = 0; i < 4; i++) {
-      if (!footingOn(i)) continue;
-      const [a0, a1] = runEnds(sides, i, R.len(i), f);
-      out.push(seg(R.at(i, a0, f), R.at(i, a1, f), 'stroke="#ffffff" stroke-width="1.5" stroke-dasharray="8 6"'));
-      for (let k = 0; k < nBars; k++) {
-        const inset = (f * (k + 1)) / (nBars + 1);
-        const [b0, b1] = runEnds(sides, i, R.len(i), inset);
-        out.push(seg(R.at(i, b0, inset), R.at(i, b1, inset), 'stroke="#ff7a00" stroke-width="2"'));
-      }
+    for (let k = 0; k < nBars; k++) {
+      const inset = (f * (k + 1)) / (nBars + 1);
+      for (const run of footingRuns(b, radii, inset, footingOn)) out.push(pl(run, 'stroke="#ff7a00" stroke-width="2" stroke-linejoin="round"'));
     }
     const first = [0, 2].find(footingOn) ?? [1, 3].find(footingOn);
     if (first !== undefined) {
-      const at = first % 2 === 0 ? R.at(first, first === 0 ? f + 1 : R.len(first) - f - 9, f + (first === 2 ? 1.5 : 0)) : R.at(first, R.len(first) / 2, f + 1);
+      const along = first === 0 ? Math.max(f, radii[3]) + 1 : R.len(first) - Math.max(f, radii[2]) - 9;
+      const at = first % 2 === 0 ? R.at(first, along, f + (first === 2 ? 1.5 : 0)) : R.at(first, R.len(first) / 2, f + 1);
       out.push(`<text x="${n(Number(X(at.x)) + 6)}" y="${n(Number(Y(at.y)) + 16)}" font-family="Helvetica, Arial, sans-serif" font-size="12" fill="#ffffff">${esc(`${n(f * 12)}" footing`)}</text>`);
     }
+  }
+
+  // Radius callout on the first rounded corner.
+  const rk = radii.findIndex((r) => r > 0);
+  if (rk >= 0) {
+    const arc = roundedRect(b, radii, 0).arcs[rk];
+    const mid = arc[Math.floor(arc.length / 2)];
+    const o = { x: OUT[rk].x + OUT[(rk + 1) % 4].x, y: OUT[rk].y + OUT[(rk + 1) % 4].y };
+    const tx = Number(X(mid.x)) + o.x * 14;
+    const ty = Number(Y(mid.y)) + o.y * 14 + 4;
+    out.push(
+      `<text x="${n(tx)}" y="${n(ty)}" text-anchor="${o.x < 0 ? 'end' : 'start'}" font-family="Helvetica, Arial, sans-serif" font-size="13" font-weight="700" fill="#ffffff">${esc(`R ${ftIn(radii[rk])}`)}</text>`,
+    );
   }
 
   // The house: a hatched wall outside each house side, and the dowels across the joint.
@@ -305,7 +380,6 @@ export function slabPlanSvg(p: PlanInput & SlabPlanExtras): string {
       const L = R.len(i);
       const corners = [R.at(i, 0, -near), R.at(i, L, -near), R.at(i, L, -far), R.at(i, 0, -far)];
       out.push(`<polygon points="${corners.map((q) => `${X(q.x)},${Y(q.y)}`).join(' ')}" fill="rgba(255,255,255,0.18)" stroke="#ffffff" stroke-width="1.5"/>`);
-      // Hatching.
       const h: string[] = [];
       const step = 14 / s;
       for (let a = step; a < L; a += step) h.push(seg(R.at(i, a, -near), R.at(i, Math.min(L, a + (far - near)), -far), ''));
@@ -346,25 +420,36 @@ export interface IsoSlabInput {
   sides?: SlabSide[];
   /** Dowel spacing (ft) */
   dowelFt?: number;
+  /** Corner radii (ft), corner k at the end of side k */
+  radii?: number[];
 }
 
 type P3 = [number, number, number];
 
-/** A slab in 3D: see-through top with the rebar, the thickened edge, the house and dowels. */
+/** A slab in 3D: see-through top with the rebar, the thickened edge, rounded corners, the house and dowels. */
 export function isoSlabSvg(p: IsoSlabInput): string {
   const depth = p.footing ? Math.max(p.footing.depth, p.thick) : p.thick;
   const houseH = depth + Math.max(depth * 1.6, 1.5);
   const proj = ([x, y, z]: P3) => ({ x: (x - y) * C30, y: (x + y) * S30 - z });
   const b0 = bounds(p.outer);
   const sides = p.sides;
+  const radii = p.radii ?? [0, 0, 0, 0];
   const R = rectSides(b0);
   const footingOn = (i: number) => !!p.footing && (sides ? sides[i].footing : true);
   const HW = 1.2; // house wall thickness drawn, ft
   const houseAt = (i: number) => !!sides && sides[i].kind !== 'form';
-  // Fit everything, house walls included.
-  const fit: P3[] = p.outer.flatMap((q): P3[] => [
+  const outline = roundedRect(b0, radii);
+  // Which side (or corner) each outline edge belongs to, for the full-depth faces.
+  const edgeFooting: boolean[] = [];
+  outline.arcs.forEach((arc, k) => {
+    const both = footingOn(k) && footingOn((k + 1) % 4);
+    for (let j = 0; j < arc.length - 1; j++) edgeFooting.push(both);
+    edgeFooting.push(footingOn((k + 1) % 4));
+  });
+  const anyHouse = [0, 1, 2, 3].some(houseAt);
+  const fit: P3[] = outline.points.flatMap((q): P3[] => [
     [q.x, q.y, 0],
-    [q.x, q.y, houseAt(0) || houseAt(1) || houseAt(2) || houseAt(3) ? houseH : depth],
+    [q.x, q.y, anyHouse ? houseH : depth],
     [q.x - HW, q.y - HW, 0],
     [q.x + HW, q.y + HW, 0],
   ]);
@@ -380,12 +465,12 @@ export function isoSlabSvg(p: IsoSlabInput): string {
   const poly = (pts: P3[], fill: string, extra = '') =>
     `<polygon points="${pts.map(([x, y, z]) => pt(x, y, z)).join(' ')}" fill="${fill}" stroke="#5f5b55" stroke-width="0.8" stroke-linejoin="round"${extra}/>`;
   const line = (a: P3, c: P3) => `<polyline points="${pt(...a)} ${pt(...c)}"/>`;
+  const run3 = (pts: Pt[], z: number) => `<polyline points="${pts.map((q) => pt(q.x, q.y, z)).join(' ')}"/>`;
   const out: string[] = [];
 
-  // A house wall outside side i: the face toward the slab plus the top (far sides), or the outer face (near sides).
   const houseWall = (i: number, nearSide: boolean) => {
     const L = R.len(i);
-    const a = R.at(i, -0.0, 0);
+    const a = R.at(i, 0, 0);
     const c = R.at(i, L, 0);
     const a2 = R.at(i, 0, -HW);
     const c2 = R.at(i, L, -HW);
@@ -399,38 +484,44 @@ export function isoSlabSvg(p: IsoSlabInput): string {
       out.push(`<text x="${n(pad + (q.x - pb.minX) * s)}" y="${n(pad + (q.y - pb.minY) * s - 6)}" text-anchor="middle" font-family="Helvetica, Arial, sans-serif" font-size="13" font-weight="700" fill="#4a5560">HOUSE</text>`);
     }
   };
-  // Far sides (top, left) sit behind the slab; near sides (right, bottom) in front of it.
   const FAR = [0, 3];
   const NEAR = [1, 2];
   for (const i of FAR) if (houseAt(i)) houseWall(i, false);
 
-  // The footing under the slab (seen through the top): inside faces of the far sides.
+  // The footing under the slab (seen through the top): its inside face along the far sides.
   if (p.footing) {
     const f = p.footing.width;
     const zTop = depth - p.thick;
-    for (const i of FAR) {
-      if (!footingOn(i)) continue;
-      const [a0, a1] = runEnds(sides, i, R.len(i), f);
-      const a = R.at(i, a0, f);
-      const c = R.at(i, a1, f);
-      out.push(poly([[a.x, a.y, 0], [c.x, c.y, 0], [c.x, c.y, zTop], [a.x, a.y, zTop]], i === 0 ? '#a9a49b' : '#9b968d'));
+    const runs = footingRuns(b0, radii, f, footingOn);
+    for (const run of runs) {
+      for (let j = 0; j < run.length - 1; j++) {
+        const a = run[j];
+        const c = run[j + 1];
+        // The inside face points to the right of the walk (−dy, dx); draw it if that faces the viewer (+x, +y).
+        if (c.x - a.x - (c.y - a.y) > 1e-9) {
+          out.push(poly([[a.x, a.y, 0], [c.x, c.y, 0], [c.x, c.y, zTop], [a.x, a.y, zTop]], '#a39e95'));
+        }
+      }
     }
   }
   // Outside faces toward the viewer, full depth where there's a footing, slab thickness elsewhere.
-  for (let i = 0; i < 4; i++) {
-    const a = p.outer[i];
-    const c = p.outer[(i + 1) % 4];
+  const pts = outline.points;
+  for (let i = 0; i < pts.length; i++) {
+    const a = pts[i];
+    const c = pts[(i + 1) % pts.length];
     const nx = c.y - a.y;
     const ny = -(c.x - a.x);
     if (nx + ny <= 1e-9) continue;
-    const bottom = footingOn(i) ? 0 : depth - p.thick;
-    out.push(poly([[a.x, a.y, bottom], [c.x, c.y, bottom], [c.x, c.y, depth], [a.x, a.y, depth]], nx >= ny ? '#b9b5ad' : '#8f8b84'));
-    if (footingOn(i)) out.push(`<polyline points="${pt(a.x, a.y, depth - p.thick)} ${pt(c.x, c.y, depth - p.thick)}" fill="none" stroke="#6b675f" stroke-width="0.8" stroke-dasharray="5 4"/>`);
+    const foot = !!p.footing && edgeFooting[i];
+    const bottom = foot ? 0 : depth - p.thick;
+    out.push(poly([[a.x, a.y, bottom], [c.x, c.y, bottom], [c.x, c.y, depth], [a.x, a.y, depth]], nx >= ny ? '#b9b5ad' : '#8f8b84', ' stroke-opacity="0.6"'));
+    if (foot) out.push(`<polyline points="${pt(a.x, a.y, depth - p.thick)} ${pt(c.x, c.y, depth - p.thick)}" fill="none" stroke="#6b675f" stroke-width="0.8" stroke-dasharray="5 4"/>`);
   }
   // Top of the slab, a little see-through.
-  out.push(poly(p.outer.map((q): P3 => [q.x, q.y, depth]), '#d9d6cf', ` fill-opacity="${p.footing ? 0.55 : 0.8}"`));
+  const topPts = pts.map((q) => pt(q.x, q.y, depth)).join(' ');
+  out.push(`<polygon points="${topPts}" fill="#d9d6cf" fill-opacity="${p.footing ? 0.55 : 0.8}" stroke="#5f5b55" stroke-width="0.8" stroke-linejoin="round"/>`);
 
-  // Rebar grid at mid-slab, with legs bent down on the footing sides.
+  // Rebar grid at mid-slab (trimmed to the outline), with legs bent down on the footing sides.
   const zBar = depth - p.thick / 2;
   if (p.rebarFt && p.rebarFt > 0) {
     const c = 3 / 12;
@@ -439,30 +530,29 @@ export function isoSlabSvg(p: IsoSlabInput): string {
     const ys = barLines(b0.minY + c, b0.maxY - c, p.rebarFt);
     for (const x of xs) g.push(line([x, b0.minY + c, zBar], [x, b0.maxY - c, zBar]));
     for (const y of ys) g.push(line([b0.minX + c, y, zBar], [b0.maxX - c, y, zBar]));
+    const clip = roundedRect(b0, radii, c).points.map((q) => pt(q.x, q.y, zBar)).join(' ');
+    out.push(`<defs><clipPath id="isoclip"><polygon points="${clip}"/></clipPath></defs>`);
+    out.push(`<g fill="none" stroke="#b5501c" stroke-width="1.1" opacity="0.85" clip-path="url(#isoclip)">${g.join('')}</g>`);
     if (p.bentLegsTo !== undefined) {
       const to = p.bentLegsTo;
+      // No legs where a rounded corner has curved the edge away.
+      const clear = (side: number, along: number) => along >= radii[(side + 3) % 4] - 1e-9 && along <= R.len(side) - radii[side] + 1e-9;
+      const legs: string[] = [];
       for (const x of xs) {
-        if (footingOn(0)) g.push(line([x, b0.minY + c, zBar], [x, b0.minY + c, to]));
-        if (footingOn(2)) g.push(line([x, b0.maxY - c, zBar], [x, b0.maxY - c, to]));
+        if (footingOn(0) && clear(0, x - b0.minX)) legs.push(line([x, b0.minY + c, zBar], [x, b0.minY + c, to]));
+        if (footingOn(2) && clear(2, b0.maxX - x)) legs.push(line([x, b0.maxY - c, zBar], [x, b0.maxY - c, to]));
       }
       for (const y of ys) {
-        if (footingOn(3)) g.push(line([b0.minX + c, y, zBar], [b0.minX + c, y, to]));
-        if (footingOn(1)) g.push(line([b0.maxX - c, y, zBar], [b0.maxX - c, y, to]));
+        if (footingOn(3) && clear(3, b0.maxY - y)) legs.push(line([b0.minX + c, y, zBar], [b0.minX + c, y, to]));
+        if (footingOn(1) && clear(1, y - b0.minY)) legs.push(line([b0.maxX - c, y, zBar], [b0.maxX - c, y, to]));
       }
+      out.push(`<g fill="none" stroke="#b5501c" stroke-width="1.1" opacity="0.85">${legs.join('')}</g>`);
     }
-    out.push(`<g fill="none" stroke="#b5501c" stroke-width="1.1" opacity="0.85">${g.join('')}</g>`);
   }
-  // Footing bars along the footing sides.
+  // Footing bars along the footing, around the curves.
   for (const bar of p.footingBars ?? []) {
-    const g: string[] = [];
-    for (let i = 0; i < 4; i++) {
-      if (!footingOn(i)) continue;
-      const [a0, a1] = runEnds(sides, i, R.len(i), bar.inset);
-      const a = R.at(i, a0, bar.inset);
-      const c = R.at(i, a1, bar.inset);
-      g.push(line([a.x, a.y, bar.z], [c.x, c.y, bar.z]));
-    }
-    out.push(`<g fill="none" stroke="#8a2e00" stroke-width="2.2" stroke-linecap="round">${g.join('')}</g>`);
+    const g = footingRuns(b0, radii, bar.inset, footingOn).map((run) => run3(run, bar.z));
+    out.push(`<g fill="none" stroke="#8a2e00" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">${g.join('')}</g>`);
   }
   // Dowels: from inside the house wall into the slab.
   if (sides && p.dowelFt && p.dowelFt > 0) {

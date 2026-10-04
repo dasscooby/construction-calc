@@ -8,7 +8,7 @@ import { commas, cuYd, dec, money } from '../tools/format';
 import { isShown, parseLength, parseNumber, RawArea, RawValues, RawWallRow, restoreRaw, runTool, RunResult } from '../tools/run';
 import { fieldText } from '../tools/share';
 import type { ResultRow, Tool } from '../tools/types';
-import { houseSectionSvg, isoSlabSvg, isoSvg, planSvg, sectionSvg, sideLabels, SlabSide, slabPlanSvg } from './drawings';
+import { houseSectionSvg, isoSlabSvg, isoSvg, planSvg, roundedLabels, roundedRect, sectionSvg, sideLabels, SlabSide, slabPlanSvg } from './drawings';
 import { insetOutline, Pt, wallOutline } from './geometry';
 
 export interface FiguredItem {
@@ -140,15 +140,16 @@ export function slabDrawings(raw: RawValues, title: string, date: string): Drawi
   const L = parseLength(filled[0].length) ?? 0;
   const Wd = parseLength(filled[0].width) ?? 0;
   if (!(L > 0 && Wd > 0)) return null;
-  const outer: Pt[] = [
-    { x: 0, y: 0 },
-    { x: L, y: 0 },
-    { x: L, y: Wd },
-    { x: 0, y: Wd },
-  ];
+  const on = (k: string) => raw[k] === '1';
+  // Rounded corners: corner k at the end of side k (top right, bottom right, bottom left, top left).
+  const r = on('rounded') ? parseLength(raw.radius as never) ?? 0 : 0;
+  const picked = typeof raw.roundCorners === 'string' ? raw.roundCorners.split(',') : [];
+  const radii = ['tr', 'br', 'bl', 'tl'].map((c) => (r > 0 && r <= Math.min(L, Wd) / 2 && picked.includes(c) ? r : 0));
+  const box = { minX: 0, minY: 0, maxX: L, maxY: Wd };
+  const outer: Pt[] = roundedRect(box, radii).points;
+  const labels = radii.some((x) => x > 0) ? roundedLabels(box, radii) : sideLabels(outer);
   const thick = parseLength(raw.thick as never) ?? 4 / 12;
   if (!(thick > 0)) return null;
-  const on = (k: string) => raw[k] === '1';
   const footing = on('footing');
   const fW = footing ? parseLength(raw.fWidth as never) ?? 1 : 0;
   const fD = footing ? Math.max(parseLength(raw.fDepth as never) ?? 16 / 12, thick) : 0;
@@ -187,7 +188,8 @@ export function slabDrawings(raw: RawValues, title: string, date: string): Drawi
   return {
     plan: slabPlanSvg({
       outer,
-      labels: sideLabels(outer),
+      labels,
+      radii,
       title,
       subtitle: `${parts.join(' · ')} · ${date}`,
       footingFt: anyFooting ? fW : undefined,
@@ -198,6 +200,7 @@ export function slabDrawings(raw: RawValues, title: string, date: string): Drawi
     }),
     iso: isoSlabSvg({
       outer,
+      radii,
       thick: thick * z,
       footing: anyFooting ? { width: fW, depth: fD * z } : undefined,
       rebarFt: spacingFt || undefined,
