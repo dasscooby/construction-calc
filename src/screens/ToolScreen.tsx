@@ -20,6 +20,7 @@ import {
   RawArea,
   RawBarRow,
   RawLength,
+  RawOutlineRow,
   RawStockRow,
   RawValue,
   RawValues,
@@ -94,7 +95,7 @@ export default function ToolScreen({ tool, raw, onChange, onBack, active, jobLin
     });
     return () => sub.remove();
   }, [active]);
-  const hasInches = tool.fields.some((f) => f.kind === 'length' || f.kind === 'areas' || f.kind === 'barlist' || f.kind === 'walls');
+  const hasInches = tool.fields.some((f) => ['length', 'areas', 'barlist', 'walls', 'outline'].includes(f.kind));
   const titleSize = tool.title.length > 22 ? 16 : tool.title.length > 16 ? 18 : 22;
 
   return (
@@ -412,6 +413,7 @@ function FieldInput({ field, value, onChange }: { field: Field; value: RawValue;
       {field.kind === 'areas' && <AreasInput value={value as RawArea[]} onChange={onChange} />}
       {field.kind === 'barlist' && <BarListInput field={field} value={value as RawBarRow[]} onChange={onChange} />}
       {field.kind === 'walls' && <WallsInput value={value as RawWallRow[]} onChange={onChange} />}
+      {field.kind === 'outline' && <OutlineInput value={value as RawOutlineRow[]} onChange={onChange} />}
       {field.kind === 'stock' && <StockInput value={value as RawStockRow[]} onChange={onChange} label={field.label} />}
     </View>
   );
@@ -593,6 +595,76 @@ function WallsInput({ value, onChange }: { value: RawWallRow[]; onChange: (v: Ra
         accessibilityRole="button"
       >
         <Text style={styles.addText}>+ Add another wall</Text>
+      </Pressable>
+    </View>
+  );
+}
+
+const EDGE_LABEL: Record<RawOutlineRow['edge'], string> = {
+  form: 'Formed',
+  house: 'House',
+  dowels: 'House + dowels',
+  slab: 'Existing slab',
+  slabDowels: 'Slab + dowels',
+};
+
+/** The sides of a slab, one card each: length, turn at the end, corner radius, what the edge is. */
+function OutlineInput({ value, onChange }: { value: RawOutlineRow[]; onChange: (v: RawOutlineRow[]) => void }) {
+  const update = (i: number, patch: Partial<RawOutlineRow>) => onChange(value.map((r, j) => (j === i ? { ...r, ...patch } : r)));
+  const chip = (on: boolean, label: string, a11y: string, onPress: () => void) => (
+    <Pressable
+      key={label}
+      onPress={() => {
+        if (!on) feel.tap();
+        onPress();
+      }}
+      accessibilityRole="button"
+      accessibilityLabel={a11y}
+      accessibilityState={{ selected: on }}
+      style={[styles.chip, styles.chipSmall, on && styles.chipOn]}
+    >
+      <Text style={[styles.chipText, on && styles.chipTextOn]}>{label}</Text>
+    </Pressable>
+  );
+  return (
+    <View>
+      {value.map((r, i) => (
+        <View key={i} style={styles.area}>
+          <View style={styles.areaHead}>
+            <Text style={styles.areaTitle}>Side {i + 1}</Text>
+            {value.length > 1 && (
+              <Pressable
+                onPress={() => onChange(value.filter((_, j) => j !== i))}
+                style={styles.removeBtn}
+                accessibilityRole="button"
+                accessibilityLabel={`Remove side ${i + 1}`}
+              >
+                <Text style={styles.removeText}>Remove</Text>
+              </Pressable>
+            )}
+          </View>
+          <LengthInput value={r.length} onChange={(length) => update(i, { length })} label={`Side ${i + 1} length`} />
+          <Text style={styles.areaSub}>This side is</Text>
+          <View style={styles.chips}>
+            {(Object.keys(EDGE_LABEL) as RawOutlineRow['edge'][]).map((e) =>
+              chip(e === r.edge, EDGE_LABEL[e], `Side ${i + 1} ${EDGE_LABEL[e]}`, () => update(i, { edge: e })),
+            )}
+          </View>
+          <Text style={styles.areaSub}>Then turn</Text>
+          <View style={styles.chips}>
+            {chip(r.turn === 'R', 'Right', `Side ${i + 1} turn right`, () => update(i, { turn: 'R' }))}
+            {chip(r.turn === 'L', 'Left', `Side ${i + 1} turn left`, () => update(i, { turn: 'L' }))}
+          </View>
+          <Text style={styles.areaSub}>Corner radius (blank = square)</Text>
+          <LengthInput value={r.radius} onChange={(radius) => update(i, { radius })} label={`Side ${i + 1} corner radius`} />
+        </View>
+      ))}
+      <Pressable
+        onPress={() => onChange([...value, { length: emptyLength(), turn: 'R', radius: emptyLength(), edge: 'form' }])}
+        style={styles.addBtn}
+        accessibilityRole="button"
+      >
+        <Text style={styles.addText}>+ Add another side</Text>
       </Pressable>
     </View>
   );

@@ -8,7 +8,7 @@
 //   Order: 25.75 yd
 
 import { ftIn, inches } from './format';
-import { isShown, RawArea, RawBarRow, RawLength, RawStockRow, RawValues, RawWallRow, parseLength, parseNumber, RunResult } from './run';
+import { isShown, RawArea, RawBarRow, RawLength, RawOutlineRow, RawStockRow, RawValues, RawWallRow, parseLength, parseNumber, RunResult } from './run';
 import { Field, Tool } from './types';
 
 const lengthText = (r: RawLength): string | null => {
@@ -53,6 +53,15 @@ export function fieldText(f: Field, v: RawValues[string]): string | null {
         .map((r) => `${r.qty.trim()} – #${r.size} @ ${lengthText(r.length)}`);
       return parts.length ? parts.join(', ') : null;
     }
+    case 'outline': {
+      const parts = (v as RawOutlineRow[])
+        .filter((r) => lengthText(r.length))
+        .map((r, i) => {
+          const rad = lengthText(r.radius);
+          return `${i + 1}) ${lengthText(r.length)} ${EDGE_TEXT[r.edge]}, turn ${r.turn === 'R' ? 'right' : 'left'}${rad ? ` (R ${rad})` : ''}`;
+        });
+      return parts.length ? parts.join('; ') : null;
+    }
     case 'stock': {
       const parts = (v as RawStockRow[])
         .filter((r) => r.size.trim())
@@ -65,6 +74,8 @@ export function fieldText(f: Field, v: RawValues[string]): string | null {
     }
   }
 }
+
+export const EDGE_TEXT = { form: 'formed', house: 'house', dowels: 'house + dowels', slab: 'existing slab', slabDowels: 'existing slab + dowels' } as const;
 
 export const WALL_ENDS_TEXT = { oo: 'outside corners', oi: 'outside + inside corner', ii: 'inside corners' } as const;
 

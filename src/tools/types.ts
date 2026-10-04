@@ -56,6 +56,22 @@ export interface MultiChoiceField extends FieldBase {
   default: string[];
 }
 
+/** What a slab edge butts against. */
+export type EdgeKind = 'form' | 'house' | 'dowels' | 'slab' | 'slabDowels';
+
+/** The sides of a slab, walked clockwise: length, turn at the end, corner radius, what the edge is. */
+export interface OutlineField extends FieldBase {
+  kind: 'outline';
+}
+
+export interface OutlineRow {
+  length: number; // feet, corner to corner (as if square)
+  turn: 'R' | 'L';
+  /** Corner radius at the end of this side, feet; 0 = square */
+  radius: number;
+  edge: EdgeKind;
+}
+
 /** An on/off switch, like "Exterior footing". Other fields can hang off it with showIf. */
 export interface ToggleField extends FieldBase {
   kind: 'toggle';
@@ -97,7 +113,8 @@ export type Field =
   | BarListField
   | WallsField
   | StockField
-  | ToggleField;
+  | ToggleField
+  | OutlineField;
 
 export interface Rect {
   length: number; // feet
@@ -144,6 +161,8 @@ export interface Inputs {
   walls(key: string): WallRow[];
   /** Stock field: the filled-in rows. */
   stock(key: string): StockRow[];
+  /** Outline field: the filled-in sides. */
+  outline(key: string): OutlineRow[];
   /** True if the field was filled in (a switch: true if it's on). */
   has(key: string): boolean;
   /** Switch field: on or off. */

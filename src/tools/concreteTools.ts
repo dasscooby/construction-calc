@@ -14,6 +14,7 @@ import { commas, commasTrim, cuYd, dec, ftIn, money, sqFt } from './format';
 import { Field, Inputs, ResultRow, Tool } from './types';
 
 import { concreteRows, CUFT_PER_CUYD, ORDER_FIELDS } from './concreteShared';
+import { slabLayout } from './slabLayoutTool';
 import { slab } from './slabTool';
 
 const footings: Tool = {
@@ -413,4 +414,4 @@ const wallForms: Tool = {
   notes: ['Both sides of the wall. Lengths are rounded to the nearest inch.'],
 };
 
-export const CONCRETE_TOOLS: Tool[] = [slab, footings, piers, steps, forms, wallForms];
+export const CONCRETE_TOOLS: Tool[] = [slab, slabLayout, footings, piers, steps, forms, wallForms];

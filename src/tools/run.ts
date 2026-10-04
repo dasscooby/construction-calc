@@ -1,14 +1,16 @@
 // Reads the text in a tool's boxes, checks it, and runs compute().
 // The screen and the tests both use runTool().
 
-import { BarRow, ComputeOutput, Field, Inputs, Rect, StockRow, Tool, ToolResult, WallEnds, WallRow } from './types';
+import { BarRow, ComputeOutput, EdgeKind, Field, Inputs, OutlineRow, Rect, StockRow, Tool, ToolResult, WallEnds, WallRow } from './types';
 
 export type RawLength = { ft: string; in: string };
 export type RawArea = { length: RawLength; width: RawLength };
 export type RawBarRow = { size: string; qty: string; length: RawLength };
 export type RawWallRow = { length: RawLength; ends: WallEnds };
 export type RawStockRow = { size: string; qty: string };
-export type RawValue = string | RawLength | RawArea[] | RawBarRow[] | RawWallRow[] | RawStockRow[];
+export type RawOutlineRow = { length: RawLength; turn: 'R' | 'L'; radius: RawLength; edge: EdgeKind };
+export const EDGE_KINDS: EdgeKind[] = ['form', 'house', 'dowels', 'slab', 'slabDowels'];
+export type RawValue = string | RawLength | RawArea[] | RawBarRow[] | RawWallRow[] | RawStockRow[] | RawOutlineRow[];
 
 export const WALL_ENDS: WallEnds[] = ['oo', 'oi', 'ii'];
 export type RawValues = Record<string, RawValue>;
@@ -67,6 +69,9 @@ export function defaultRaw(tool: Tool, overrides: RawValues = {}): RawValues {
       case 'toggle':
         raw[f.key] = f.default ? '1' : '';
         break;
+      case 'outline':
+        raw[f.key] = [{ length: emptyLength(), turn: 'R', radius: emptyLength(), edge: 'form' }];
+        break;
       case 'choice':
         raw[f.key] = f.default;
         break;
@@ -107,6 +112,14 @@ export function restoreRaw(tool: Tool, saved: unknown): RawValues {
       raw[f.key] = v as RawStockRow[];
     } else if (f.kind === 'choice' && f.options.some((o) => o.value === v)) raw[f.key] = v as string;
     else if (f.kind === 'toggle' && (v === '1' || v === '')) raw[f.key] = v;
+    else if (
+      f.kind === 'outline' &&
+      Array.isArray(v) &&
+      v.length &&
+      v.every((r) => isRawLength(r?.length) && isRawLength(r?.radius) && (r?.turn === 'R' || r?.turn === 'L') && EDGE_KINDS.includes(r?.edge))
+    ) {
+      raw[f.key] = v as RawOutlineRow[];
+    }
     else if (f.kind === 'multi' && typeof v === 'string' && v.split(',').every((x) => x === '' || f.options.some((o) => o.value === x))) {
       raw[f.key] = v;
     }
@@ -120,7 +133,7 @@ export type RunResult =
   | { status: 'missing'; message: string }
   | { status: 'invalid'; message: string };
 
-type Parsed = number | string | string[] | Rect[] | BarRow[] | WallRow[] | StockRow[] | null;
+type Parsed = number | string | string[] | Rect[] | BarRow[] | WallRow[] | StockRow[] | OutlineRow[] | null;
 
 /**
  * Test-friendly inputs are allowed too: a number for a length field means feet,
@@ -134,7 +147,8 @@ export type LooseValue =
   | [number, number][]
   | [string, number, number][]
   | [number, WallEnds][]
-  | [number, number | null][];
+  | [number, number | null][]
+  | [number, 'R' | 'L', number, EdgeKind][];
 
 function normalize(f: Field, v: LooseValue | boolean | undefined): RawValue | undefined {
   if (v === undefined) return undefined;
@@ -144,6 +158,14 @@ function normalize(f: Field, v: LooseValue | boolean | undefined): RawValue | un
     return (v as [number, number][]).map(([l, w]) => ({
       length: { ft: String(l), in: '' },
       width: { ft: String(w), in: '' },
+    }));
+  }
+  if (f.kind === 'outline' && Array.isArray(v) && v.length && Array.isArray(v[0])) {
+    return (v as unknown as [number, 'R' | 'L', number, EdgeKind][]).map(([ft, turn, r, edge]) => ({
+      length: { ft: String(ft), in: '' },
+      turn,
+      radius: { ft: r ? String(r) : '', in: '' },
+      edge,
     }));
   }
   if (f.kind === 'stock' && Array.isArray(v) && v.length && Array.isArray(v[0])) {
@@ -247,6 +269,20 @@ export function runTool(tool: Tool, values: Record<string, LooseValue | boolean>
         else blank = true;
         break;
       }
+      case 'outline': {
+        const rows: OutlineRow[] = [];
+        for (const [i, r] of (v as RawOutlineRow[]).entries()) {
+          const len = parseLength(r.length);
+          if (len === null) continue; // empty row
+          if (Number.isNaN(len) || len <= 0) return { status: 'invalid', message: `Check the length of side ${i + 1}` };
+          const rad = parseLength(r.radius);
+          if (rad !== null && (Number.isNaN(rad) || rad < 0)) return { status: 'invalid', message: `Check the radius at the end of side ${i + 1}` };
+          rows.push({ length: len, turn: r.turn, radius: rad ?? 0, edge: r.edge });
+        }
+        if (rows.length) value = rows;
+        else blank = true;
+        break;
+      }
       case 'stock': {
         const rows: StockRow[] = [];
         for (const r of v as RawStockRow[]) {
@@ -293,6 +329,7 @@ export function runTool(tool: Tool, values: Record<string, LooseValue | boolean>
     bars: (k) => (get(k) as BarRow[] | null) ?? [],
     walls: (k) => (get(k) as WallRow[] | null) ?? [],
     stock: (k) => (get(k) as StockRow[] | null) ?? [],
+    outline: (k) => (get(k) as OutlineRow[] | null) ?? [],
     has: (k) => get(k) !== null,
     on: (k) => get(k) === 'on',
   };

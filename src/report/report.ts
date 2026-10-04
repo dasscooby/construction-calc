@@ -5,11 +5,13 @@ import type { Job, JobItem } from '../lib/jobs';
 import { companyLine, Settings } from '../lib/settings';
 import { ALL_TOOLS, migrateItem } from '../tools';
 import { commas, cuYd, dec, money } from '../tools/format';
-import { isShown, parseLength, parseNumber, RawArea, RawValues, RawWallRow, restoreRaw, runTool, RunResult } from '../tools/run';
+import { isShown, parseLength, parseNumber, RawArea, RawOutlineRow, RawValues, RawWallRow, restoreRaw, runTool, RunResult } from '../tools/run';
 import { fieldText } from '../tools/share';
 import type { ResultRow, Tool } from '../tools/types';
 import { houseSectionSvg, isoSlabSvg, isoSvg, planSvg, roundedLabels, roundedRect, sectionSvg, sideLabels, SlabSide, slabPlanSvg } from './drawings';
 import { insetOutline, Pt, wallOutline } from './geometry';
+import { layoutIsoSvg, layoutPlanSvg } from './layoutDraw';
+import { buildLayout, matBars } from './layoutGeom';
 
 export interface FiguredItem {
   item: JobItem;
@@ -233,11 +235,80 @@ export function slabDrawings(raw: RawValues, title: string, date: string): Drawi
   };
 }
 
+/** Plan, 3D and details for a Slab Layout (any shape). Null until the sides close up. */
+export function layoutDrawings(raw: RawValues, title: string, date: string): Drawings | null {
+  const sides = (raw.sides as RawOutlineRow[])
+    .map((r) => ({ length: parseLength(r.length) ?? 0, turn: r.turn, radius: parseLength(r.radius) ?? 0, edge: r.edge }))
+    .filter((r) => r.length > 0);
+  if (sides.length < 4) return null;
+  const L = buildLayout(sides);
+  if (!L.closed) return null;
+  const on = (k: string) => raw[k] === '1';
+  const thick = parseLength(raw.thick as never) ?? 4 / 12;
+  if (!(thick > 0)) return null;
+  const footing = on('footing') && sides.some((s) => s.edge === 'form');
+  const fW = footing ? parseLength(raw.fWidth as never) ?? 1 : 0;
+  const fD = footing ? Math.max(parseLength(raw.fDepth as never) ?? 16 / 12, thick) : 0;
+  const footOn = (k: number) => footing && sides[k].edge === 'form';
+  const slabRebar = on('slabRebar');
+  const spacingFt = slabRebar ? (parseNumber(String(raw.spacing)) ?? 18) / 12 : 0;
+  const tie = (footing && slabRebar ? raw.edgeTie : 'none') as 'bend' | 'lbars' | 'none';
+  const bars = slabRebar && spacingFt > 0 ? matBars(L, 3 / 12, spacingFt, footOn) : undefined;
+  const footBars = footing && on('footBars') ? Number(raw.fBars) || 0 : 0;
+  const dowels = sides.some((s) => s.edge === 'dowels' || s.edge === 'slabDowels');
+  const dowelFt = dowels ? (parseNumber(String(raw.dowelSpacing)) ?? 24) / 12 : undefined;
+  const dowelLenIn = (parseLength(raw.dowelLength as never) ?? 1.5) * 12;
+  // Stretch the height so the edge and rebar show in 3D.
+  const xs = L.V.map((p) => p.x);
+  const ys = L.V.map((p) => p.y);
+  const span = Math.max(Math.max(...xs) - Math.min(...xs), Math.max(...ys) - Math.min(...ys));
+  const realDepth = footing ? fD : thick;
+  const z = Math.max(1, span / 10 / realDepth);
+  const inch = 1 / 12;
+  const fBars: { inset: number; z: number }[] = [];
+  if (footBars > 0) {
+    const bottom = Math.min(2, footBars);
+    const spread = (count: number) => Array.from({ length: count }, (_, i) => (count === 1 ? fW / 2 : 3 * inch + ((fW - 6 * inch) * i) / (count - 1)));
+    for (const inset of spread(bottom)) fBars.push({ inset, z: 3 * inch * z });
+    const topFromTop = Math.max(thick + 3 * inch, fD * 0.45);
+    for (const inset of spread(footBars - bottom)) fBars.push({ inset, z: (fD - topFromTop) * z });
+  }
+  const parts = [`${dec(thick * 12)}" slab`];
+  if (footing) parts.push(`${dec(fW * 12)}" × ${dec(fD * 12)}" edge`);
+  if (slabRebar) parts.push(`#${String(raw.barSize)} at ${dec(spacingFt * 12)}"`);
+  const joint = sides.find((s) => s.edge !== 'form');
+  return {
+    plan: layoutPlanSvg({ L, title, subtitle: `${parts.join(' · ')} · ${date}`, footingFt: footing ? fW : undefined, footingBars: footBars, bars, dowelFt }),
+    iso: layoutIsoSvg({
+      L,
+      thick: thick * z,
+      footing: footing ? { width: fW, depth: fD * z } : undefined,
+      bars,
+      footingBars: fBars,
+      bentLegsTo: tie === 'bend' ? 4 * inch * z : undefined,
+      dowelFt,
+      note: z > 1.5 ? 'Height exaggerated to show the edge and rebar' : undefined,
+    }),
+    section: footing
+      ? sectionSvg({ slabIn: thick * 12, footWIn: fW * 12, footDIn: fD * 12, bars: footBars, barSize: Number(raw.fBarSize) || 4, tie, slabBars: slabRebar, slabBarSize: Number(raw.barSize) || 4 })
+      : undefined,
+    house: joint
+      ? houseSectionSvg({
+          slabIn: thick * 12,
+          dowelSize: Number(raw.dowelSize) || 4,
+          dowelIn: dowels ? dowelLenIn : 0,
+          against: joint.edge === 'slab' || joint.edge === 'slabDowels' ? 'slab' : 'house',
+        })
+      : undefined,
+  };
+}
+
 /** Drawings for one tool's numbers (the tool screen shows these under the answers). */
 export function toolDrawings(toolId: string, raw: RawValues, title: string): Drawings | null {
   const date = new Date().toLocaleDateString();
   if (toolId === 'slab') return slabDrawings(raw, title, date);
   if (toolId === 'wall-forms') return wallFormsDrawings(raw, title, date);
+  if (toolId === 'slab-layout') return layoutDrawings(raw, title, date);
   return null;
 }
 
@@ -250,6 +321,8 @@ export function jobDrawings(job: Job, items: FiguredItem[]): Drawings | null {
     const slabThick = slab ? parseLength(restoreRaw(slab.tool, slab.item.raw).thick as never) ?? 0 : 0;
     return wallFormsDrawings(restoreRaw(walls.tool, walls.item.raw), job.name, date, slabThick);
   }
+  const layout = items.find((f) => f.tool.id === 'slab-layout' && f.result.status === 'ok');
+  if (layout) return layoutDrawings(restoreRaw(layout.tool, layout.item.raw), job.name, date);
   if (slab) return slabDrawings(restoreRaw(slab.tool, slab.item.raw), job.name, date);
   return null;
 }

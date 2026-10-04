@@ -648,6 +648,8 @@ export interface HouseSectionInput {
   dowelIn: number;
   /** A thickened edge along the house too */
   footing?: { widthIn: number; depthIn: number };
+  /** Poured against the house (default) or against an existing slab */
+  against?: 'house' | 'slab';
 }
 
 /** Section where the slab meets the house: the house foundation, the slab against it, and a dowel drilled in. */
@@ -661,14 +663,21 @@ export function houseSectionSvg(p: HouseSectionInput): string {
   const X = (inch: number) => x0 + inch * k;
   const Y = (inch: number) => y0 + inch * k;
   const parts: string[] = [];
-  // House foundation wall (8" shown), running above and below the slab.
-  const wallTop = -10;
-  const wallBottom = depthIn + 16;
-  parts.push(`<rect x="${n(X(-8))}" y="${n(Y(wallTop))}" width="${n(8 * k)}" height="${n((wallBottom - wallTop) * k)}" fill="#c3cbd2" stroke="#3b3a37" stroke-width="2"/>`);
-  for (let yy = wallTop + 4; yy < wallBottom; yy += 3) {
-    parts.push(`<line x1="${n(X(-8))}" y1="${n(Y(yy))}" x2="${n(X(0))}" y2="${n(Y(yy - 4))}" stroke="#8a96a1" stroke-width="1"/>`);
+  // What it's poured against: the house foundation wall (8" shown, above and below the slab),
+  // or an existing slab the same thickness.
+  const slabNext = p.against === 'slab';
+  const wallW = slabNext ? 20 : 8;
+  const wallTop = slabNext ? 0 : -10;
+  const wallBottom = slabNext ? p.slabIn : depthIn + 16;
+  parts.push(`<rect x="${n(X(-wallW))}" y="${n(Y(wallTop))}" width="${n(wallW * k)}" height="${n((wallBottom - wallTop) * k)}" fill="#c3cbd2" stroke="#3b3a37" stroke-width="2"/>`);
+  for (let yy = wallTop + 4; yy < wallBottom + wallW; yy += 3) {
+    const y1 = Math.min(yy, wallBottom);
+    const x1 = -wallW + Math.max(0, yy - wallBottom);
+    const y2 = Math.max(wallTop, yy - wallW);
+    const x2 = Math.min(0, -wallW + (yy - wallTop));
+    parts.push(`<line x1="${n(X(x1))}" y1="${n(Y(y1))}" x2="${n(X(x2))}" y2="${n(Y(y2))}" stroke="#8a96a1" stroke-width="1"/>`);
   }
-  parts.push(`<text x="${n(X(-4))}" y="${n(Y(wallTop) - 8)}" text-anchor="middle" font-size="13" font-weight="700">HOUSE</text>`);
+  parts.push(`<text x="${n(X(-wallW / 2))}" y="${n(Y(wallTop) - 8)}" text-anchor="middle" font-size="13" font-weight="700">${slabNext ? 'EXISTING SLAB' : 'HOUSE'}</text>`);
   // Slab (and footing) against it.
   const run = 56;
   const slab = p.footing
@@ -680,12 +689,18 @@ export function houseSectionSvg(p: HouseSectionInput): string {
     const half = p.dowelIn / 2;
     const yb = p.slabIn / 2;
     const sw = Math.max(3, (p.dowelSize / 8) * k * 0.8);
-    parts.push(`<line x1="${n(X(-Math.min(half, 7)))}" y1="${n(Y(yb))}" x2="${n(X(p.dowelIn - Math.min(half, 7)))}" y2="${n(Y(yb))}" stroke="#e05a00" stroke-width="${n(sw)}" stroke-linecap="round"/>`);
-    parts.push(`<text x="${n(X(-8) - 10)}" y="${n(Y(yb) + 5)}" text-anchor="end" font-size="13">Drill + epoxy ${n(Math.min(half, 7))}"</text>`);
-    parts.push(`<text x="${n(X(p.dowelIn - Math.min(half, 7)) + 8)}" y="${n(Y(0) - 10)}" font-size="13">${n(p.dowelIn - Math.min(half, 7))}" in the slab</text>`);
+    const into = Math.min(half, slabNext ? 9 : 7);
+    parts.push(`<line x1="${n(X(-into))}" y1="${n(Y(yb))}" x2="${n(X(p.dowelIn - into))}" y2="${n(Y(yb))}" stroke="#e05a00" stroke-width="${n(sw)}" stroke-linecap="round"/>`);
+    parts.push(
+      slabNext
+        ? `<text x="${n(X(-wallW))}" y="${n(Y(p.slabIn) + 22)}" font-size="13">Drill + epoxy ${n(into)}"</text>`
+        : `<text x="${n(X(-wallW) - 10)}" y="${n(Y(yb) + 5)}" text-anchor="end" font-size="13">Drill + epoxy ${n(into)}"</text>`,
+    );
+    parts.push(`<text x="${n(X(p.dowelIn - into) + 8)}" y="${n(Y(0) - 10)}" font-size="13">${n(p.dowelIn - into)}" in the new slab</text>`);
   }
   parts.push(`<text x="${n(X(run) + 8)}" y="${n(Y(p.slabIn / 2) + 5)}" font-size="14" font-weight="700">${n(p.slabIn)}" slab</text>`);
-  const legend = p.dowelIn > 0 ? `#${p.dowelSize} dowels, ${n(p.dowelIn)}" long, drilled and epoxied into the house` : 'Poured against the house, no dowels';
+  const what = slabNext ? 'the existing slab' : 'the house';
+  const legend = p.dowelIn > 0 ? `#${p.dowelSize} dowels, ${n(p.dowelIn)}" long, drilled and epoxied into ${what}` : `Poured against ${what}, no dowels`;
   parts.push(`<text x="${W - 20}" y="${H - 20}" text-anchor="end" font-size="13">${esc(legend)}</text>`);
-  return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${W} ${H}" width="100%" role="img" aria-label="House detail"><rect width="${W}" height="${H}" fill="#ffffff"/><g font-family="Helvetica, Arial, sans-serif" fill="#222">${parts.join('')}</g></svg>`;
+  return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${W} ${H}" width="100%" role="img" aria-label="${slabNext ? 'Existing slab detail' : 'House detail'}"><rect width="${W}" height="${H}" fill="#ffffff"/><g font-family="Helvetica, Arial, sans-serif" fill="#222">${parts.join('')}</g></svg>`;
 }
