@@ -44,7 +44,8 @@ export function parseLength(r: RawLength): number | null {
 
 export const emptyLength = (): RawLength => ({ ft: '', in: '' });
 
-export function defaultRaw(tool: Tool): RawValues {
+/** The boxes a fresh tool starts with. `overrides` (from My defaults) replaces any of them. */
+export function defaultRaw(tool: Tool, overrides: RawValues = {}): RawValues {
   const raw: RawValues = {};
   for (const f of tool.fields) {
     switch (f.kind) {
@@ -73,6 +74,7 @@ export function defaultRaw(tool: Tool): RawValues {
         raw[f.key] = f.default ?? '';
     }
   }
+  for (const f of tool.fields) if (f.key in overrides) raw[f.key] = overrides[f.key];
   return raw;
 }
 

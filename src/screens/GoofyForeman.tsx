@@ -4,7 +4,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { AccessibilityInfo, Animated, Easing, Modal, Pressable, StyleSheet, Text, View } from 'react-native';
 
-import { colors } from '../theme';
+import { colors, onThemeChange, themed } from '../theme';
 
 export const ERRORS_FOR_FOREMAN = 3;
 
@@ -99,10 +99,10 @@ const SKIN = '#F1C27D';
 const HAT = '#FFC300';
 const VEST = '#FF7A00';
 
-const styles = StyleSheet.create({
+const getStyles = themed(() => ({
   backdrop: { flex: 1, backgroundColor: 'rgba(0,0,0,0.6)', alignItems: 'center', justifyContent: 'center', padding: 24 },
   card: { width: '100%', maxWidth: 360, backgroundColor: colors.panel, borderRadius: 24, padding: 20, alignItems: 'center' },
-  bubble: { backgroundColor: colors.text, borderRadius: 18, paddingVertical: 14, paddingHorizontal: 16, marginBottom: 18, alignSelf: 'stretch' },
+  bubble: { backgroundColor: '#FFFFFF', borderWidth: 1, borderColor: colors.border, borderRadius: 18, paddingVertical: 14, paddingHorizontal: 16, marginBottom: 18, alignSelf: 'stretch' },
   bubbleTail: {
     position: 'absolute',
     bottom: -10,
@@ -110,7 +110,7 @@ const styles = StyleSheet.create({
     marginLeft: -10,
     width: 20,
     height: 20,
-    backgroundColor: colors.text,
+    backgroundColor: '#FFFFFF',
     transform: [{ rotate: '45deg' }],
   },
   jokeText: { fontSize: 19, fontWeight: '700', color: '#000', textAlign: 'center', lineHeight: 25 },
@@ -141,4 +141,10 @@ const styles = StyleSheet.create({
 
   btn: { backgroundColor: colors.accent, borderRadius: 999, paddingVertical: 14, paddingHorizontal: 26 },
   btnText: { fontSize: 18, fontWeight: '800', color: colors.accentText },
+}));
+
+// Rebuilt when the colors or text size change in Settings.
+let styles = getStyles();
+onThemeChange(() => {
+  styles = getStyles();
 });

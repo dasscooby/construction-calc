@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import { BackHandler, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 
 import { dayLabel, history, HistoryEntry, timeLabel, useHistory } from '../lib/history';
-import { colors } from '../theme';
+import { colors, onThemeChange, themed } from '../theme';
 import { ShareButton } from './ToolScreen';
 
 interface Props {
@@ -150,7 +150,7 @@ function Header({ left, onLeft, title }: { left: string; onLeft: () => void; tit
 
 const hairline = StyleSheet.hairlineWidth;
 
-const styles = StyleSheet.create({
+const getStyles = themed(() => ({
   page: { flex: 1, backgroundColor: colors.bg },
   header: {
     flexDirection: 'row',
@@ -184,4 +184,10 @@ const styles = StyleSheet.create({
   confirmText: { fontSize: 17, fontWeight: '600', color: colors.text, textAlign: 'center', marginBottom: 12 },
   confirmRow: { flexDirection: 'row', gap: 10 },
   half: { flex: 1, marginBottom: 0 },
+}));
+
+// Rebuilt when the colors or text size change in Settings.
+let styles = getStyles();
+onThemeChange(() => {
+  styles = getStyles();
 });

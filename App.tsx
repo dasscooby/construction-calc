@@ -1,87 +1,98 @@
 import { StatusBar } from 'expo-status-bar';
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 import { SafeAreaProvider, SafeAreaView } from 'react-native-safe-area-context';
 
 import { HistoryEntry } from './src/lib/history';
+import { TabId, useSettings } from './src/lib/settings';
 import CalculatorScreen from './src/screens/CalculatorScreen';
 import HistoryScreen from './src/screens/HistoryScreen';
-import ToolsTab, { OpenRequest, ToolGroup } from './src/screens/ToolsTab';
-import { CONCRETE_GROUPS, ENGINEERING_GROUPS, REBAR_GROUPS, SITE_GROUPS } from './src/tools';
-import { colors } from './src/theme';
-
-const TABS = ['Calc', 'Concrete', 'Rebar', 'Site', 'Engineer'] as const;
-
-// Tabs 1–4 are tool menus.
-const TOOL_TABS: { title: string; groups: ToolGroup[] }[] = [
-  { title: 'Concrete', groups: CONCRETE_GROUPS },
-  { title: 'Rebar', groups: REBAR_GROUPS },
-  { title: 'Site & Layout', groups: SITE_GROUPS },
-  { title: 'Engineering', groups: ENGINEERING_GROUPS },
-];
+import SettingsScreen from './src/screens/SettingsScreen';
+import ToolsTab, { OpenRequest } from './src/screens/ToolsTab';
+import { TABS } from './src/tabs';
+import { colors, mode, onThemeChange, themed } from './src/theme';
 
 export default function App() {
-  const [tab, setTab] = useState(0);
-  const [showHistory, setShowHistory] = useState(false);
-  const [request, setRequest] = useState<{ tab: number; req: OpenRequest } | null>(null);
+  const prefs = useSettings();
+  const [tab, setTab] = useState<TabId>(prefs.tabOrder[0]);
+  const [overlay, setOverlay] = useState<'history' | 'settings' | null>(null);
+  const [request, setRequest] = useState<{ tab: TabId; req: OpenRequest } | null>(null);
+
+  // Start on the first tab in your order (settings load a moment after the app opens).
+  const picked = useRef(false);
+  useEffect(() => {
+    if (!picked.current) setTab(prefs.tabOrder[0]);
+  }, [prefs.tabOrder[0]]);
+
+  // Repaint everything when the colors or text size change.
+  const [, setLook] = useState(0);
+  useEffect(() => onThemeChange(() => setLook((n) => n + 1)), []);
 
   // From History: jump to the tool's tab and open it with the saved numbers.
   const openEntry = (e: HistoryEntry) => {
-    const i = TOOL_TABS.findIndex((t) => t.groups.some((g) => g.tools.some((tool) => tool.id === e.toolId)));
-    if (i < 0) return;
-    setRequest({ tab: i + 1, req: { toolId: e.toolId, raw: e.raw, n: Date.now() } });
-    setTab(i + 1);
-    setShowHistory(false);
+    const id = (Object.keys(TABS) as TabId[]).find((k) => TABS[k].groups?.some((g) => g.tools.some((t) => t.id === e.toolId)));
+    if (!id) return;
+    setRequest({ tab: id, req: { toolId: e.toolId, raw: e.raw, n: Date.now() } });
+    setTab(id);
+    setOverlay(null);
   };
 
   // All tabs stay mounted so numbers aren't lost when switching tabs.
-  const screens = [
-    <CalculatorScreen />,
-    ...TOOL_TABS.map((t, i) => (
+  const screen = (id: TabId) => {
+    const t = TABS[id];
+    if (!t.groups) return <CalculatorScreen />;
+    return (
       <ToolsTab
-        title={t.title}
+        title={t.title!}
         groups={t.groups}
-        active={tab === i + 1 && !showHistory}
-        onOpenHistory={() => setShowHistory(true)}
-        request={request?.tab === i + 1 ? request.req : undefined}
+        active={tab === id && !overlay}
+        onOpenHistory={() => setOverlay('history')}
+        onOpenSettings={() => setOverlay('settings')}
+        request={request?.tab === id ? request.req : undefined}
       />
-    )),
-  ];
+    );
+  };
 
   return (
     <SafeAreaProvider>
-      <StatusBar style="light" />
+      <StatusBar style={mode === 'dark' ? 'light' : 'dark'} />
       <SafeAreaView style={styles.root} edges={['top', 'left', 'right']}>
         <View style={styles.body}>
-          {screens.map((screen, i) => (
-            <View key={TABS[i]} style={[styles.screen, (i !== tab || showHistory) && styles.hidden]}>
-              {screen}
+          {prefs.tabOrder.map((id) => (
+            <View key={id} style={[styles.screen, (id !== tab || overlay) && styles.hidden]}>
+              {screen(id)}
             </View>
           ))}
-          {showHistory && (
+          {overlay === 'history' && (
             <View style={styles.screen}>
-              <HistoryScreen onClose={() => setShowHistory(false)} onOpen={openEntry} />
+              <HistoryScreen onClose={() => setOverlay(null)} onOpen={openEntry} />
+            </View>
+          )}
+          {overlay === 'settings' && (
+            <View style={styles.screen}>
+              <SettingsScreen onClose={() => setOverlay(null)} />
             </View>
           )}
         </View>
       </SafeAreaView>
       <SafeAreaView style={styles.tabBarWrap} edges={['bottom', 'left', 'right']}>
         <View style={styles.tabBar}>
-          {TABS.map((name, i) => {
-            const active = i === tab;
+          {prefs.tabOrder.map((id) => {
+            const active = id === tab && !overlay;
             return (
               <Pressable
-                key={name}
+                key={id}
                 onPress={() => {
-                  setTab(i);
-                  setShowHistory(false);
+                  picked.current = true;
+                  setTab(id);
+                  setOverlay(null);
                 }}
                 accessibilityRole="tab"
                 accessibilityState={{ selected: active }}
                 style={[styles.tab, active && styles.tabActive]}
               >
                 <Text style={[styles.tabText, active && styles.tabTextActive]} numberOfLines={1} maxFontSizeMultiplier={1.15}>
-                  {name}
+                  {TABS[id].name}
                 </Text>
               </Pressable>
             );
@@ -92,7 +103,7 @@ export default function App() {
   );
 }
 
-const styles = StyleSheet.create({
+const getStyles = themed(() => ({
   root: { flex: 1, backgroundColor: colors.bg },
   body: { flex: 1 },
   screen: { flex: 1 },
@@ -110,4 +121,10 @@ const styles = StyleSheet.create({
   tabActive: { backgroundColor: colors.panel2 },
   tabText: { fontSize: 15, fontWeight: '600', color: colors.subtext },
   tabTextActive: { color: colors.accent, fontWeight: '800' },
+}), { scaleText: false });
+
+// Rebuilt when the colors or text size change in Settings.
+let styles = getStyles();
+onThemeChange(() => {
+  styles = getStyles();
 });

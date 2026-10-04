@@ -15,9 +15,10 @@ import {
 
 import { RawArea, RawBarRow, RawLength, RawStockRow, RawValue, RawValues, RawWallRow, RunResult, WALL_ENDS, defaultRaw, runTool } from '../tools/run';
 import { history } from '../lib/history';
+import { companyLine, userDefaults, useSettings } from '../lib/settings';
 import { shareText } from '../tools/share';
 import { BarListField, Field, Tool } from '../tools/types';
-import { colors } from '../theme';
+import { colors, onThemeChange, themed } from '../theme';
 
 const SHARE_LABEL = Platform.OS === 'ios' ? 'Share or save to Notes' : 'Share these numbers';
 
@@ -34,18 +35,19 @@ interface Props {
 }
 
 export default function ToolScreen({ tool, raw, onChange, onBack, active }: Props) {
+  const prefs = useSettings();
   const result = useMemo(() => runTool(tool, raw), [tool, raw]);
   const set = (key: string, value: RawValue) => onChange({ ...raw, [key]: value });
   const clear = () => {
     // Clear the job, keep what you own.
-    const fresh = defaultRaw(tool);
+    const fresh = defaultRaw(tool, userDefaults(tool, prefs));
     for (const f of tool.fields) if (f.sticky) fresh[f.key] = raw[f.key];
     onChange(fresh);
     Keyboard.dismiss();
   };
 
   const main = result.status === 'ok' ? result.result.rows.filter((r) => r.big).slice(0, 2) : [];
-  const text = shareText(tool, raw, result);
+  const text = shareText(tool, raw, result, companyLine(prefs));
   // Anything with an answer goes into History when you leave the tool or share it.
   const save = () => {
     if (!text) return;
@@ -477,7 +479,7 @@ function StockInput({ value, onChange, label }: { value: RawStockRow[]; onChange
 
 const hairline = StyleSheet.hairlineWidth;
 
-const styles = StyleSheet.create({
+const getStyles = themed(() => ({
   flex: { flex: 1, backgroundColor: colors.bg },
   header: {
     flexDirection: 'row',
@@ -530,7 +532,7 @@ const styles = StyleSheet.create({
   chipText: { fontSize: 17, fontWeight: '600', color: colors.text },
   chipTextOn: { color: colors.accentText, fontWeight: '800' },
 
-  area: { backgroundColor: '#0E0E10', borderWidth: hairline, borderColor: colors.border, borderRadius: 16, padding: 12, marginBottom: 10 },
+  area: { backgroundColor: colors.bg, borderWidth: hairline, borderColor: colors.border, borderRadius: 16, padding: 12, marginBottom: 10 },
   areaHead: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
   areaTitle: { fontSize: 16, fontWeight: '700', color: colors.accent, marginBottom: 4 },
   areaSub: { fontSize: 16, fontWeight: '600', color: colors.text, marginTop: 8, marginBottom: 4 },
@@ -575,4 +577,10 @@ const styles = StyleSheet.create({
   footerLabel: { fontSize: 13, fontWeight: '600', color: colors.subtext },
   footerValue: { fontSize: 28, fontWeight: '300', color: colors.accent },
   footerMsg: { flex: 1, fontSize: 16, fontWeight: '600', color: colors.subtext, textAlign: 'center' },
+}));
+
+// Rebuilt when the colors or text size change in Settings.
+let styles = getStyles();
+onThemeChange(() => {
+  styles = getStyles();
 });

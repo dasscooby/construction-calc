@@ -66,7 +66,8 @@ function fieldText(f: Field, v: RawValues[string]): string | null {
 
 export const WALL_ENDS_TEXT = { oo: 'outside corners', oi: 'outside + inside corner', ii: 'inside corners' } as const;
 
-export function shareText(tool: Tool, raw: RawValues, result: RunResult): string | null {
+/** `footer` is the company line from Settings (name · phone · …), added at the bottom when filled in. */
+export function shareText(tool: Tool, raw: RawValues, result: RunResult, footer = ''): string | null {
   if (result.status !== 'ok') return null;
   const lines = [`${tool.title} – Construction Calc`, ''];
   for (const f of tool.fields) {
@@ -76,5 +77,6 @@ export function shareText(tool: Tool, raw: RawValues, result: RunResult): string
   lines.push('');
   for (const w of result.result.warnings ?? []) lines.push(`⚠ ${w}`);
   for (const r of result.result.rows) lines.push(`${r.label}: ${r.value}${r.note ? ` (${r.note})` : ''}`);
+  if (footer) lines.push('', footer);
   return lines.join('\n');
 }

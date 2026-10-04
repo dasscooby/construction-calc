@@ -19,7 +19,7 @@ import { calcHistory, newTapeLines, useCalcHistory } from '../lib/calcHistory';
 import { dayLabel, timeLabel } from '../lib/history';
 import { DENOMS } from '../lib/units';
 import GoofyForeman, { ERRORS_FOR_FOREMAN } from './GoofyForeman';
-import { colors } from '../theme';
+import { colors, onThemeChange, themed } from '../theme';
 
 // ---------- keypad layout (same as the Construction Master 5) ----------
 
@@ -56,14 +56,16 @@ const ROWS: KeyDef[][] = [
   [fn('%', '%', 'Prefs'), num('0', 'wt/vol'), num('.', 'Cost'), op('=', '=', 'Tape'), op('+', '+', 'π')],
 ];
 
-const KEY_COLORS: Record<KeyKind, { bg: string; fg: string }> = {
-  fn: { bg: colors.fnKey, fg: colors.fnKeyText },
-  num: { bg: colors.numKey, fg: colors.numKeyText },
-  op: { bg: colors.opKey, fg: colors.opKeyText },
-  conv: { bg: colors.lightKey, fg: colors.lightKeyText },
-  clear: { bg: colors.lightKey, fg: colors.lightKeyText },
-  util: { bg: colors.lightKey, fg: colors.lightKeyText },
-};
+/** Key colors, read fresh each time (they follow the theme). */
+const keyColors = (kind: KeyKind): { bg: string; fg: string } =>
+  ({
+    fn: { bg: colors.fnKey, fg: colors.fnKeyText },
+    num: { bg: colors.numKey, fg: colors.numKeyText },
+    op: { bg: colors.opKey, fg: colors.opKeyText },
+    conv: { bg: colors.lightKey, fg: colors.lightKeyText },
+    clear: { bg: colors.lightKey, fg: colors.lightKeyText },
+    util: { bg: colors.lightKey, fg: colors.lightKeyText },
+  })[kind];
 
 // ---------- state + saving settings on the phone ----------
 
@@ -248,7 +250,7 @@ function CalcKey({
   onPress: () => void;
   compact?: boolean;
 }) {
-  const c = KEY_COLORS[def.kind];
+  const c = keyColors(def.kind);
   const lit = def.kind === 'conv' && armed; // Conv turns white with orange text, like a picked operator
   const fontSize = def.kind === 'num' ? 30 : def.label.length <= 2 ? 26 : def.label.length <= 4 ? 18 : 15;
   return (
@@ -472,7 +474,7 @@ function GuideModal({ visible, onClose }: { visible: boolean; onClose: () => voi
   );
 }
 
-const styles = StyleSheet.create({
+const getStyles = themed(() => ({
   container: { flex: 1, backgroundColor: colors.bg, paddingHorizontal: 6, paddingTop: 4 },
 
   lcd: { backgroundColor: colors.lcd, paddingHorizontal: 12, paddingTop: 2, paddingBottom: 4 },
@@ -531,4 +533,10 @@ const styles = StyleSheet.create({
   chipOn: { backgroundColor: colors.accent },
   chipText: { fontSize: 17, fontWeight: '600', color: colors.text },
   chipTextOn: { color: colors.accentText, fontWeight: '800' },
+}), { scaleText: false });
+
+// Rebuilt when the colors or text size change in Settings.
+let styles = getStyles();
+onThemeChange(() => {
+  styles = getStyles();
 });
