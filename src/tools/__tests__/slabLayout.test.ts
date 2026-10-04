@@ -1,6 +1,9 @@
 import { buildLayout, matBars } from '../../report/layoutGeom';
 import { slabLayout } from '../slabLayoutTool';
-import { rowValue, runTool } from '../run';
+import { RawValues, rowValue, runTool } from '../run';
+import { ALL_TOOLS } from '../index';
+
+const cutList = ALL_TOOLS.find((t) => t.id === 'cut-list')!;
 import type { EdgeKind } from '../types';
 
 // A 7' wide L walk, walked clockwise from the top left:
@@ -63,4 +66,27 @@ test('sides that don\'t meet, wrong turns, or rounding next to the house are ref
   expect(runTool(slabLayout, { sides: turns }).status).toBe('invalid');
   const houseRound = walk.map((s, i) => (i === 4 ? ([7, 'R', 2, 'form'] as typeof s) : s));
   expect(runTool(slabLayout, { sides: houseRound }).status).toBe('invalid');
+});
+
+test('sends every piece to the Rebar Cut List, which comes up with the same weight', () => {
+  const r = runTool(slabLayout, { sides: walk, footing: true, slabRebar: true, footBars: true });
+  expect(r.status).toBe('ok');
+  if (r.status !== 'ok') return;
+  const send = r.result.send!;
+  expect(send.toolId).toBe('cut-list');
+  const cut = runTool(cutList, send.raw as RawValues);
+  expect(cut.status).toBe('ok');
+  // Pieces are rounded up to the next ½", so the weight can only come out the same or a hair more.
+  const lbs = (v: string | undefined) => Number(v!.replace(/[^\d.]/g, ''));
+  const own = lbs(rowValue(r, 'Rebar weight'));
+  const listed = lbs(rowValue(cut, 'Weight'));
+  expect(listed).toBeGreaterThanOrEqual(own);
+  expect(listed - own).toBeLessThan(own * 0.02);
+});
+
+test('no rebar or dowels, nothing to send', () => {
+  const noDowels = walk.map(([l, t, r, e]): [number, 'R' | 'L', number, EdgeKind] => [l, t, r, e === 'slabDowels' ? 'slab' : e]);
+  const r = runTool(slabLayout, { sides: noDowels });
+  expect(r.status).toBe('ok');
+  if (r.status === 'ok') expect(r.result.send).toBeUndefined();
 });

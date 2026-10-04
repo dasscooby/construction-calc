@@ -182,6 +182,14 @@ export const slabLayout: Tool = {
       const lapFor = (bar: Bar) => (inp.has('lap') ? inp.num('lap') : lapIn(bar)) / 12;
       const sticks = new Map<number, number>();
       const addSticks = (bar: Bar, k: number) => sticks.set(bar.size, (sticks.get(bar.size) ?? 0) + k);
+      // Every piece to cut, for the Rebar Cut List: size → length in ½" → how many.
+      const cuts = new Map<string, number>();
+      const cut = (bar: Bar, lengthFt: number, count: number) => {
+        if (count <= 0 || lengthFt <= 1e-9) return;
+        const halfIn = Math.ceil(lengthFt * 24 - 1e-6);
+        const key = `${bar.size}|${halfIn}`;
+        cuts.set(key, (cuts.get(key) ?? 0) + count);
+      };
       let totalLb = 0;
       const legFt = Math.max(0, d - t / 2 - COVER_IN / 12);
 
@@ -204,6 +212,8 @@ export const slabLayout: Tool = {
           ft += run.barFt;
           laps += run.laps;
           pieces.push({ lengthFt: run.tailFt, count: 1 });
+          cut(bar, stockFt, run.laps);
+          cut(bar, run.tailFt, 1);
         }
         if (pieces.some((p) => p.lengthFt > stockFt + 1e-9)) return { error: `A bar piece is longer than a ${stockFt}' stick. Try a longer stick.` };
         let slabSticks = laps + sticksToCut(pieces, stockFt);
@@ -218,6 +228,7 @@ export const slabLayout: Tool = {
           const k = countAlong(centerline * 12, spacing);
           const len = lapFt + legFt;
           slabSticks += sticksToCut([{ lengthFt: len, count: k }], stockFt);
+          cut(bar, len, k);
           ft += k * len;
           rows.push({ label: 'Edge L-bars', value: `${commas(k)} × ${ftIn(len)}`, note: `${inches(lapFt * 12)} into the slab, ${inches(legFt * 12)} down into the edge, every ${dec(spacing)}"` });
         }
@@ -233,6 +244,9 @@ export const slabLayout: Tool = {
         if (2 * lapFt > stockFt) return { error: `A corner bar won’t fit in a ${stockFt}' stick.` };
         const r = beamBars(centerline, lines, bar, stockFt, lapFt, squareCorners);
         const curves = sides.filter((s, k) => both(k) && s.radius > 0).length;
+        cut(bar, stockFt, lines * r.run.laps);
+        cut(bar, r.run.tailFt, lines);
+        cut(bar, r.cornerBarFt, r.cornerBars);
         rows.push({
           label: 'Footing bars',
           value: feet(r.totalFt),
@@ -258,11 +272,24 @@ export const slabLayout: Tool = {
           note: `#${bar.size} every ${dec(spacing)}" into the ${where} (sides ${dowelSides.map(({ k }) => k + 1).join(', ')}) · drill and epoxy about ${inches((len * 12) / 2)}`,
         });
         addSticks(bar, sticksToCut([{ lengthFt: len, count }], stockFt));
+        cut(bar, len, count);
         totalLb += weightLb(bar, count * len);
       }
 
       for (const [size, k] of [...sticks].sort((a, b) => a[0] - b[0])) rows.push({ label: `#${size} sticks`, value: `${commas(k)} × ${stockFt}'` });
       rows.push({ label: 'Rebar weight', value: lb(totalLb), note: tons(totalLb / LB_PER_TON) });
+      const marks = [...cuts]
+        .map(([key, qty]) => {
+          const [size, halfIn] = key.split('|').map(Number);
+          return { size, halfIn, qty };
+        })
+        .sort((a, b) => a.size - b.size || b.halfIn - a.halfIn)
+        .map(({ size, halfIn, qty }) => ({
+          size: String(size),
+          qty: String(qty),
+          length: { ft: String(Math.floor(halfIn / 24)), in: String((halfIn % 24) / 2) },
+        }));
+      return { rows, warnings, send: { toolId: 'cut-list', label: 'Send to Rebar Cut List', raw: { marks, stockLength: String(stockFt) } } };
     }
     return { rows, warnings };
   },

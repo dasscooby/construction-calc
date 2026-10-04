@@ -182,6 +182,8 @@ export interface ToolResult {
   rows: ResultRow[];
   /** Plain-English cautions shown in a yellow box */
   warnings?: string[];
+  /** Hand these numbers to another tool (a button under the answers opens it filled in) */
+  send?: { toolId: string; label: string; raw: Record<string, unknown> };
 }
 
 /** Return { error } for values that don't make sense (e.g. cover bigger than the slab). */

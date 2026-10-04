@@ -79,6 +79,7 @@ export default function App() {
         onOpenHistory={() => setOverlay('history')}
         onOpenSettings={() => setOverlay('settings')}
         request={request?.tab === id ? request.req : undefined}
+        onSend={(toolId, raw) => openTool(toolId, raw)}
       />
     );
   };

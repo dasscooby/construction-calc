@@ -59,9 +59,11 @@ interface Props {
   /** Opened from a job (or just added to one): changes can be saved back to it */
   jobLink?: JobLink;
   onJobLink: (link: JobLink | undefined) => void;
+  /** Open another tool filled in with numbers from this one */
+  onSend?: (toolId: string, raw: RawValues) => void;
 }
 
-export default function ToolScreen({ tool, raw, onChange, onBack, active, jobLink, onJobLink }: Props) {
+export default function ToolScreen({ tool, raw, onChange, onBack, active, jobLink, onJobLink, onSend }: Props) {
   const prefs = useSettings();
   const result = useMemo(() => runTool(tool, raw), [tool, raw]);
   const set = (key: string, value: RawValue) => onChange({ ...raw, [key]: value });
@@ -129,6 +131,20 @@ export default function ToolScreen({ tool, raw, onChange, onBack, active, jobLin
         {hasInches && <Text style={styles.hint}>Inches can be 6, 6.5, or 6 1/2</Text>}
         <Results result={result} />
         {drawings ? <DrawingView drawings={drawings} /> : null}
+        {result.status === 'ok' && result.result.send && onSend ? (
+          <Pressable
+            onPress={() => {
+              const s = result.result.send!;
+              feel.tap();
+              save();
+              onSend(s.toolId, s.raw as RawValues);
+            }}
+            style={styles.sendBtn}
+            accessibilityRole="button"
+          >
+            <Text style={styles.sendText}>{result.result.send.label} ›</Text>
+          </Pressable>
+        ) : null}
         <ShareButton text={text} onShare={save} />
         {text ? <JobButtons tool={tool} raw={raw} title={tool.title} jobLink={jobLink} onJobLink={onJobLink} /> : null}
         {tool.notes?.map((n, i) => (
@@ -818,6 +834,8 @@ const getStyles = themed(() => ({
   stockRow: { flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 8 },
   stockCol: { flex: 1, minWidth: 0, flexDirection: 'row' },
   stockRemove: { width: 36, alignItems: 'center', justifyContent: 'center', paddingVertical: 10 },
+  sendBtn: { backgroundColor: colors.panel2, borderRadius: 14, padding: 14, alignItems: 'center', marginBottom: 12 },
+  sendText: { fontSize: 17, fontWeight: '700', color: colors.accent },
   sketch: { borderRadius: 14, overflow: 'hidden', marginBottom: 12 },
   addBtn: { borderWidth: 1, borderColor: colors.faint, borderStyle: 'dashed', borderRadius: 14, padding: 12, alignItems: 'center' },
   addText: { fontSize: 17, fontWeight: '700', color: colors.accent },

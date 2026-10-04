@@ -34,10 +34,12 @@ interface Props {
   onOpenHistory: () => void;
   onOpenSettings: () => void;
   request?: OpenRequest;
+  /** Open another tool (any tab) filled in with these numbers */
+  onSend: (toolId: string, raw: RawValues) => void;
 }
 
 /** A tab's menu of tools. Tapping one opens it; numbers stay filled in, even after the app is closed. */
-export default function ToolsTab({ title, groups, active, onOpenHistory, onOpenSettings, request }: Props) {
+export default function ToolsTab({ title, groups, active, onOpenHistory, onOpenSettings, request, onSend }: Props) {
   const prefs = useSettings();
   const [openId, setOpenId] = useState<string | null>(null);
   const [raws, setRaws] = useState<Record<string, RawValues>>({});
@@ -96,6 +98,7 @@ export default function ToolsTab({ title, groups, active, onOpenHistory, onOpenS
         active={active}
         jobLink={links[tool.id]}
         onJobLink={(link) => setLinks((prev) => ({ ...prev, [tool.id]: link }))}
+        onSend={onSend}
       />
     );
   }
