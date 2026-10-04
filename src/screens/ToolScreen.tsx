@@ -1,5 +1,6 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import {
+  BackHandler,
   Keyboard,
   KeyboardAvoidingView,
   Platform,
@@ -13,9 +14,12 @@ import {
 } from 'react-native';
 
 import { RawArea, RawBarRow, RawLength, RawValue, RawValues, RunResult, defaultRaw, runTool } from '../tools/run';
+import { history } from '../lib/history';
 import { shareText } from '../tools/share';
 import { BarListField, Field, Tool } from '../tools/types';
 import { colors } from '../theme';
+
+const SHARE_LABEL = Platform.OS === 'ios' ? 'Share or save to Notes' : 'Share these numbers';
 
 // iPhone keyboard with numbers plus space, "/", "-" and "." so 6 1/2 and -0.35 can be typed.
 const NUM_KEYBOARD = Platform.OS === 'ios' ? 'numbers-and-punctuation' : 'default';
@@ -25,9 +29,11 @@ interface Props {
   raw: RawValues;
   onChange: (raw: RawValues) => void;
   onBack: () => void;
+  /** This tab is showing (the Android back button only acts on the tab you're looking at) */
+  active: boolean;
 }
 
-export default function ToolScreen({ tool, raw, onChange, onBack }: Props) {
+export default function ToolScreen({ tool, raw, onChange, onBack, active }: Props) {
   const result = useMemo(() => runTool(tool, raw), [tool, raw]);
   const set = (key: string, value: RawValue) => onChange({ ...raw, [key]: value });
   const clear = () => {
@@ -36,13 +42,35 @@ export default function ToolScreen({ tool, raw, onChange, onBack }: Props) {
   };
 
   const main = result.status === 'ok' ? result.result.rows.filter((r) => r.big).slice(0, 2) : [];
+  const text = shareText(tool, raw, result);
+  // Anything with an answer goes into History when you leave the tool or share it.
+  const save = () => {
+    if (!text) return;
+    history.add({ toolId: tool.id, title: tool.title, raw, main: main.map((r) => ({ label: r.label, value: r.value })), text });
+  };
+  const back = () => {
+    save();
+    onBack();
+  };
+  const backRef = useRef(back);
+  backRef.current = back;
+
+  // Android back button/gesture: leave the tool (saving it) before leaving the app.
+  useEffect(() => {
+    if (!active) return;
+    const sub = BackHandler.addEventListener('hardwareBackPress', () => {
+      backRef.current();
+      return true;
+    });
+    return () => sub.remove();
+  }, [active]);
   const hasInches = tool.fields.some((f) => f.kind === 'length' || f.kind === 'areas' || f.kind === 'barlist');
   const titleSize = tool.title.length > 22 ? 16 : tool.title.length > 16 ? 18 : 22;
 
   return (
     <KeyboardAvoidingView style={styles.flex} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
       <View style={styles.header}>
-        <Pressable onPress={onBack} style={styles.back} accessibilityRole="button" accessibilityLabel="Back">
+        <Pressable onPress={back} style={styles.back} accessibilityRole="button" accessibilityLabel="Back">
           <Text style={styles.backText}>‹ Back</Text>
         </Pressable>
         <Text style={[styles.title, { fontSize: titleSize }]} numberOfLines={1}>
@@ -64,7 +92,7 @@ export default function ToolScreen({ tool, raw, onChange, onBack }: Props) {
         ))}
         {hasInches && <Text style={styles.hint}>Inches can be 6, 6.5, or 6 1/2</Text>}
         <Results result={result} />
-        <ShareButton text={shareText(tool, raw, result)} />
+        <ShareButton text={text} onShare={save} />
         {tool.notes?.map((n, i) => (
           <Text key={i} style={styles.note}>
             • {n}
@@ -95,11 +123,12 @@ export default function ToolScreen({ tool, raw, onChange, onBack }: Props) {
   );
 }
 
-/** Text or email the numbers. On a computer browser with no share menu, copies them instead. */
-function ShareButton({ text }: { text: string | null }) {
+/** Opens the phone's share menu: text, email, or (iPhone) Apple Notes. On a computer with no share menu, copies instead. */
+export function ShareButton({ text, onShare }: { text: string | null; onShare?: () => void }) {
   const [copied, setCopied] = useState(false);
   if (!text) return null;
   const share = async () => {
+    onShare?.();
     const nav = typeof navigator !== 'undefined' ? navigator : undefined;
     if (Platform.OS === 'web' && !nav?.share) {
       if (!nav?.clipboard) return;
@@ -112,7 +141,7 @@ function ShareButton({ text }: { text: string | null }) {
   };
   return (
     <Pressable onPress={share} style={({ pressed }) => [styles.shareBtn, pressed && styles.sharePressed]} accessibilityRole="button">
-      <Text style={styles.shareText}>{copied ? 'Copied ✓' : 'Share these numbers'}</Text>
+      <Text style={styles.shareText}>{copied ? 'Copied ✓' : SHARE_LABEL}</Text>
     </Pressable>
   );
 }

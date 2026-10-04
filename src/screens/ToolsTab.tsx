@@ -1,6 +1,6 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useEffect, useState } from 'react';
-import { BackHandler, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 
 import { RawValues, defaultRaw, restoreRaw } from '../tools/run';
 import { Tool } from '../tools/types';
@@ -12,8 +12,23 @@ export interface ToolGroup {
   tools: Tool[];
 }
 
+/** Open this tool with these numbers in the boxes (from History). `n` changes on every request. */
+export interface OpenRequest {
+  toolId: string;
+  raw: RawValues;
+  n: number;
+}
+
+interface Props {
+  title: string;
+  groups: ToolGroup[];
+  active: boolean;
+  onOpenHistory: () => void;
+  request?: OpenRequest;
+}
+
 /** A tab's menu of tools. Tapping one opens it; numbers stay filled in, even after the app is closed. */
-export default function ToolsTab({ title, groups, active }: { title: string; groups: ToolGroup[]; active: boolean }) {
+export default function ToolsTab({ title, groups, active, onOpenHistory, request }: Props) {
   const [openId, setOpenId] = useState<string | null>(null);
   const [raws, setRaws] = useState<Record<string, RawValues>>({});
   const [loaded, setLoaded] = useState(false);
@@ -38,15 +53,13 @@ export default function ToolsTab({ title, groups, active }: { title: string; gro
     if (loaded) AsyncStorage.setItem(saveKey, JSON.stringify(raws)).catch(() => {});
   }, [loaded, raws, saveKey]);
 
-  // Android back button/gesture: leave the open tool before leaving the app.
   useEffect(() => {
-    if (!active || !openId) return;
-    const sub = BackHandler.addEventListener('hardwareBackPress', () => {
-      setOpenId(null);
-      return true;
-    });
-    return () => sub.remove();
-  }, [active, openId]);
+    if (!request) return;
+    const t = all.find((x) => x.id === request.toolId);
+    if (!t) return;
+    setRaws((prev) => ({ ...prev, [t.id]: restoreRaw(t, request.raw) }));
+    setOpenId(t.id);
+  }, [request?.n]); // each new request
 
   if (tool) {
     return (
@@ -55,13 +68,21 @@ export default function ToolsTab({ title, groups, active }: { title: string; gro
         raw={raws[tool.id] ?? defaultRaw(tool)}
         onChange={(r) => setRaws((prev) => ({ ...prev, [tool.id]: r }))}
         onBack={() => setOpenId(null)}
+        active={active}
       />
     );
   }
 
   return (
     <ScrollView style={styles.page} contentContainerStyle={styles.content}>
-      <Text style={styles.title}>{title}</Text>
+      <View style={styles.titleRow}>
+        <Text style={styles.title} numberOfLines={1} adjustsFontSizeToFit>
+          {title}
+        </Text>
+        <Pressable onPress={onOpenHistory} style={styles.historyBtn} accessibilityRole="button">
+          <Text style={styles.historyText}>History</Text>
+        </Pressable>
+      </View>
       {groups.map((g, gi) => (
         <View key={gi}>
           {g.heading ? <Text style={styles.heading}>{g.heading}</Text> : null}
@@ -89,7 +110,10 @@ export default function ToolsTab({ title, groups, active }: { title: string; gro
 const styles = StyleSheet.create({
   page: { flex: 1, backgroundColor: colors.bg },
   content: { padding: 14, paddingBottom: 30 },
-  title: { fontSize: 34, fontWeight: '800', color: colors.text, marginBottom: 8, marginLeft: 2 },
+  titleRow: { flexDirection: 'row', alignItems: 'center', marginBottom: 8 },
+  title: { flex: 1, fontSize: 34, fontWeight: '800', color: colors.text, marginLeft: 2 },
+  historyBtn: { backgroundColor: colors.panel2, borderRadius: 999, paddingHorizontal: 16, paddingVertical: 9, marginLeft: 8 },
+  historyText: { color: colors.accent, fontSize: 17, fontWeight: '700' },
   heading: { fontSize: 14, fontWeight: '700', color: colors.subtext, marginTop: 12, marginBottom: 6, marginLeft: 4, textTransform: 'uppercase', letterSpacing: 0.6 },
   item: {
     flexDirection: 'row',
