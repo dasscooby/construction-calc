@@ -26,6 +26,16 @@ export interface Pour {
   done: boolean;
 }
 
+/** One line on a bid or bill, kept as typed. */
+export interface PriceLine {
+  id: string;
+  desc: string;
+  qty: string;
+  unit: string;
+  /** Price per unit, dollars */
+  price: string;
+}
+
 export interface Job {
   id: string;
   name: string;
@@ -38,6 +48,14 @@ export interface Job {
   pour?: Pour;
   /** Scanned plan pages: image files saved on the phone */
   scans?: string[];
+  /** Who the bid and bill go to */
+  customer?: string;
+  /** Bid / bill lines */
+  lines?: PriceLine[];
+  /** Sales tax %, as typed */
+  taxPct?: string;
+  /** Already paid (deposit), dollars, as typed */
+  paid?: string;
 }
 
 const SAVE_KEY = 'jobs-v1';
@@ -77,7 +95,7 @@ export const jobStore = {
     set([job, ...jobs]);
     return job.id;
   },
-  edit(id: string, patch: Partial<Pick<Job, 'name' | 'address' | 'notes'>>) {
+  edit(id: string, patch: Partial<Pick<Job, 'name' | 'address' | 'notes' | 'customer' | 'taxPct' | 'paid'>>) {
     update(id, (j) => ({ ...j, ...patch }));
   },
   remove(id: string) {
@@ -112,6 +130,9 @@ export const jobStore = {
   },
   addScans(jobId: string, uris: string[]) {
     update(jobId, (j) => ({ ...j, scans: [...(j.scans ?? []), ...uris] }));
+  },
+  setLines(jobId: string, lines: Omit<PriceLine, 'id'>[] | PriceLine[]) {
+    update(jobId, (j) => ({ ...j, lines: lines.map((l) => ({ ...l, id: 'id' in l && l.id ? l.id : newId() })) }));
   },
   removeScan(jobId: string, uri: string) {
     update(jobId, (j) => ({ ...j, scans: (j.scans ?? []).filter((s) => s !== uri) }));

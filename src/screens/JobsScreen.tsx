@@ -3,13 +3,15 @@ import { Image, Platform, Pressable, ScrollView, Share, Text, TextInput, View } 
 
 import { feel } from '../lib/feel';
 import { dayLabel, timeLabel } from '../lib/history';
-import { Job, JobItem, jobStore, useJobs, yardsIn } from '../lib/jobs';
+import { Job, JobItem, jobStore, PriceLine, useJobs, yardsIn } from '../lib/jobs';
 import { deleteJobScans, deleteScanFile, scanPages, scannerAvailable, scansForReport } from '../lib/scanner';
 import { useSettings } from '../lib/settings';
 import { dec } from '../tools/format';
 import { liveActivitiesSupported } from '../widgets/bridge';
 import { openReport } from '../report/open';
-import { buildReport, figureItems, jobTotals } from '../report/report';
+import { buildBid, buildBill, lineAmount, priceTotals, suggestLines } from '../report/billing';
+import { buildReport, figureItems, FiguredItem, jobTotals } from '../report/report';
+import { money } from '../tools/format';
 import { colors, onThemeChange, themed } from '../theme';
 
 interface Props {
@@ -74,7 +76,7 @@ function JobDetail({ job, onBack, onOpenItem }: { job: Job; onBack: () => void; 
   const prefs = useSettings();
   const [confirmDelete, setConfirmDelete] = useState(false);
   const figured = useMemo(() => figureItems(job), [job]);
-  const report = useMemo(() => buildReport(job, prefs), [job, prefs]);
+  const report = useMemo(() => buildReport(job, prefs, { crew: true }), [job, prefs]);
   const totals = useMemo(() => jobTotals(figured), [figured]);
   const [scanning, setScanning] = useState(false);
   const canScan = useMemo(scannerAvailable, []);
@@ -82,7 +84,7 @@ function JobDetail({ job, onBack, onOpenItem }: { job: Job; onBack: () => void; 
     // Phone app: put the scanned plan pages in the PDF too.
     if (Platform.OS !== 'web' && job.scans?.length) {
       void scansForReport(job.scans).then((scans) => {
-        const r = buildReport(job, prefs, { scans });
+        const r = buildReport(job, prefs, { scans, crew: true });
         openReport(r.html, r.text, job.name);
       });
     } else openReport(report.html, report.text, job.name);
@@ -149,12 +151,38 @@ function JobDetail({ job, onBack, onOpenItem }: { job: Job; onBack: () => void; 
           </View>
         )}
 
+        <Text style={styles.section}>Send out</Text>
         <Pressable onPress={viewReport} style={[styles.primary, styles.wide]} accessibilityRole="button">
-          <Text style={styles.primaryText}>View report / PDF</Text>
+          <Text style={styles.primaryText}>Crew sheet</Text>
+          <Text style={styles.primarySub}>Plans, drawings, load list, notes. No prices.</Text>
         </Pressable>
-        <Pressable onPress={() => Share.share({ title: job.name, message: report.text }).catch(() => {})} style={styles.secondary} accessibilityRole="button">
-          <Text style={styles.secondaryText}>Share as text</Text>
+        <View style={styles.sendRow}>
+          <Pressable
+            onPress={() => {
+              const r = buildBid(job, prefs, figured);
+              openReport(r.html, r.text, `${job.name} bid`);
+            }}
+            style={[styles.secondary, styles.half]}
+            accessibilityRole="button"
+          >
+            <Text style={styles.secondaryText}>Bid</Text>
+          </Pressable>
+          <Pressable
+            onPress={() => {
+              const r = buildBill(job, prefs, figured);
+              openReport(r.html, r.text, `${job.name} bill`);
+            }}
+            style={[styles.secondary, styles.half]}
+            accessibilityRole="button"
+          >
+            <Text style={styles.secondaryText}>Final bill</Text>
+          </Pressable>
+        </View>
+        <Pressable onPress={() => Share.share({ title: job.name, message: report.text }).catch(() => {})} style={styles.linkBtn} accessibilityRole="button">
+          <Text style={styles.linkText}>Text the crew sheet instead</Text>
         </Pressable>
+
+        <Prices job={job} figured={figured} />
 
         <PourCard job={job} orderYd={totals.concreteOrderYd} truckYd={Number(prefs.defaults.truck) || 10} />
 
@@ -342,7 +370,117 @@ function PourCard({ job, orderYd, truckYd }: { job: Job; orderYd: number; truckY
   );
 }
 
+/** Customer and price lines for the bid and the final bill. */
+function Prices({ job, figured }: { job: Job; figured: FiguredItem[] }) {
+  const lines = job.lines ?? [];
+  const m = priceTotals(job);
+  const setLine = (i: number, patch: Partial<PriceLine>) => jobStore.setLines(job.id, lines.map((l, j) => (j === i ? { ...l, ...patch } : l)));
+  const box = (value: string, onChange: (v: string) => void, placeholder: string, a11y: string, style: object, numeric = true) => (
+    <TextInput
+      style={[styles.lineInput, style]}
+      value={value}
+      onChangeText={onChange}
+      placeholder={placeholder}
+      placeholderTextColor={colors.faint}
+      keyboardType={numeric ? 'decimal-pad' : 'default'}
+      accessibilityLabel={a11y}
+    />
+  );
+  return (
+    <>
+      <Text style={styles.section}>Bid and bill</Text>
+      <TextInput
+        style={[styles.field, styles.customer]}
+        value={job.customer ?? ''}
+        onChangeText={(customer) => jobStore.edit(job.id, { customer })}
+        placeholder="Customer name, address, phone"
+        placeholderTextColor={colors.faint}
+        multiline
+        accessibilityLabel="Customer"
+      />
+      <View style={styles.card}>
+        {lines.length === 0 ? <Text style={styles.help}>Add what you’re charging for. “Fill in from job” starts the list from your numbers.</Text> : null}
+        {lines.map((l, i) => (
+          <View key={l.id} style={styles.line}>
+            <View style={styles.lineTop}>
+              {box(l.desc, (desc) => setLine(i, { desc }), 'What', `Line ${i + 1} description`, styles.lineDesc, false)}
+              <Pressable
+                onPress={() => jobStore.setLines(job.id, lines.filter((_, j) => j !== i))}
+                style={styles.lineX}
+                accessibilityRole="button"
+                accessibilityLabel={`Remove line ${i + 1}`}
+              >
+                <Text style={[styles.smallBtnText, styles.danger]}>✕</Text>
+              </Pressable>
+            </View>
+            <View style={styles.lineTop}>
+              {box(l.qty, (qty) => setLine(i, { qty }), 'Qty', `Line ${i + 1} quantity`, styles.lineQty)}
+              {box(l.unit, (unit) => setLine(i, { unit }), 'unit', `Line ${i + 1} unit`, styles.lineUnit, false)}
+              {box(l.price, (price) => setLine(i, { price }), '$ each', `Line ${i + 1} price`, styles.linePrice)}
+              <Text style={styles.lineAmt} numberOfLines={1}>
+                {money(lineAmount(l))}
+              </Text>
+            </View>
+          </View>
+        ))}
+        <View style={styles.itemBtns}>
+          <Pressable
+            onPress={() => jobStore.setLines(job.id, [...lines, { id: '', desc: '', qty: '1', unit: '', price: '' }])}
+            style={styles.smallBtn}
+            accessibilityRole="button"
+          >
+            <Text style={styles.smallBtnText}>+ Add line</Text>
+          </Pressable>
+          <Pressable
+            onPress={() => {
+              feel.tap();
+              jobStore.setLines(job.id, [...lines, ...suggestLines(figured)]);
+            }}
+            style={styles.smallBtn}
+            accessibilityRole="button"
+          >
+            <Text style={styles.smallBtnText}>Fill in from job</Text>
+          </Pressable>
+        </View>
+        <View style={[styles.sumRow, styles.lineGap]}>
+          <Text style={styles.sumLabel}>Tax %</Text>
+          {box(job.taxPct ?? '', (taxPct) => jobStore.edit(job.id, { taxPct }), '0', 'Tax percent', styles.lineQty)}
+        </View>
+        <View style={styles.sumRow}>
+          <Text style={styles.sumLabel}>Paid so far (deposit)</Text>
+          {box(job.paid ?? '', (paid) => jobStore.edit(job.id, { paid }), '$0', 'Paid so far', styles.linePrice)}
+        </View>
+        <View style={[styles.sumRow, styles.lineGap]}>
+          <Text style={styles.sumLabel}>Total</Text>
+          <Text style={styles.sumValue}>{money(m.total)}</Text>
+        </View>
+        {m.paid ? (
+          <View style={styles.sumRow}>
+            <Text style={styles.sumLabel}>Balance due</Text>
+            <Text style={styles.sumValue}>{money(m.balance)}</Text>
+          </View>
+        ) : null}
+      </View>
+    </>
+  );
+}
+
 const getStyles = themed(() => ({
+  primarySub: { fontSize: 13, color: colors.accentText, opacity: 0.8, marginTop: 2 },
+  sendRow: { flexDirection: 'row', gap: 10 },
+  linkBtn: { alignItems: 'center', paddingVertical: 6, marginBottom: 6 },
+  linkText: { fontSize: 15, color: colors.subtext, textDecorationLine: 'underline' },
+  customer: { minHeight: 70, textAlignVertical: 'top' },
+  line: { borderBottomWidth: 0.5, borderBottomColor: colors.border, paddingVertical: 8 },
+  lineTop: { flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 4 },
+  lineInput: { backgroundColor: colors.panel2, borderRadius: 10, paddingHorizontal: 10, paddingVertical: 8, fontSize: 16, color: colors.text },
+  lineDesc: { flex: 1, minWidth: 0 },
+  lineQty: { width: 70 },
+  lineUnit: { width: 64 },
+  linePrice: { width: 88 },
+  lineAmt: { flex: 1, minWidth: 0, textAlign: 'right', fontSize: 16, fontWeight: '700', color: colors.text },
+  lineX: { paddingHorizontal: 10, paddingVertical: 8 },
+  lineGap: { marginTop: 10 },
   page: { flex: 1, backgroundColor: colors.bg },
   content: { padding: 14, paddingBottom: 40 },
   header: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 8, paddingVertical: 6, borderBottomWidth: 0.5, borderBottomColor: colors.border },

@@ -363,15 +363,23 @@ function totalsRows(t: Totals): { label: string; value: string }[] {
   return rows;
 }
 
-/** `scans`: scanned plan pages as data URIs (phone app), added at the end of the report. */
-export function buildReport(job: Job, s: Settings, opts: { now?: Date; scans?: string[] } = {}): { html: string; text: string } {
+/**
+ * The job report. `crew`: the crew sheet, with no prices and the notes up top.
+ * `scans`: scanned plan pages as data URIs (phone app), added at the end.
+ */
+export function buildReport(job: Job, s: Settings, opts: { now?: Date; scans?: string[]; crew?: boolean } = {}): { html: string; text: string } {
   const now = opts.now ?? new Date();
   const scans = opts.scans ?? [];
-  const items = figureItems(job);
+  const crew = !!opts.crew;
+  const priced = (r: { label: string }) => !(crew && /cost|price/i.test(r.label));
+  const items = figureItems(job).map((f) =>
+    crew && f.result.status === 'ok' ? { ...f, result: { ...f.result, result: { ...f.result.result, rows: f.result.result.rows.filter(priced) } } } : f,
+  );
   const totals = jobTotals(items);
   const drawings = jobDrawings(job, items);
   const company = companyLine(s);
-  const sum = totalsRows(totals);
+  const sum = totalsRows(totals).filter(priced);
+  const notesHtml = job.notes ? `<h2>Notes</h2><div class="notes">${esc(job.notes)}</div>` : '';
   const date = now.toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' });
 
   const itemHtml = items
@@ -387,7 +395,7 @@ export function buildReport(job: Job, s: Settings, opts: { now?: Date; scans?: s
     .join('');
 
   const html = `<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
-<title>${esc(job.name)} – Job report</title>
+<title>${esc(job.name)} – ${crew ? 'Crew sheet' : 'Job report'}</title>
 <style>
   body { font-family: -apple-system, Helvetica, Arial, sans-serif; color: #111; margin: 0; padding: 24px; background: #fff; }
   .top { display: flex; justify-content: space-between; align-items: flex-start; gap: 16px; border-bottom: 3px solid #111; padding-bottom: 12px; }
@@ -410,37 +418,40 @@ export function buildReport(job: Job, s: Settings, opts: { now?: Date; scans?: s
   .warn { background: #fff4dc; border: 1px solid #e0a000; border-radius: 6px; padding: 6px 8px; font-size: 13px; margin-bottom: 6px; }
   .draw { border: 1px solid #ccc; border-radius: 10px; overflow: hidden; margin-bottom: 12px; break-inside: avoid; }
   .notes { white-space: pre-wrap; font-size: 14px; }
+  .kind { font-size: 12px; font-weight: 800; letter-spacing: .12em; color: #b25c00; margin-bottom: 2px; }
   .scan { break-before: page; }
   .scan img { width: 100%; border: 1px solid #ccc; }
   .foot { margin-top: 24px; font-size: 11px; color: #888; text-align: center; }
   .print { position: fixed; right: 16px; bottom: 16px; padding: 12px 18px; border-radius: 999px; border: 0; background: #ff9f0a; color: #000; font-size: 16px; font-weight: 700; }
   @media print { .print { display: none; } body { padding: 0; } }
 </style></head><body>
-<div class="top"><div><h1>${esc(job.name)}</h1>${job.address ? `<div class="meta">${esc(job.address)}</div>` : ''}<div class="meta">${esc(date)}</div></div>
+<div class="top"><div>${crew ? '<div class="kind">CREW SHEET</div>' : ''}<h1>${esc(job.name)}</h1>${job.address ? `<div class="meta">${esc(job.address)}</div>` : ''}<div class="meta">${esc(date)}</div></div>
 ${company ? `<div class="co">${esc(company).replace(/ · /g, '<br>')}</div>` : ''}</div>
-${sum.length ? `<h2>Order summary</h2><table class="sum">${sum.map((r) => `<tr><td>${esc(r.label)}</td><td class="v">${esc(r.value)}</td></tr>`).join('')}</table>` : ''}
+${crew ? notesHtml : ''}
+${sum.length ? `<h2>${crew ? 'Load list' : 'Order summary'}</h2><table class="sum">${sum.map((r) => `<tr><td>${esc(r.label)}</td><td class="v">${esc(r.value)}</td></tr>`).join('')}</table>` : ''}
 ${drawings ? `<h2>Plan</h2><div class="draw">${drawings.plan}</div><h2>3D view</h2><div class="draw">${drawings.iso}</div>` : ''}
 ${drawings?.section ? `<h2>Edge detail</h2><div class="draw">${drawings.section}</div>` : ''}
 ${drawings?.house ? `<h2>At the house</h2><div class="draw">${drawings.house}</div>` : ''}
 ${items.length ? `<h2>Details</h2>${itemHtml}` : '<p>Nothing added to this job yet.</p>'}
-${job.notes ? `<h2>Notes</h2><div class="notes">${esc(job.notes)}</div>` : ''}
+${crew ? '' : notesHtml}
 ${scans.map((src, i) => `<div class="scan"><h2>Plans · page ${i + 1}</h2><img src="${src}" alt="Plan page ${i + 1}"></div>`).join('')}
 <div class="foot">Made with Construction Calc · Field numbers — always follow your plans and your engineer.</div>
 <button class="print" onclick="window.print()">Save as PDF / Print</button>
 </body></html>`;
 
   const text = [
-    `${job.name} – Job report`,
+    `${job.name} – ${crew ? 'Crew sheet' : 'Job report'}`,
     job.address,
     date,
     '',
-    ...(sum.length ? ['ORDER SUMMARY', ...sum.map((r) => `${r.label}: ${r.value}`), ''] : []),
+    ...(crew && job.notes ? ['NOTES', job.notes, ''] : []),
+    ...(sum.length ? [crew ? 'LOAD LIST' : 'ORDER SUMMARY', ...sum.map((r) => `${r.label}: ${r.value}`), ''] : []),
     ...items.flatMap(({ item, tool, result }) => [
       `— ${item.label || tool.title}`,
       ...(result.status === 'ok' ? result.result.rows.filter((r) => r.big).map((r) => `${r.label.trim()}: ${r.value}`) : [`Not finished: ${result.message}`]),
       '',
     ]),
-    ...(job.notes ? ['NOTES', job.notes, ''] : []),
+    ...(!crew && job.notes ? ['NOTES', job.notes, ''] : []),
     company,
   ]
     .filter((l, i, a) => !(l === '' && a[i - 1] === ''))

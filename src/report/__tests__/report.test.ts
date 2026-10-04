@@ -4,6 +4,7 @@ import type { Job } from '../../lib/jobs';
 import { DEFAULT_SETTINGS } from '../../lib/settings';
 import { ALL_TOOLS } from '../../tools';
 import { defaultRaw, RawValues } from '../../tools/run';
+import { buildBid, buildBill, priceTotals, suggestLines } from '../billing';
 import { buildReport, figureItems, jobTotals, numberIn, parseHeight } from '../report';
 
 const raw = (toolId: string, patch: RawValues): RawValues => ({ ...defaultRaw(ALL_TOOLS.find((t) => t.id === toolId)!), ...patch });
@@ -82,4 +83,47 @@ test('a slab-only job still gets drawings; an empty job says so', () => {
   const slabOnly = { ...job, items: [job.items[1]] };
   expect(buildReport(slabOnly, DEFAULT_SETTINGS).html).toContain('aria-label="3D view"');
   expect(buildReport({ ...job, items: [] }, DEFAULT_SETTINGS).html).toContain('Nothing added to this job yet.');
+});
+
+test('crew sheet: notes up top, a load list, and no prices', () => {
+  const { html, text } = buildReport(job, DEFAULT_SETTINGS, { crew: true });
+  expect(html).toContain('CREW SHEET');
+  expect(html).toContain('Load list');
+  expect(html).not.toContain('Concrete cost');
+  expect(html).not.toContain('$4,237.50');
+  expect(text.indexOf('Pump truck at 7')).toBeLessThan(text.indexOf('LOAD LIST'));
+});
+
+test('bid and bill: lines, tax, deposit, balance', () => {
+  const priced: Job = {
+    ...job,
+    customer: 'Bob Smith',
+    lines: [
+      { id: '1', desc: 'Slab', qty: '2065', unit: 'sq ft', price: '6.50' },
+      { id: '2', desc: 'Labor', qty: '1', unit: 'job', price: '1,200' },
+    ],
+    taxPct: '5',
+    paid: '5000',
+  };
+  // 2065 × 6.50 = 13,422.50 + 1,200 = 14,622.50; tax 731.13; total 15,353.63; balance 10,353.63
+  const m = priceTotals(priced);
+  expect(m.subtotal).toBe(14622.5);
+  expect(m.tax).toBeCloseTo(731.13, 2);
+  expect(m.balance).toBeCloseTo(10353.63, 2);
+  const items = figureItems(priced);
+  const bid = buildBid(priced, DEFAULT_SETTINGS, items);
+  expect(bid.html).toContain('BID');
+  expect(bid.html).toContain('Bob Smith');
+  expect(bid.html).toContain('$15,353.63');
+  expect(bid.html).not.toContain('Balance due');
+  expect(bid.html).toContain('Accepted by');
+  const bill = buildBill(priced, DEFAULT_SETTINGS, items);
+  expect(bill.html).toContain('INVOICE');
+  expect(bill.text).toContain('Balance due: $10,353.63');
+});
+
+test('fill in from job: slab area, concrete at the job price, rebar, forms, labor', () => {
+  const lines = suggestLines(figureItems(job));
+  expect(lines.map((l) => l.desc)).toEqual(['Slab: form, pour and finish', 'Concrete', 'Rebar, cut, bent and tied', 'Wall forms, set and strip', 'Labor']);
+  expect(lines[1]).toMatchObject({ qty: '28.25', unit: 'yd', price: '150' });
 });
