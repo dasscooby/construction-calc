@@ -330,16 +330,9 @@ const heightText = (inch: number) => (inch % 12 ? `${Math.floor(inch / 12)}'${in
 /** 12 → 1'   8 → 8" */
 const fillerText = (inch: number) => (inch === 12 ? `1'` : `${dec(inch)}"`);
 
-/** Panel heights stacked in every column, and ties in each vertical joint. */
-const WALL_STACKS: Record<string, { label: string; heightsIn: number[]; ties: number }> = {
-  p4: { label: `4'`, heightsIn: [48], ties: 3 },
-  stagger8: { label: `5'4" + 2'8" staggered`, heightsIn: [64, 32], ties: 6 },
-  p4x2: { label: `4' + 4'`, heightsIn: [48, 48], ties: 6 },
-  p8: { label: `8'`, heightsIn: [96], ties: 6 },
-  p94: { label: `9'4"`, heightsIn: [112], ties: 7 },
-  bar4_8: { label: `8' 4-bar`, heightsIn: [96], ties: 4 },
-  bar5_9: { label: `9' 5-bar`, heightsIn: [108], ties: 5 },
-};
+/** Ties in each vertical joint: one every 16" up the wall (Advance 6-bar spacing), at least 2. */
+const TIE_SPACING_IN = 16;
+export const tiesPerJoint = (wallIn: number) => Math.max(2, Math.round(wallIn / TIE_SPACING_IN));
 
 /** "1' + 34 × 2' + 1'" */
 function describeFace(lead: number[], face: FaceLayout, trail: number[], panelText: string): string {
@@ -367,12 +360,13 @@ const wallForms: Tool = {
   fields: [
     { key: 'walls', label: 'Walls', kind: 'walls', help: 'Measure on the outside. Go around the foundation one wall at a time.' },
     { key: 'thick', label: 'Wall thickness', kind: 'number', unit: 'in', default: '8' },
+    { key: 'height1', label: 'Panel height', kind: 'length', default: { ft: '4' } },
     {
-      key: 'stack',
-      label: 'Panels',
-      kind: 'choice',
-      options: Object.entries(WALL_STACKS).map(([value, st]) => ({ value, label: st.label })),
-      default: 'p4',
+      key: 'height2',
+      label: 'Stacked on top',
+      kind: 'length',
+      optional: true,
+      help: `Second row, like 4' + 4' or 5' + 3'. Staggered counts the same. Blank = one row.`,
     },
     { key: 'panel', label: 'Panel width', kind: 'number', unit: 'in', default: '24' },
     {
@@ -390,7 +384,10 @@ const wallForms: Tool = {
     const walls = inp.walls('walls');
     const t = inp.num('thick');
     const panelIn = inp.num('panel');
-    const stack = WALL_STACKS[inp.choice('stack')];
+    const heightsIn = [inp.len('height1'), ...(inp.has('height2') ? [inp.len('height2')] : [])].map((ft) => Math.round(ft * 12));
+    if (heightsIn.some((h) => h <= 0)) return { error: 'Panel height must be more than 0.' };
+    const wallIn = heightsIn.reduce((x, y) => x + y, 0);
+    const ties = tiesPerJoint(wallIn);
     if (t <= 0) return { error: 'Wall thickness must be more than 0.' };
     if (panelIn < 4) return { error: 'Panel width must be at least 4".' };
 
@@ -410,7 +407,7 @@ const wallForms: Tool = {
       return face;
     };
 
-    const pieces = stack.heightsIn.length;
+    const pieces = heightsIn.length;
     const panelText = `${dec(panelIn / 12)}'`;
     let panels = 0;
     let woodStrips = 0;
@@ -455,12 +452,12 @@ const wallForms: Tool = {
     const panelHave = haveNote(panels, inp.has('panelsOwned') ? inp.count('panelsOwned') : null, each);
     if (panelHave.short) shortages.push(`${commas(panelHave.short)} panels`);
     const rows: ResultRow[] = [
-      { label: 'Wall height', value: heightText(stack.heightsIn.reduce((x, y) => x + y, 0)) },
+      { label: 'Wall height', value: heightText(wallIn) },
       {
         label: `${panelText} panels`,
         value: commas(panels * pieces),
         big: true,
-        note: [pieces > 1 ? stack.heightsIn.map((h) => `${commas(panels)} × ${heightText(h)}`).join(' + ') : '', panelHave.note ?? '']
+        note: [pieces > 1 ? heightsIn.map((h) => `${commas(panels)} × ${heightText(h)}`).join(' + ') : '', inp.has('panelsOwned') ? panelHave.note ?? '' : '']
           .filter(Boolean)
           .join('\n') || undefined,
       },
@@ -479,10 +476,10 @@ const wallForms: Tool = {
       note: [`${ocCorners} outside + ${icCorners} inside corners on the foundation`, cornerHave.note ?? ''].filter(Boolean).join('\n'),
     });
     if (woodStrips) rows.push({ label: 'Wood strips', value: commas(woodStrips * pieces), note: '1" where a face comes out to an odd inch' });
-    rows.push({ label: 'Ties', value: `about ${commas(joints * stack.ties)}`, note: `${stack.ties} per joint` });
+    rows.push({ label: 'Ties', value: `about ${commas(joints * ties)}`, note: `${ties} per joint (one every 16")` });
     // Concrete: each outside corner shortens the centerline by the thickness, each inside corner adds it.
     const centerFt = walls.reduce((sum, w) => sum + w.length, 0) - ((ocCorners - icCorners) * t) / 12;
-    const heightFt = stack.heightsIn.reduce((x, y) => x + y, 0) / 12;
+    const heightFt = wallIn / 12;
     rows.push({ label: 'Concrete in the wall', value: cuYd((centerFt * (t / 12) * heightFt) / CUFT_PER_CUYD), note: 'No waste added' });
 
     const warnings: string[] = [];

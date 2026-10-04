@@ -248,13 +248,22 @@ In: 11 × 2' + 1' + 8" + 6"`);
     expect(r.result.warnings?.[0]).toMatch(/^Short: 42 panels, \d+ × 1'\.$/);
   });
 
+  test(`5' + 3' stacked: 8' wall, both heights listed, 6 ties per joint`, () => {
+    const r = runTool(tool('wall-forms'), { walls: job, height1: 5, height2: 3 });
+    expect(rowValue(r, 'Wall height')).toBe(`8'`);
+    if (r.status !== 'ok') throw new Error(r.status);
+    expect(r.result.rows.find((x) => x.label === `2' panels`)!.note).toBe(`192 × 5' + 192 × 3'`);
+    expect(r.result.rows.find((x) => x.label === 'Ties')!.note).toBe('6 per joint (one every 16")');
+    expect(rowValue(runTool(tool('wall-forms'), { walls: job, height1: 5 }), 'Wall height')).toBe(`5'`);
+  });
+
   test('Clear keeps what you own', () => {
     const f = tool('wall-forms').fields;
     expect(f.filter((x) => x.sticky).map((x) => x.key)).toEqual(['fillers', 'panelsOwned', 'cornersOwned']);
   });
 
   test('staggered 8\' doubles every piece', () => {
-    const r = runTool(tool('wall-forms'), { walls: job, stack: 'stagger8' });
+    const r = runTool(tool('wall-forms'), { walls: job, height1: { ft: '5', in: '4' }, height2: { ft: '2', in: '8' } });
     expect(rowValue(r, `2' panels`)).toBe('384');
     expect(rowValue(r, 'Fillers')).toBe('40');
   });
