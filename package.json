@@ -45,5 +45,12 @@
   "jest": {
     "preset": "jest-expo"
   },
-  "private": true
+  "private": true,
+  "expo": {
+    "autolinking": {
+      "exclude": [
+        "expo-widgets"
+      ]
+    }
+  }
 }

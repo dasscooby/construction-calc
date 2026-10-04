@@ -46,24 +46,6 @@
     "plugins": [
       "expo-sharing",
       [
-        "expo-widgets",
-        {
-          "groupIdentifier": "group.com.dasscooby.constructioncalc",
-          "widgets": [
-            {
-              "name": "JobWidget",
-              "displayName": "Job",
-              "description": "Your latest job's order: yards, panels and fillers.",
-              "supportedFamilies": [
-                "systemSmall",
-                "systemMedium",
-                "accessoryRectangular"
-              ]
-            }
-          ]
-        }
-      ],
-      [
         "react-native-document-scanner-plugin",
         {
           "cameraPermission": "Construction Calc uses the camera to scan plans and paperwork into your jobs."
