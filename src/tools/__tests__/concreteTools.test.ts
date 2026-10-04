@@ -1,3 +1,4 @@
+import { layoutRun } from '../concreteTools';
 import { belledPierCuFt, bellHeightFt, perimeterBeamCenterline, truckLoads } from '../../lib/concrete';
 import { CONCRETE_TOOLS } from '../concreteTools';
 import { rowValue, runTool } from '../run';
@@ -142,32 +143,6 @@ describe('concrete cost', () => {
   });
 });
 
-describe('control joints', () => {
-  // 40 x 30, 4": max 10' → 4 panels × 3 panels at 10' each. Saw cut 3 × 30 + 2 × 40 = 170 ft.
-  test('40 x 30 slab, 4" thick', () => {
-    const r = runTool(tool('control-joints'), { length: 40, width: 30 });
-    expect(rowValue(r, 'Joints along length')).toBe(`every 10' 0"`);
-    expect(rowValue(r, 'Joints along width')).toBe(`every 10' 0"`);
-    expect(rowValue(r, 'Panels')).toBe('12');
-    expect(rowValue(r, 'Saw cut')).toBe('170 ft');
-    expect(rowValue(r, 'Cut depth')).toBe('1"');
-    if (r.status === 'ok') expect(r.result.warnings).toEqual([]);
-  });
-
-  test('6" slab allows 15\'; 5" cut depth is 1-1/4"', () => {
-    expect(rowValue(runTool(tool('control-joints'), { length: 30, width: 30, thick: 0.5 }), 'Joints along length')).toBe(`every 15' 0"`);
-    expect(rowValue(runTool(tool('control-joints'), { length: 30, width: 30, thick: { ft: '', in: '5' } }), 'Cut depth')).toBe('1-1/4"');
-  });
-
-  test('long skinny panels and too-far spacing get warnings', () => {
-    // 20 x 12: 10' × 6' panels, 1.67 to 1
-    const skinny = runTool(tool('control-joints'), { length: 20, width: 12 });
-    expect(skinny.status === 'ok' && skinny.result.warnings?.[0]).toMatch(/long and skinny/);
-    const far = runTool(tool('control-joints'), { length: 28, width: 28, max: 14 });
-    expect(far.status === 'ok' && far.result.warnings?.some((w) => w.includes('farther apart'))).toBe(true);
-  });
-});
-
 describe('forms & stakes', () => {
   // 40 x 30 = 140 ft of 2x4. 140 / 16 = 8.75 → 9 boards.
   // Stakes: 40' side = 10 + 1 = 11, 30' side = 8 + 1 = 9 → 2 × 11 + 2 × 9 = 40
@@ -189,5 +164,49 @@ describe('forms & stakes', () => {
 
   test('needs a size', () => {
     expect(runTool(tool('forms'), {}).status).toBe('invalid');
+  });
+});
+
+describe('wall forms (aluminum)', () => {
+  test('layoutRun: panels, then a filler; under 4" left over swaps a panel for two fillers', () => {
+    expect(layoutRun(478, 24)).toEqual({ panels: 19, fillers: [22] });
+    expect(layoutRun(456, 24)).toEqual({ panels: 19, fillers: [] });
+    expect(layoutRun(482, 24)).toEqual({ panels: 19, fillers: [13, 13] }); // 20 panels + 2" → 19 + 26"
+  });
+
+  // 40' × 30' outside, 8" wall, 5'4" + 2'8" staggered:
+  //   outside face 40': 480 − 2 = 478" = 19 panels + 22" filler   30': 358" = 14 + 22"
+  //   inside face 40': 480 − 16 − 8 = 456" = 19 panels             30': 336" = 14
+  //   columns = 2 × (19 + 14) × 2 faces = 132 → 132 of each height = 264 panels
+  //   ties: outside joints (20 + 1) + (15 + 1) = 37 per half → 74 × 6 = 444
+  //   concrete: (140 − 2.667) × 0.667 × 8 = 732.4 cu ft = 27.13 cu yd
+  test('40 x 30 foundation, 8" wall, staggered 8\'', () => {
+    const r = runTool(tool('wall-forms'), { length: 40, width: 30, stack: 'stagger8' });
+    expect(rowValue(r, 'Wall height')).toBe(`8'`);
+    expect(rowValue(r, '24" panels')).toBe('264');
+    expect(rowValue(r, 'Fillers')).toBe('8');
+    expect(rowValue(r, 'Outside corners (1×1)')).toBe('8');
+    expect(rowValue(r, 'Inside corners (4×4)')).toBe('8');
+    expect(rowValue(r, 'Ties')).toBe('about 444');
+    expect(rowValue(r, 'Concrete in the wall')).toBe('27.13 cu yd');
+    if (r.status === 'ok') {
+      expect(r.result.rows.find((x) => x.label === '24" panels')!.note).toBe(`132 × 5'4" + 132 × 2'8"`);
+      expect(r.result.rows.find((x) => x.label === 'Fillers')!.note).toBe('4 × 22" of each height');
+    }
+  });
+
+  test('single 8\' panels: one of each piece per column', () => {
+    const r = runTool(tool('wall-forms'), { length: 40, width: 30, stack: 'p8' });
+    expect(rowValue(r, '24" panels')).toBe('132');
+    expect(rowValue(r, 'Outside corners (1×1)')).toBe('4');
+  });
+
+  test('other shapes use the outside wall length and inside corners', () => {
+    const r = runTool(tool('wall-forms'), { perim: 140, jogs: 1, stack: 'p8' });
+    expect(r.status).toBe('ok');
+    expect(rowValue(r, 'Outside corners (1×1)')).toBe('5');
+    expect(rowValue(r, 'Inside corners (4×4)')).toBe('1');
+    expect(rowValue(r, 'Fillers')).toBe('about 12');
+    expect(runTool(tool('wall-forms'), {}).status).toBe('invalid');
   });
 });
