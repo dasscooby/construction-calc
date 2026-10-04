@@ -13,7 +13,7 @@ import {
   View,
 } from 'react-native';
 
-import { RawArea, RawBarRow, RawLength, RawValue, RawValues, RawWallRow, RunResult, WALL_ENDS, defaultRaw, runTool } from '../tools/run';
+import { RawArea, RawBarRow, RawLength, RawStockRow, RawValue, RawValues, RawWallRow, RunResult, WALL_ENDS, defaultRaw, runTool } from '../tools/run';
 import { history } from '../lib/history';
 import { shareText } from '../tools/share';
 import { BarListField, Field, Tool } from '../tools/types';
@@ -37,7 +37,10 @@ export default function ToolScreen({ tool, raw, onChange, onBack, active }: Prop
   const result = useMemo(() => runTool(tool, raw), [tool, raw]);
   const set = (key: string, value: RawValue) => onChange({ ...raw, [key]: value });
   const clear = () => {
-    onChange(defaultRaw(tool));
+    // Clear the job, keep what you own.
+    const fresh = defaultRaw(tool);
+    for (const f of tool.fields) if (f.sticky) fresh[f.key] = raw[f.key];
+    onChange(fresh);
     Keyboard.dismiss();
   };
 
@@ -242,6 +245,7 @@ function FieldInput({ field, value, onChange }: { field: Field; value: RawValue;
       {field.kind === 'areas' && <AreasInput value={value as RawArea[]} onChange={onChange} />}
       {field.kind === 'barlist' && <BarListInput field={field} value={value as RawBarRow[]} onChange={onChange} />}
       {field.kind === 'walls' && <WallsInput value={value as RawWallRow[]} onChange={onChange} />}
+      {field.kind === 'stock' && <StockInput value={value as RawStockRow[]} onChange={onChange} label={field.label} />}
     </View>
   );
 }
@@ -427,6 +431,50 @@ function WallsInput({ value, onChange }: { value: RawWallRow[]; onChange: (v: Ra
   );
 }
 
+/** Size + how many rows, e.g. fillers you own. */
+function StockInput({ value, onChange, label }: { value: RawStockRow[]; onChange: (v: RawStockRow[]) => void; label: string }) {
+  const update = (i: number, patch: Partial<RawStockRow>) => onChange(value.map((r, j) => (j === i ? { ...r, ...patch } : r)));
+  return (
+    <View>
+      <View style={styles.stockHead}>
+        <Text style={[styles.areaSub, styles.stockCol]}>Width (in)</Text>
+        <Text style={[styles.areaSub, styles.stockCol]}>How many</Text>
+        <View style={styles.stockRemove} />
+      </View>
+      {value.map((r, i) => (
+        <View key={i} style={styles.stockRow}>
+          <View style={styles.stockCol}>
+            <Box value={r.size} onChange={(size) => update(i, { size })} keyboard={NUM_KEYBOARD} label={`${label} row ${i + 1} width`} />
+          </View>
+          <View style={styles.stockCol}>
+            <TextInput
+              style={styles.input}
+              value={r.qty}
+              onChangeText={(qty) => update(i, { qty })}
+              keyboardType="number-pad"
+              returnKeyType="done"
+              placeholder="plenty"
+              placeholderTextColor={colors.faint}
+              accessibilityLabel={`${label} row ${i + 1} how many`}
+            />
+          </View>
+          <Pressable
+            onPress={() => onChange(value.filter((_, j) => j !== i))}
+            style={styles.stockRemove}
+            accessibilityRole="button"
+            accessibilityLabel={`Remove ${label} row ${i + 1}`}
+          >
+            <Text style={styles.removeText}>✕</Text>
+          </Pressable>
+        </View>
+      ))}
+      <Pressable onPress={() => onChange([...value, { size: '', qty: '' }])} style={styles.addBtn} accessibilityRole="button">
+        <Text style={styles.addText}>+ Add a size</Text>
+      </Pressable>
+    </View>
+  );
+}
+
 const hairline = StyleSheet.hairlineWidth;
 
 const styles = StyleSheet.create({
@@ -488,6 +536,10 @@ const styles = StyleSheet.create({
   areaSub: { fontSize: 16, fontWeight: '600', color: colors.text, marginTop: 8, marginBottom: 4 },
   removeBtn: { paddingHorizontal: 12, paddingVertical: 6, borderRadius: 999, backgroundColor: colors.panel2 },
   removeText: { color: colors.danger, fontWeight: '700', fontSize: 15 },
+  stockHead: { flexDirection: 'row', gap: 8 },
+  stockRow: { flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 8 },
+  stockCol: { flex: 1, minWidth: 0, flexDirection: 'row' },
+  stockRemove: { width: 36, alignItems: 'center', justifyContent: 'center', paddingVertical: 10 },
   addBtn: { borderWidth: 1, borderColor: colors.faint, borderStyle: 'dashed', borderRadius: 14, padding: 12, alignItems: 'center' },
   addText: { fontSize: 17, fontWeight: '700', color: colors.accent },
 

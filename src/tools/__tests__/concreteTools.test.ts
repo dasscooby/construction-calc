@@ -213,17 +213,44 @@ In: 11 × 2' + 14" + 1'`);
     // centerline 207 − 4 × 8" = 204.33 ft × 0.667 × 4 = 544.9 cu ft
     expect(rowValue(r, 'Concrete in the wall')).toBe('20.18 cu yd');
     if (r.status === 'ok') {
-      expect(r.result.rows.find((x) => x.label === 'Fillers')!.note).toBe(`2 × 14", 14 × 1', 2 × 8", 2 × 6"`);
+      // Load list, one row per filler size
+      expect(rowValue(r, '14" fillers')).toBe('2');
+      expect(rowValue(r, `1' fillers`)).toBe('14');
+      expect(rowValue(r, '8" fillers')).toBe('2');
+      expect(rowValue(r, '6" fillers')).toBe('2');
       expect(r.result.warnings).toEqual([]);
     }
   });
 
-  test(`pick your fillers: with an 18" on the trailer, 29'6" takes one 18" instead of 1' + 6"`, () => {
-    const r = runTool(tool('wall-forms'), { walls: [[29.5, 'oo']], fillers: '6,8,12,14,18' });
+  const plenty = (sizes: number[]) => sizes.map((n) => [n, null] as [number, null]);
+
+  test(`your fillers: with an 18" on the trailer, 29'6" takes one 18" instead of 1' + 6"`, () => {
+    const r = runTool(tool('wall-forms'), { walls: [[29.5, 'oo']], fillers: plenty([6, 8, 12, 14, 18]) });
     if (r.status !== 'ok') throw new Error(r.status);
     expect(r.result.rows.find((x) => x.label === `Wall 1: 29' 6"`)!.note).toBe(`Out: 1' + 13 × 2' + 18" + 1'
 In: 13 × 2' + 18"`);
-    expect(runTool(tool('wall-forms'), { walls: [[29.5, 'oo']], fillers: '' })).toEqual({ status: 'missing', message: 'Pick fillers on the trailer' });
+    expect(runTool(tool('wall-forms'), { walls: [[29.5, 'oo']], fillers: [{ size: '', qty: '' }] }).status).toBe('missing');
+  });
+
+  test(`only one 14" on the trailer: the second face makes do with 1' + 8" + 6"`, () => {
+    const r = runTool(tool('wall-forms'), { walls: [[25.5, 'oi']], fillers: [[14, 1], [12, null], [8, null], [6, null]] });
+    if (r.status !== 'ok') throw new Error(r.status);
+    expect(r.result.rows.find((x) => x.label === `Wall 1: 25' 6"`)!.note).toBe(`Out: 1' + 11 × 2' + 14" + 1'
+In: 11 × 2' + 1' + 8" + 6"`);
+    expect(rowValue(r, '14" fillers')).toBe('1');
+    expect(r.result.warnings).toEqual([]);
+  });
+
+  test(`short on panels and 1' fillers shows up in the load list and a warning`, () => {
+    const r = runTool(tool('wall-forms'), { walls: job, panelsOwned: 150, fillers: [[14, null], [12, 10], [8, null], [6, null]] });
+    if (r.status !== 'ok') throw new Error(r.status);
+    expect(r.result.rows.find((x) => x.label === `2' panels`)!.note).toBe('Short 42. You have 150.');
+    expect(r.result.warnings?.[0]).toMatch(/^Short: 42 panels, \d+ × 1'\.$/);
+  });
+
+  test('Clear keeps what you own', () => {
+    const f = tool('wall-forms').fields;
+    expect(f.filter((x) => x.sticky).map((x) => x.key)).toEqual(['fillers', 'panelsOwned', 'cornersOwned']);
   });
 
   test('staggered 8\' doubles every piece', () => {

@@ -13,6 +13,8 @@ interface FieldBase {
   help?: string;
   /** Blank is allowed (compute gets 0 and has(key) is false) */
   optional?: boolean;
+  /** Clear leaves this box alone (things like what you own, not the job) */
+  sticky?: boolean;
 }
 
 /** Feet + inches boxes. compute() receives FEET. Boxes accept 6, 6.5, 6 1/2, 6-1/2, 1/2. */
@@ -50,6 +52,13 @@ export interface MultiChoiceField extends FieldBase {
   default: string[];
 }
 
+/** Rows of sizes (inches) and how many you own. Blank "how many" = plenty. */
+export interface StockField extends FieldBase {
+  kind: 'stock';
+  /** Rows shown at first: sizes in inches */
+  defaultSizes: string[];
+}
+
 /** Any number of length × width rectangles (odd-shaped slabs). compute() receives feet. */
 export interface AreasField extends FieldBase {
   kind: 'areas';
@@ -68,7 +77,16 @@ export interface WallsField extends FieldBase {
   kind: 'walls';
 }
 
-export type Field = LengthField | NumberField | CountField | ChoiceField | MultiChoiceField | AreasField | BarListField | WallsField;
+export type Field =
+  | LengthField
+  | NumberField
+  | CountField
+  | ChoiceField
+  | MultiChoiceField
+  | AreasField
+  | BarListField
+  | WallsField
+  | StockField;
 
 export interface Rect {
   length: number; // feet
@@ -89,6 +107,12 @@ export interface WallRow {
   ends: WallEnds;
 }
 
+export interface StockRow {
+  size: number; // inches
+  /** How many you own; null = plenty */
+  qty: number | null;
+}
+
 /** What compute() reads. Required fields are always filled in and valid before compute() runs. */
 export interface Inputs {
   /** Length field, in feet (0 if an optional field is blank). */
@@ -107,6 +131,8 @@ export interface Inputs {
   bars(key: string): BarRow[];
   /** Walls field: the filled-in rows. */
   walls(key: string): WallRow[];
+  /** Stock field: the filled-in rows. */
+  stock(key: string): StockRow[];
   /** True if the field was filled in. */
   has(key: string): boolean;
 }

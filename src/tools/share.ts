@@ -8,7 +8,7 @@
 //   Order: 25.75 yd
 
 import { ftIn, inches } from './format';
-import { RawArea, RawBarRow, RawLength, RawValues, RawWallRow, parseLength, parseNumber, RunResult } from './run';
+import { RawArea, RawBarRow, RawLength, RawStockRow, RawValues, RawWallRow, parseLength, parseNumber, RunResult } from './run';
 import { Field, Tool } from './types';
 
 const lengthText = (r: RawLength): string | null => {
@@ -49,6 +49,12 @@ function fieldText(f: Field, v: RawValues[string]): string | null {
       const parts = (v as RawBarRow[])
         .filter((r) => r.qty.trim() && lengthText(r.length))
         .map((r) => `${r.qty.trim()} – #${r.size} @ ${lengthText(r.length)}`);
+      return parts.length ? parts.join(', ') : null;
+    }
+    case 'stock': {
+      const parts = (v as RawStockRow[])
+        .filter((r) => r.size.trim())
+        .map((r) => `${r.size.trim()}"${r.qty.trim() ? ` × ${r.qty.trim()}` : ''}`);
       return parts.length ? parts.join(', ') : null;
     }
     case 'walls': {
