@@ -1,5 +1,5 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { useEffect, useReducer, useState } from 'react';
+import { useEffect, useReducer, useRef, useState } from 'react';
 import { Modal, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 
 import {
@@ -15,7 +15,10 @@ import {
   setPrefs,
   view,
 } from '../lib/cm';
+import { calcHistory, newTapeLines, useCalcHistory } from '../lib/calcHistory';
+import { dayLabel, timeLabel } from '../lib/history';
 import { DENOMS } from '../lib/units';
+import GoofyForeman, { ERRORS_FOR_FOREMAN } from './GoofyForeman';
 import { colors } from '../theme';
 
 // ---------- keypad layout (same as the Construction Master 5) ----------
@@ -37,7 +40,7 @@ const op = (k: Key, label: string, sub?: string): KeyDef => ({ k, label, sub, ki
 
 const TOP_ROW: KeyDef[] = [
   { k: 'guide', label: 'Guide', kind: 'util' },
-  { k: 'tape', label: 'Tape', kind: 'util' },
+  { k: 'tape', label: 'History', kind: 'util' },
   { k: 'prefs', label: 'Prefs', kind: 'util' },
   { k: 'onc', label: 'On/C', kind: 'clear', flex: 2 },
 ];
@@ -119,6 +122,14 @@ export default function CalculatorScreen() {
     AsyncStorage.setItem(SAVE_KEY, data).catch(() => {});
   }, [loaded, state.prefs, state.stored, state.tri.pitch]);
 
+  // Everything that goes on the tape is also saved to History (kept across days).
+  const tapeSeen = useRef(0);
+  useEffect(() => {
+    if (state.tapeCount < tapeSeen.current) tapeSeen.current = 0; // calculator was reset on startup
+    calcHistory.add(newTapeLines(state.tape, state.tapeCount, tapeSeen.current));
+    tapeSeen.current = state.tapeCount;
+  }, [state.tapeCount]);
+
   // Rcl = / Conv = open the tape; Conv % opens preferences.
   useEffect(() => {
     if (state.ui) setModal(state.ui);
@@ -126,6 +137,21 @@ export default function CalculatorScreen() {
 
   const v = view(state);
   const armed = state.prefix === 'conv';
+
+  // Easter egg: every third error brings out the foreman.
+  const [errors, setErrors] = useState(0);
+  const [foreman, setForeman] = useState(false);
+  const wasError = useRef(false);
+  useEffect(() => {
+    if (v.isError && !wasError.current) {
+      const n = errors + 1;
+      if (n >= ERRORS_FOR_FOREMAN) {
+        setForeman(true);
+        setErrors(0);
+      } else setErrors(n);
+    }
+    wasError.current = v.isError;
+  }, [v.isError]);
 
   const onKey = (k: KeyDef['k']) => {
     if (k === 'guide' || k === 'tape' || k === 'prefs') setModal(k);
@@ -150,7 +176,7 @@ export default function CalculatorScreen() {
         ))}
       </View>
 
-      <TapeModal visible={modal === 'tape'} state={state} onClose={() => setModal(null)} />
+      <TapeModal visible={modal === 'tape'} onClose={() => setModal(null)} />
       <PrefsModal
         visible={modal === 'prefs'}
         state={state}
@@ -158,6 +184,7 @@ export default function CalculatorScreen() {
         onClose={() => setModal(null)}
       />
       <GuideModal visible={modal === 'guide'} onClose={() => setModal(null)} />
+      <GoofyForeman visible={foreman} onClose={() => setForeman(false)} />
     </View>
   );
 }
@@ -268,19 +295,57 @@ function Sheet({ visible, title, onClose, children }: { visible: boolean; title:
   );
 }
 
-function TapeModal({ visible, state, onClose }: { visible: boolean; state: CalcState; onClose: () => void }) {
+/** The tape, kept by day. Newest day first, lines in the order they were entered. */
+function TapeModal({ visible, onClose }: { visible: boolean; onClose: () => void }) {
+  const lines = useCalcHistory();
+  const [confirm, setConfirm] = useState(false);
+  const days: { label: string; lines: typeof lines }[] = [];
+  for (const line of lines) {
+    const label = dayLabel(line.at);
+    if (days[days.length - 1]?.label !== label) days.push({ label, lines: [] });
+    days[days.length - 1].lines.push(line);
+  }
+  days.reverse();
   return (
-    <Sheet visible={visible} title="Tape" onClose={onClose}>
-      {state.tape.length === 0 ? (
-        <Text style={styles.para}>Nothing yet. Your entries and answers show up here.</Text>
+    <Sheet visible={visible} title="History" onClose={onClose}>
+      {lines.length === 0 ? (
+        <Text style={styles.para}>Nothing yet. Your entries and answers show up here and stay saved.</Text>
       ) : (
-        state.tape.map((line, i) => (
-          <View key={i} style={[styles.tapeRow, line.tag === 'TTL=' && styles.tapeTotal]}>
-            <Text style={styles.tapeTag}>{line.tag}</Text>
-            <Text style={styles.tapeText}>{line.text}</Text>
+        days.map((d) => (
+          <View key={d.label}>
+            <Text style={styles.tapeDay}>{d.label}</Text>
+            {d.lines.map((line, i) => (
+              <View key={i} style={[styles.tapeRow, line.tag === 'TTL=' && styles.tapeTotal]}>
+                <Text style={styles.tapeTag}>{line.tag}</Text>
+                <Text style={styles.tapeText}>{line.text}</Text>
+                {line.tag === 'TTL=' ? <Text style={styles.tapeTime}>{timeLabel(line.at)}</Text> : null}
+              </View>
+            ))}
           </View>
         ))
       )}
+      {lines.length > 0 &&
+        (confirm ? (
+          <View style={styles.tapeConfirm}>
+            <Pressable onPress={() => setConfirm(false)} style={styles.tapeBtn} accessibilityRole="button">
+              <Text style={styles.tapeBtnText}>Keep it</Text>
+            </Pressable>
+            <Pressable
+              onPress={() => {
+                calcHistory.clear();
+                setConfirm(false);
+              }}
+              style={styles.tapeBtn}
+              accessibilityRole="button"
+            >
+              <Text style={[styles.tapeBtnText, styles.tapeDanger]}>Delete all</Text>
+            </Pressable>
+          </View>
+        ) : (
+          <Pressable onPress={() => setConfirm(true)} style={styles.tapeBtn} accessibilityRole="button">
+            <Text style={[styles.tapeBtnText, styles.tapeDanger]}>Clear history</Text>
+          </Pressable>
+        ))}
     </Sheet>
   );
 }
@@ -453,6 +518,12 @@ const styles = StyleSheet.create({
   tapeTotal: { backgroundColor: colors.panel2 },
   tapeTag: { width: 64, fontSize: 17, fontWeight: '700', color: colors.accent },
   tapeText: { flex: 1, fontSize: 20, fontWeight: '500', color: colors.text, textAlign: 'right' },
+  tapeTime: { width: 72, fontSize: 13, color: colors.subtext, textAlign: 'right', alignSelf: 'center' },
+  tapeDay: { fontSize: 14, fontWeight: '700', color: colors.subtext, marginTop: 14, marginBottom: 4, textTransform: 'uppercase', letterSpacing: 0.6 },
+  tapeConfirm: { flexDirection: 'row', gap: 10 },
+  tapeBtn: { flex: 1, backgroundColor: colors.panel2, borderRadius: 14, paddingVertical: 14, alignItems: 'center', marginTop: 16 },
+  tapeBtnText: { fontSize: 17, fontWeight: '700', color: colors.accent },
+  tapeDanger: { color: colors.danger },
   prefBlock: { marginBottom: 14 },
   prefTitle: { fontSize: 17, fontWeight: '700', color: colors.subtext, marginBottom: 6 },
   chips: { flexDirection: 'row', flexWrap: 'wrap' },

@@ -134,6 +134,8 @@ export interface CalcState {
   prefs: Prefs;
   tempDenom: Denom | null;
   tape: TapeLine[];
+  /** Lines ever put on the tape (the tape keeps only the last 50), so the screen can save new ones to History */
+  tapeCount: number;
   lastKey: Key | null;
   oncCount: number;
   /** Asks the screen to open the tape or preferences */
@@ -158,6 +160,7 @@ export function createState(prefs: Prefs = DEFAULT_PREFS, stored: Stored = DEFAU
     prefs,
     tempDenom: null,
     tape: [],
+    tapeCount: 0,
     lastKey: null,
     oncCount: 0,
     ui: null,
@@ -528,7 +531,7 @@ function qtyText(q: Quantity, s: CalcState): string {
 }
 
 function pushTape(s: CalcState, tag: string, text: string): CalcState {
-  return { ...s, tape: [...s.tape, { tag, text }].slice(-50) };
+  return { ...s, tape: [...s.tape, { tag, text }].slice(-50), tapeCount: s.tapeCount + 1 };
 }
 
 // ---------- getting the value a function key works on ----------
@@ -1109,7 +1112,7 @@ function onClear(s: CalcState): CalcState {
 }
 
 function clearAll(s: CalcState): CalcState {
-  return { ...createState(s.prefs), tape: s.tape, display: { kind: 'text', text: 'ALL CLEARED' } };
+  return { ...createState(s.prefs), tape: s.tape, tapeCount: s.tapeCount, display: { kind: 'text', text: 'ALL CLEARED' } };
 }
 
 function operator(s0: CalcState, op: Op): CalcState {
