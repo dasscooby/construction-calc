@@ -14,8 +14,22 @@ type PourActivityT = typeof import('./PourActivity').default;
 
 let loaded: { JobWidget: JobWidgetT; PourActivity: PourActivityT } | null | undefined;
 
+/** Is the widget extension in this app build? Checked without loading any widget code. */
+const hasWidgetModule = (() => {
+  try {
+    return require('expo-modules-core').requireOptionalNativeModule('ExpoWidgets') !== null;
+  } catch {
+    return false;
+  }
+})();
+
 function widgets() {
   if (loaded === undefined) {
+    // Don't even load the widget code (it pulls in SwiftUI views) unless the build has widgets.
+    if (!hasWidgetModule) {
+      loaded = null;
+      return loaded;
+    }
     try {
       loaded = {
         JobWidget: (require('./JobWidget') as typeof import('./JobWidget')).default,
@@ -67,10 +81,4 @@ export function endPour(props: PourProps): void {
 }
 
 /** Live Activities need the widget extension, which this build may not have. */
-export const liveActivitiesSupported = (() => {
-  try {
-    return require('expo-modules-core').requireOptionalNativeModule('ExpoWidgets') !== null;
-  } catch {
-    return false;
-  }
-})();
+export const liveActivitiesSupported = hasWidgetModule;
