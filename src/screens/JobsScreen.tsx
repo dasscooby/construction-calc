@@ -5,7 +5,7 @@ import { feel } from '../lib/feel';
 import { dayLabel, timeLabel } from '../lib/history';
 import { Job, JobItem, jobStore, PriceLine, useJobs, yardsIn } from '../lib/jobs';
 import { deleteJobScans, deleteScanFile, scanPages, scannerAvailable, scansForReport } from '../lib/scanner';
-import { pickPlanFileWeb, PlanSlab, processPlanQueue, savePendingFile, slabToRaw } from '../lib/planReader';
+import { pickError, pickPlanFileNative, pickPlanFileWeb, pickPlanPhotoNative, PlanSlab, processPlanQueue, savePendingFile, slabToRaw } from '../lib/planReader';
 import { useSettings } from '../lib/settings';
 import { dec } from '../tools/format';
 import { liveActivitiesSupported } from '../widgets/bridge';
@@ -80,6 +80,7 @@ function JobDetail({ job, onBack, onOpenItem }: { job: Job; onBack: () => void; 
   const report = useMemo(() => buildReport(job, prefs, { crew: true }), [job, prefs]);
   const totals = useMemo(() => jobTotals(figured), [figured]);
   const [scanning, setScanning] = useState(false);
+  const [scanError, setScanError] = useState('');
   const canScan = useMemo(scannerAvailable, []);
   const viewReport = () => {
     // Phone app: put the scanned plan pages in the PDF too.
@@ -92,14 +93,15 @@ function JobDetail({ job, onBack, onOpenItem }: { job: Job; onBack: () => void; 
   };
   const scan = async () => {
     setScanning(true);
+    setScanError('');
     try {
       const pages = await scanPages(job.id);
       if (pages.length) {
         jobStore.addScans(job.id, pages);
         feel.success();
       }
-    } catch {
-      // cancelled or no camera permission
+    } catch (e) {
+      setScanError(pickError(e));
     }
     setScanning(false);
   };
@@ -262,6 +264,7 @@ function JobDetail({ job, onBack, onOpenItem }: { job: Job; onBack: () => void; 
                 <Text style={styles.secondaryText}>{scanning ? 'Scanning…' : 'Scan plans'}</Text>
               </Pressable>
             )}
+            {scanError ? <Text style={styles.warn}>{scanError}</Text> : null}
           </>
         )}
 
@@ -401,9 +404,33 @@ function PlanReader({ job }: { job: Job }) {
     jobStore.queuePlan(job.id, { id, mediaType: file.mediaType });
     void processPlanQueue();
   };
-  const readScan = (uri: string) => {
-    jobStore.queuePlan(job.id, { uri, mediaType: 'image/jpeg' });
+  const readScan = (uri: string, mediaType = 'image/jpeg') => {
+    jobStore.queuePlan(job.id, { uri, mediaType });
     void processPlanQueue();
+  };
+  const [busy, setBusy] = useState(false);
+  const canScan = useMemo(scannerAvailable, []);
+  // Phone app: scan, pick a PDF/file, or pick a photo; whatever comes back is saved with the job and read.
+  const phone = async (how: 'scan' | 'file' | 'photo') => {
+    setBusy(true);
+    jobStore.setPlanFound(job.id, found); // clears an old error
+    try {
+      if (how === 'scan') {
+        const pages = await scanPages(job.id);
+        if (pages.length) {
+          jobStore.addScans(job.id, pages);
+          pages.forEach((uri) => jobStore.queuePlan(job.id, { uri, mediaType: 'image/jpeg' }));
+          void processPlanQueue();
+        }
+      } else {
+        const picked = how === 'file' ? await pickPlanFileNative(job.id) : await pickPlanPhotoNative(job.id);
+        if (picked) readScan(picked.uri, picked.mediaType);
+      }
+    } catch (e) {
+      const msg = pickError(e);
+      if (msg) jobStore.planDone(job.id, '', { error: msg });
+    }
+    setBusy(false);
   };
   const scans = job.scans ?? [];
   const summary = (s: PlanSlab) =>
@@ -424,16 +451,34 @@ function PlanReader({ job }: { job: Job }) {
         <Pressable onPress={() => void pickWeb()} style={styles.secondary} accessibilityRole="button">
           <Text style={styles.secondaryText}>Pick a PDF or picture</Text>
         </Pressable>
-      ) : scans.length ? (
-        <View style={styles.sendRow}>
-          {scans.slice(0, 4).map((uri, i) => (
-            <Pressable key={uri} onPress={() => readScan(uri)} style={[styles.smallBtn, styles.readBtn]} accessibilityRole="button">
-              <Text style={styles.smallBtnText}>Page {i + 1}</Text>
-            </Pressable>
-          ))}
-        </View>
       ) : (
-        <Text style={styles.help}>Scan the plans below, then come back here to read them.</Text>
+        <>
+          <View style={styles.sendRow}>
+            {canScan ? (
+              <Pressable onPress={() => void phone('scan')} disabled={busy} style={[styles.smallBtn, styles.readBtn]} accessibilityRole="button">
+                <Text style={styles.smallBtnText}>Scan a plan</Text>
+              </Pressable>
+            ) : null}
+            <Pressable onPress={() => void phone('file')} disabled={busy} style={[styles.smallBtn, styles.readBtn]} accessibilityRole="button">
+              <Text style={styles.smallBtnText}>PDF or file</Text>
+            </Pressable>
+            <Pressable onPress={() => void phone('photo')} disabled={busy} style={[styles.smallBtn, styles.readBtn]} accessibilityRole="button">
+              <Text style={styles.smallBtnText}>Photo</Text>
+            </Pressable>
+          </View>
+          {scans.length ? (
+            <>
+              <Text style={styles.help}>Or read a page you already scanned:</Text>
+              <View style={styles.sendRow}>
+                {scans.slice(0, 4).map((uri, i) => (
+                  <Pressable key={uri} onPress={() => readScan(uri)} style={[styles.smallBtn, styles.readBtn]} accessibilityRole="button">
+                    <Text style={styles.smallBtnText}>Page {i + 1}</Text>
+                  </Pressable>
+                ))}
+              </View>
+            </>
+          ) : null}
+        </>
       )}
       {waiting ? (
         <Text style={styles.help}>

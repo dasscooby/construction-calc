@@ -69,6 +69,14 @@
             }
           ]
         }
+      ],
+      [
+        "expo-image-picker",
+        {
+          "photosPermission": "Construction Calc uses your photos to read plans and add pictures to your jobs.",
+          "cameraPermission": "Construction Calc uses the camera to scan plans and paperwork into your jobs.",
+          "microphonePermission": false
+        }
       ]
     ]
   }

@@ -195,3 +195,63 @@ export function startPlanQueue(): () => void {
     if (Platform.OS === 'web' && typeof window !== 'undefined') window.removeEventListener('online', kick);
   };
 }
+
+// ---- Phone app: a PDF or file from Files, or a photo -------------------------------------------
+// The picked file is kept with the job (Documents/jobs/<job id>/) so it can wait for signal.
+
+type FS = typeof import('expo-file-system');
+const MAX_BYTES = 4_500_000;
+const TOO_BIG = 'That file is too big to read (over 4.5 MB). Try one page of the plans, or a picture of it.';
+const READABLE = ['application/pdf', 'image/jpeg', 'image/png', 'image/webp'];
+
+async function keepWithJob(jobId: string, srcUri: string, ext: string): Promise<string> {
+  const { Directory, File, Paths } = require('expo-file-system') as FS;
+  const dir = new Directory(Paths.document, 'jobs', jobId);
+  dir.create({ intermediates: true, idempotent: true });
+  const dest = new File(dir, `plan-${Date.now()}.${ext}`);
+  await new File(srcUri).copy(dest);
+  return dest.uri;
+}
+
+/** Files app: a PDF or a picture. Null if you back out. Throws with a plain message if it can't be used. */
+export async function pickPlanFileNative(jobId: string): Promise<{ uri: string; mediaType: string } | null> {
+  let DP: typeof import('expo-document-picker');
+  try {
+    DP = require('expo-document-picker');
+  } catch {
+    throw new Error('Picking a PDF needs the newest app version from TestFlight.');
+  }
+  const r = await DP.getDocumentAsync({ type: ['application/pdf', 'image/jpeg', 'image/png'], copyToCacheDirectory: true });
+  if (r.canceled || !r.assets?.length) return null;
+  const a = r.assets[0];
+  const name = a.name.toLowerCase();
+  const mediaType = a.mimeType ?? (name.endsWith('.pdf') ? 'application/pdf' : name.endsWith('.png') ? 'image/png' : 'image/jpeg');
+  if (!READABLE.includes(mediaType)) throw new Error('Use a PDF or a picture (JPG or PNG).');
+  if (a.size && a.size > MAX_BYTES) throw new Error(TOO_BIG);
+  const ext = mediaType === 'application/pdf' ? 'pdf' : mediaType === 'image/png' ? 'png' : 'jpg';
+  return { uri: await keepWithJob(jobId, a.uri, ext), mediaType };
+}
+
+/** Photos: a picture of the plans. */
+export async function pickPlanPhotoNative(jobId: string): Promise<{ uri: string; mediaType: string } | null> {
+  let IP: typeof import('expo-image-picker');
+  try {
+    IP = require('expo-image-picker');
+  } catch {
+    throw new Error('Picking a photo needs the newest app version from TestFlight.');
+  }
+  // Saved as JPEG (iPhone photos are often HEIC, which can't be read).
+  const r = await IP.launchImageLibraryAsync({ mediaTypes: ['images'], quality: 0.7 });
+  if (r.canceled || !r.assets?.length) return null;
+  const a = r.assets[0];
+  if (a.fileSize && a.fileSize > MAX_BYTES) throw new Error(TOO_BIG);
+  return { uri: await keepWithJob(jobId, a.uri, 'jpg'), mediaType: 'image/jpeg' };
+}
+
+/** Plain words for whatever went wrong while scanning or picking. */
+export const pickError = (e: unknown) => {
+  const m = e instanceof Error ? e.message : String(e);
+  if (/permission|denied|not authorized/i.test(m)) return 'The app needs permission. Go to iPhone Settings → Construction Calc and turn on Camera and Photos.';
+  if (/cancel/i.test(m)) return '';
+  return m.length < 160 ? m : 'Something went wrong. Try again.';
+};
