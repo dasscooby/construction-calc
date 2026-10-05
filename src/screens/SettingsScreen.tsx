@@ -186,6 +186,15 @@ export default function SettingsScreen({ onClose }: { onClose: () => void }) {
           <Field label="Steps" unit="$/set" value={s.prices.stepsSet} placeholder="none" onChange={(v) => setPrice('stepsSet', v)} />
           <Field label="Rebar" unit="$/lb" value={s.prices.rebarLb} placeholder="none" onChange={(v) => setPrice('rebarLb', v)} />
           <Field label="Labor" unit="$/job" value={s.prices.laborJob} placeholder="none" onChange={(v) => setPrice('laborJob', v)} />
+          <Field label="Excavation" unit="$/yd" value={s.prices.excavYd} placeholder="none" onChange={(v) => setPrice('excavYd', v)} />
+          <Field label="Base rock" unit="$/ton" value={s.prices.baseTon} placeholder="none" onChange={(v) => setPrice('baseTon', v)} />
+          <Field label="Vapor barrier" unit="$/sq ft" value={s.prices.barrierSqFt} placeholder="none" onChange={(v) => setPrice('barrierSqFt', v)} />
+          <Field label="Dowels" unit="$ each" value={s.prices.dowelEa} placeholder="none" onChange={(v) => setPrice('dowelEa', v)} />
+          <Field label="Pump truck" unit="$/pour" value={s.prices.pumpPour} placeholder="none" onChange={(v) => setPrice('pumpPour', v)} />
+          <Text style={styles.label}>Bids and bills</Text>
+          <Field label="Sales tax" unit="%" value={s.prices.taxPct} placeholder="0" onChange={(v) => setPrice('taxPct', v)} />
+          <Field label="Deposit to start" unit="%" value={s.prices.depositPct} placeholder="none" onChange={(v) => setPrice('depositPct', v)} />
+          <Field label="Days to pay the bill" unit="days" value={s.prices.termsDays} placeholder="on receipt" onChange={(v) => setPrice('termsDays', v)} />
           <Text style={styles.preview}>Concrete uses “Price per yard” from My defaults.</Text>
         </View>
 

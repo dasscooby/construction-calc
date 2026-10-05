@@ -8,6 +8,7 @@ import { commas, cuYd, dec, money } from '../tools/format';
 import { isShown, parseLength, parseNumber, RawArea, RawOutlineRow, RawPad, RawValues, RawWallRow, restoreRaw, runTool, RunResult } from '../tools/run';
 import { padLoop, solvePad } from '../lib/padSolve';
 import { sketchIsoSvg, sketchSvg } from './sketchDraw';
+import { footingIsoSvg, sectionWithBarsSvg } from './footingDraw';
 import { fieldText } from '../tools/share';
 import type { ResultRow, Tool } from '../tools/types';
 import { houseSectionSvg, isoSlabSvg, isoSvg, planSvg, roundedLabels, roundedRect, sectionSvg, sideLabels, SlabSide, slabPlanSvg } from './drawings';
@@ -124,7 +125,7 @@ export function jobTotals(items: FiguredItem[]): Totals {
 }
 
 export interface Drawings {
-  plan: string;
+  plan?: string;
   iso?: string;
   section?: string;
   /** Where the slab meets the house */
@@ -143,9 +144,37 @@ export function wallFormsDrawings(raw: RawValues, title: string, date: string, s
   const inner = insetOutline(outline.points, t);
   const heightText = run.result.rows.find((r) => r.label === 'Wall height')?.value ?? `4'`;
   const hFt = parseHeight(heightText) || 4;
+  const steel = raw.wallRebar === '1';
   return {
     plan: planSvg({ outer: outline.points, inner, labels: sideLabels(outline.points), title, subtitle: `${dec(t * 12)}" walls, ${heightText} tall · ${date}` }),
     iso: isoSvg({ outer: outline.points, inner, height: hFt, slabThick: slabThickFt || undefined }),
+    section: steel
+      ? sectionWithBarsSvg({
+          widthIn: t * 12,
+          depthIn: hFt * 12,
+          lines: 0,
+          barSize: Number(raw.hBarSize) || 4,
+          hSpacingIn: parseNumber(String(raw.hSpacing)) ?? 24,
+          vSpacingIn: parseNumber(String(raw.vSpacing)) ?? 24,
+          title: 'Wall',
+        })
+      : undefined,
+  };
+}
+
+/** Footings & Walls: a 3D look at the run and a cross-section with the bars. */
+export function footingDrawings(raw: RawValues): Drawings | null {
+  const L = parseLength(raw.length as never) ?? 0;
+  const W = parseLength(raw.width as never) ?? 0;
+  const D = parseLength(raw.depth as never) ?? 0;
+  if (!(L > 0 && W > 0 && D > 0)) return null;
+  const bars = raw.bars === '1';
+  const lines = bars ? Number(raw.lines) || 0 : 0;
+  const barSize = Number(raw.barSize) || 4;
+  const vSpacingIn = bars ? parseNumber(String(raw.vSpacing)) ?? 0 : 0;
+  return {
+    iso: footingIsoSvg({ lengthFt: L * (Number(raw.qty) || 1), widthFt: W, depthFt: D, lines, barSize, vSpacingIn }),
+    section: sectionWithBarsSvg({ widthIn: W * 12, depthIn: D * 12, lines, barSize, vSpacingIn, title: 'Section' }),
   };
 }
 
@@ -350,6 +379,7 @@ export function toolDrawings(toolId: string, raw: RawValues, title: string): Dra
   if (toolId === 'wall-forms') return wallFormsDrawings(raw, title, date);
   if (toolId === 'slab-layout') return layoutDrawings(raw, title, date);
   if (toolId === 'layout-sketch') return sketchDrawings(raw, title, date);
+  if (toolId === 'footings') return footingDrawings(raw);
   return null;
 }
 
@@ -473,7 +503,7 @@ ${docCss(s.docs)}
 ${company || opts.logo ? `<div class="co">${logoHtml(opts.logo)}${esc(company).replace(/ · /g, '<br>')}</div>` : ''}</div>
 ${crew ? notesHtml : ''}
 ${sum.length ? `<h2>${crew ? 'Load list' : 'Order summary'}</h2><table class="sum">${sum.map((r) => `<tr><td>${esc(r.label)}</td><td class="v">${esc(r.value)}</td></tr>`).join('')}</table>` : ''}
-${drawings ? `<h2>Plan</h2><div class="draw">${drawings.plan}</div>${drawings.iso ? `<h2>3D view</h2><div class="draw">${drawings.iso}</div>` : ''}` : ''}
+${drawings?.plan ? `<h2>Plan</h2><div class="draw">${drawings.plan}</div>` : ''}${drawings?.iso ? `<h2>3D view</h2><div class="draw">${drawings.iso}</div>` : ''}
 ${drawings?.section ? `<h2>Edge detail</h2><div class="draw">${drawings.section}</div>` : ''}
 ${drawings?.house ? `<h2>At the house</h2><div class="draw">${drawings.house}</div>` : ''}
 ${opts.photos?.length ? `<h2>Photos</h2><div class="photos">${opts.photos.map((src, i) => `<img src="${src}" alt="Photo ${i + 1}">`).join('')}</div>` : ''}

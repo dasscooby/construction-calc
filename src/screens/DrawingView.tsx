@@ -17,10 +17,10 @@ function aspect(svg: string): number {
 
 /** Plan / 3D / Edge drawings under a tool's answers. */
 export default function DrawingView({ drawings }: { drawings: Drawings }) {
-  const [which, setWhich] = useState<Which>('plan');
+  const [which, setWhich] = useState<Which>(drawings.plan ? 'plan' : 'iso');
   const [width, setWidth] = useState(0);
   const tabs = (['plan', 'iso', 'section', 'house'] as Which[]).filter((w) => drawings[w]);
-  const shown = drawings[tabs.includes(which) ? which : 'plan']!;
+  const shown = drawings[tabs.includes(which) ? which : tabs[0]]!;
   const onLayout = (e: LayoutChangeEvent) => setWidth(e.nativeEvent.layout.width);
 
   return (

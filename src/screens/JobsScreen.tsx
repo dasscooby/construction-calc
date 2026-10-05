@@ -12,7 +12,7 @@ import type { DocMedia } from '../report/docStyle';
 import { dec } from '../tools/format';
 import { liveActivitiesSupported } from '../widgets/bridge';
 import { openReport } from '../report/open';
-import { buildBid, buildBill, buildChange, lineAmount, priceTotals, suggestLines } from '../report/billing';
+import { buildBid, buildBill, buildChange, lineAmount, priceTotals, suggestLines, syncLines } from '../report/billing';
 import SignaturePad from './SignaturePad';
 import { orderText, PLACE_TEXT, sendOrder } from '../lib/order';
 import { dayName, fetchForecast, pourWarnings } from '../lib/weather';
@@ -716,6 +716,21 @@ function Prices({ job, figured }: { job: Job; figured: FiguredItem[] }) {
   // Who's signing: the bid, or one change order.
   const [signing, setSigning] = useState<{ change?: string } | null>(null);
   const firstName = (job.customer ?? '').split('\n')[0].trim();
+
+  // Lines that came from the job stay in step with it: change a tool, finish a pour, order a pump.
+  const key = (ls: Omit<PriceLine, 'id'>[]) => JSON.stringify(ls.map((l) => [l.desc, l.qty, l.unit, l.price, l.src ?? '']));
+  useEffect(() => {
+    if (!lines.some((l) => l.src)) return;
+    const next = syncLines(lines, suggestLines(figured, prefs, job));
+    if (key(next) !== key(lines)) jobStore.setLines(job.id, next);
+  }, [figured, job.pour?.done, job.pour?.trucksIn, job.order?.place]);
+  const fill = () => {
+    feel.tap();
+    jobStore.setLines(job.id, syncLines(lines, suggestLines(figured, prefs, job)));
+    if (!job.taxPct && prefs.prices.taxPct) jobStore.edit(job.id, { taxPct: prefs.prices.taxPct });
+  };
+  const depositPct = Number(prefs.prices.depositPct.replace(/[%\s]/g, '')) || 0;
+  const deposit = Math.round(m.total * depositPct) / 100;
   const setLine = (i: number, patch: Partial<PriceLine>) => jobStore.setLines(job.id, lines.map((l, j) => (j === i ? { ...l, ...patch } : l)));
   const box = (value: string, onChange: (v: string) => void, placeholder: string, a11y: string, style: object, numeric = true) => (
     <TextInput
@@ -741,7 +756,9 @@ function Prices({ job, figured }: { job: Job; figured: FiguredItem[] }) {
         accessibilityLabel="Customer"
       />
       <View style={styles.card}>
-        {lines.length === 0 ? <Text style={styles.help}>Add what you’re charging for. “Fill in from job” starts the list from your numbers.</Text> : null}
+        {lines.length === 0 ? (
+          <Text style={styles.help}>Add what you’re charging for. “Fill in from job” starts the list from your numbers and your price book, and keeps it up to date.</Text>
+        ) : null}
         {lines.map((l, i) => (
           <View key={l.id} style={styles.line}>
             <View style={styles.lineTop}>
@@ -774,10 +791,7 @@ function Prices({ job, figured }: { job: Job; figured: FiguredItem[] }) {
             <Text style={styles.smallBtnText}>+ Add line</Text>
           </Pressable>
           <Pressable
-            onPress={() => {
-              feel.tap();
-              jobStore.setLines(job.id, [...lines, ...suggestLines(figured, prefs)]);
-            }}
+            onPress={fill}
             style={styles.smallBtn}
             accessibilityRole="button"
           >
@@ -792,6 +806,20 @@ function Prices({ job, figured }: { job: Job; figured: FiguredItem[] }) {
           <Text style={styles.sumLabel}>Paid so far (deposit)</Text>
           {box(job.paid ?? '', (paid) => jobStore.edit(job.id, { paid }), '$0', 'Paid so far', styles.linePrice)}
         </View>
+        {lines.length ? (
+          <View style={styles.itemBtns}>
+            {deposit > 0 && !withChanges.paid ? (
+              <Pressable onPress={() => jobStore.edit(job.id, { paid: deposit.toFixed(2) })} style={styles.smallBtn} accessibilityRole="button">
+                <Text style={styles.smallBtnText}>Deposit received ({money(deposit)})</Text>
+              </Pressable>
+            ) : null}
+            {withChanges.balance > 0.004 ? (
+              <Pressable onPress={() => jobStore.edit(job.id, { paid: withChanges.total.toFixed(2) })} style={styles.smallBtn} accessibilityRole="button">
+                <Text style={styles.smallBtnText}>Paid in full</Text>
+              </Pressable>
+            ) : null}
+          </View>
+        ) : null}
         <View style={[styles.sumRow, styles.lineGap]}>
           <Text style={styles.sumLabel}>Bid total</Text>
           <Text style={styles.sumValue}>{money(m.total)}</Text>

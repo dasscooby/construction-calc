@@ -33,7 +33,26 @@ export interface Settings {
   /** How bids, bills and crew sheets look */
   docs: DocSettings;
   /** Your usual prices, as typed; "Fill in from job" uses them. Blank = leave it for you. */
-  prices: { slabSqFt: string; wallFt: string; footingFt: string; pierEa: string; stepsSet: string; rebarLb: string; laborJob: string };
+  prices: {
+    slabSqFt: string;
+    wallFt: string;
+    footingFt: string;
+    pierEa: string;
+    stepsSet: string;
+    rebarLb: string;
+    laborJob: string;
+    excavYd: string;
+    baseTon: string;
+    barrierSqFt: string;
+    dowelEa: string;
+    pumpPour: string;
+    /** Sales tax %, put on every new bid */
+    taxPct: string;
+    /** Deposit to start, % of the bid */
+    depositPct: string;
+    /** Days to pay the final bill; blank = due on receipt */
+    termsDays: string;
+  };
   /** Who you order concrete from */
   supplier: { name: string; phone: string; psi: string };
   favorites: string[];
@@ -49,7 +68,23 @@ export const DEFAULT_SETTINGS: Settings = {
   defaults: { waste: '', truck: '', price: '', slabThick: '', wallThick: '', spacing: '', lap: '', stockLength: '' },
   company: { name: '', phone: '', email: '', license: '' },
   docs: DEFAULT_DOCS,
-  prices: { slabSqFt: '', wallFt: '', footingFt: '', pierEa: '', stepsSet: '', rebarLb: '', laborJob: '' },
+  prices: {
+    slabSqFt: '',
+    wallFt: '',
+    footingFt: '',
+    pierEa: '',
+    stepsSet: '',
+    rebarLb: '',
+    laborJob: '',
+    excavYd: '',
+    baseTon: '',
+    barrierSqFt: '',
+    dowelEa: '',
+    pumpPour: '',
+    taxPct: '',
+    depositPct: '',
+    termsDays: '',
+  },
   supplier: { name: '', phone: '', psi: '3000' },
   favorites: [],
   hidden: [],

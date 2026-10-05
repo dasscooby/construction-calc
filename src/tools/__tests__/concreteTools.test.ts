@@ -439,3 +439,29 @@ describe('slab bars sized for the slab, with a bar around the edge', () => {
     expect(rowValue(r, 'Edge bar')).toBeUndefined();
   });
 });
+
+describe('rebar in footings and walls', () => {
+  const note = (r: ReturnType<typeof runTool>, label: string) => (r.status === 'ok' ? r.result.rows.find((x) => x.label === label)?.note : undefined);
+  test('100 ft footing around a building, 2 #4, 4 corners: like Beam & Footing Bars', () => {
+    // Per bar: (100 − 1.667) ÷ (20 − 1.667) = 5.36 → 6 sticks, 5 laps → 108.33 ft; × 2 = 216.67 ft.
+    // Corner L-bars: 4 corners × 2 bars = 8 × 3' 4" = 26.67 ft. Total 243.33 ft × 0.668 = 163 lb.
+    const r = runTool(tool('footings'), { length: 100, width: { ft: '', in: '20' } as never, depth: { ft: '', in: '10' } as never, bars: true, corners: 4 });
+    expect(rowValue(r, 'Bars along it')).toBe('243.3 ft');
+    expect(rowValue(r, 'Rebar weight')).toBe('163 lb');
+    expect(rowValue(r, '#4 sticks')).toMatch(/^\d+ × 20'$/);
+  });
+
+  test('a stem wall with verticals every 24"', () => {
+    // 20 ft straight run: verticals over 240 − 6 = 234" at 24" → 10 spaces → 11 bars, each 4' − 3" = 3' 9"
+    const r = runTool(tool('footings'), { length: 20, width: { ft: '', in: '8' } as never, depth: 4, bars: true, vSpacing: 24 });
+    expect(rowValue(r, 'Verticals')).toBe(`11 × 3' 9"`);
+  });
+
+  test('Wall Forms: horizontals and verticals for a 30 × 20 foundation, 4 ft tall', () => {
+    const r = runTool(tool('wall-forms'), { walls: [[30, 'oo'], [20, 'oo'], [30, 'oo'], [20, 'oo']], height1: 4, wallRebar: true });
+    // 48" − 6" = 42" at 24" → 2 spaces → 3 rows. Centerline 100 − 4 × 8" = 97.33 ft → 1168" at 24" → 49 spaces → 50 + 4 corners = 54, each 3' 9"
+    expect(note(r, 'Horizontal bars')).toMatch(/^3 rows of #4, 24" apart/);
+    expect(rowValue(r, 'Vertical bars')).toBe(`54 × 3' 9"`);
+    expect(rowValue(r, 'Rebar weight')).toMatch(/ lb$/);
+  });
+});

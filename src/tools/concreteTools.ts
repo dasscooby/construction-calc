@@ -10,27 +10,94 @@ import {
   stepsCuFt,
   truckLoads,
 } from '../lib/concrete';
-import { commas, commasTrim, cuYd, dec, ftIn, money, sqFt } from './format';
+import { BARS, beamBars, countAlong, getBar, lapIn, LB_PER_TON, sticksToCut, weightLb } from '../lib/rebar';
+import { commas, commasTrim, cuYd, dec, ftIn, inches, lb, money, sqFt, tons } from './format';
 import { Field, Inputs, ResultRow, Tool } from './types';
 
 import { concreteRows, CUFT_PER_CUYD, ORDER_FIELDS } from './concreteShared';
 import { slabLayout } from './slabLayoutTool';
 import { slab } from './slabTool';
 
+const barSizeChoice = (key: string, label: string, def: string, showIf: string[]): Field => ({
+  key,
+  label,
+  kind: 'choice',
+  options: BARS.filter((b) => b.size >= 3 && b.size <= 6).map((b) => ({ value: String(b.size), label: `#${b.size}` })),
+  default: def,
+  showIf,
+});
+const stickField = (showIf: string[]): Field => ({
+  key: 'stockLength',
+  label: 'Stick length',
+  kind: 'choice',
+  options: [20, 30, 40, 60].map((v) => ({ value: String(v), label: `${v}'` })),
+  default: '20',
+  showIf,
+});
+const lapField = (showIf: string[]): Field => ({ key: 'lap', label: 'Lap', kind: 'number', unit: 'in', optional: true, help: 'Blank = 20" on #4, 25" on #5, 30" on #6', showIf });
+const COVER_FT = 3 / 12;
+
+/** Sticks by bar size and weight, the way every rebar answer ends. */
+function steelRows(sticks: Map<number, number>, totalLb: number, stockFt: number): ResultRow[] {
+  return [
+    ...[...sticks].sort((a, b) => a[0] - b[0]).map(([size, k]): ResultRow => ({ label: `#${size} sticks`, value: `${commas(k)} × ${stockFt}'` })),
+    { label: 'Rebar weight', value: lb(totalLb), note: tons(totalLb / LB_PER_TON) },
+  ];
+}
+
 const footings: Tool = {
   id: 'footings',
   title: 'Footings & Walls',
-  blurb: 'Footings, pads, stem walls',
+  blurb: 'Footings, pads, stem walls, with the rebar',
   fields: [
     { key: 'length', label: 'Length', kind: 'length' },
     { key: 'width', label: 'Width (wall thickness)', kind: 'length' },
     { key: 'depth', label: 'Depth (wall height)', kind: 'length' },
     { key: 'qty', label: 'How many', kind: 'count', default: '1' },
+    { key: 'bars', label: 'Rebar', kind: 'toggle' },
+    { key: 'lines', label: 'Bars along it', kind: 'count', default: '2', help: '2 #4 continuous = 2. More than 3 go half bottom, half top.', showIf: ['bars'] },
+    barSizeChoice('barSize', 'Bar size', '4', ['bars']),
+    { key: 'corners', label: 'Corners', kind: 'count', optional: true, help: 'If it goes around a building: an L-bar at each corner for every bar', showIf: ['bars'] },
+    { key: 'vSpacing', label: 'Verticals every', kind: 'number', unit: 'in', optional: true, help: 'Stem walls: bars standing up. Blank = none.', showIf: ['bars'] },
+    stickField(['bars']),
+    lapField(['bars']),
     ...ORDER_FIELDS,
   ],
-  compute: (inp) => ({
-    rows: concreteRows(boxCuFt(inp.len('length'), inp.len('width'), inp.len('depth')) * inp.count('qty'), inp),
-  }),
+  compute: (inp) => {
+    const rows = concreteRows(boxCuFt(inp.len('length'), inp.len('width'), inp.len('depth')) * inp.count('qty'), inp);
+    if (!inp.on('bars')) return { rows };
+    const bar = getBar(inp.choice('barSize'));
+    const stockFt = Number(inp.choice('stockLength')) || 20;
+    const lapFt = (inp.has('lap') ? inp.num('lap') : lapIn(bar)) / 12;
+    const lines = inp.count('lines');
+    const runFt = inp.len('length') * inp.count('qty');
+    const depthFt = inp.len('depth');
+    if (lines < 1) return { error: 'Enter at least 1 bar.' };
+    if (2 * lapFt > stockFt) return { error: `A corner bar won’t fit in a ${stockFt}' stick.` };
+    const corners = inp.has('corners') ? inp.count('corners') : 0;
+    // Around a building the bars run all the way round; a straight run stops 3" short of each end.
+    const r = beamBars(corners ? runFt : Math.max(0, runFt - 2 * COVER_FT), lines, bar, stockFt, lapFt, corners);
+    rows.push({
+      label: 'Bars along it',
+      value: `${commasTrim(r.totalFt, 1)} ft`,
+      note: `${lines} #${bar.size} · ${commas(r.laps)} laps${corners ? ` · ${commas(r.cornerBars)} corner L-bars ${ftIn(r.cornerBarFt)}` : ''}`,
+    });
+    let sticks = r.sticks;
+    let totalLb = r.lb;
+    if (inp.has('vSpacing')) {
+      const s = inp.num('vSpacing');
+      if (s <= 0) return { error: 'Verticals spacing must be more than 0.' };
+      const len = depthFt - COVER_FT;
+      if (len <= 0) return { error: 'The wall is too short for verticals.' };
+      if (len > stockFt) return { error: `A vertical won’t fit in a ${stockFt}' stick.` };
+      const count = countAlong(Math.max(0, runFt * 12 - 6), s);
+      sticks += sticksToCut([{ lengthFt: len, count }], stockFt);
+      totalLb += weightLb(bar, count * len);
+      rows.push({ label: 'Verticals', value: `${commas(count)} × ${ftIn(len)}`, note: `#${bar.size} every ${dec(s)}", 3" from the top` });
+    }
+    rows.push(...steelRows(new Map([[bar.size, sticks]]), totalLb, stockFt));
+    return { rows };
+  },
 };
 
 const piers: Tool = {
@@ -300,6 +367,13 @@ const wallForms: Tool = {
       sticky: true,
     },
     { key: 'panelsOwned', label: 'Panels you own', kind: 'count', optional: true, sticky: true, help: 'Of each height. Blank = plenty.' },
+    { key: 'wallRebar', label: 'Rebar in the wall', kind: 'toggle' },
+    barSizeChoice('hBarSize', 'Horizontal bars', '4', ['wallRebar']),
+    { key: 'hSpacing', label: 'Horizontal every', kind: 'number', unit: 'in', default: '24', help: 'Up the wall', showIf: ['wallRebar'] },
+    barSizeChoice('vBarSize', 'Vertical bars', '4', ['wallRebar']),
+    { key: 'vSpacing', label: 'Vertical every', kind: 'number', unit: 'in', default: '24', help: 'Along the wall', showIf: ['wallRebar'] },
+    stickField(['wallRebar']),
+    lapField(['wallRebar']),
     { key: 'cornersOwned', label: 'Inside corners you own', kind: 'count', optional: true, sticky: true, help: 'Of each height. Blank = plenty.' },
   ],
   compute: (inp) => {
@@ -403,6 +477,33 @@ const wallForms: Tool = {
     const centerFt = walls.reduce((sum, w) => sum + w.length, 0) - ((ocCorners - icCorners) * t) / 12;
     const heightFt = wallIn / 12;
     rows.push({ label: 'Concrete in the wall', value: cuYd((centerFt * (t / 12) * heightFt) / CUFT_PER_CUYD), note: 'No waste added' });
+
+    // ---- Rebar in the wall: horizontals around the foundation (lapped, L-bars at corners), verticals along it ----
+    if (inp.on('wallRebar')) {
+      const stockFt = Number(inp.choice('stockLength')) || 20;
+      const hBar = getBar(inp.choice('hBarSize'));
+      const vBar = getBar(inp.choice('vBarSize'));
+      const hs = inp.num('hSpacing');
+      const vs = inp.num('vSpacing');
+      if (hs <= 0 || vs <= 0) return { error: 'Rebar spacing must be more than 0.' };
+      const lapFor = (b: typeof hBar) => (inp.has('lap') ? inp.num('lap') : lapIn(b)) / 12;
+      if (2 * lapFor(hBar) > stockFt) return { error: `A corner bar won’t fit in a ${stockFt}' stick.` };
+      const lines = countAlong(Math.max(0, wallIn - 6), hs);
+      const h = beamBars(centerFt, lines, hBar, stockFt, lapFor(hBar), ocCorners + icCorners);
+      const vLen = heightFt - COVER_FT;
+      if (vLen > stockFt) return { error: `A vertical won’t fit in a ${stockFt}' stick.` };
+      const vCount = countAlong(Math.max(0, centerFt * 12), vs) + ocCorners + icCorners;
+      const sticks = new Map<number, number>();
+      sticks.set(hBar.size, h.sticks);
+      sticks.set(vBar.size, (sticks.get(vBar.size) ?? 0) + sticksToCut([{ lengthFt: vLen, count: vCount }], stockFt));
+      rows.push({
+        label: 'Horizontal bars',
+        value: `${commasTrim(h.totalFt, 1)} ft`,
+        note: `${lines} rows of #${hBar.size}, ${dec(hs)}" apart · ${commas(h.laps)} laps · ${commas(h.cornerBars)} corner L-bars ${ftIn(h.cornerBarFt)}`,
+      });
+      rows.push({ label: 'Vertical bars', value: `${commas(vCount)} × ${ftIn(vLen)}`, note: `#${vBar.size} every ${dec(vs)}", one at each corner · tie to the footing dowels` });
+      rows.push(...steelRows(sticks, h.lb + weightLb(vBar, vCount * vLen), stockFt));
+    }
 
     const warnings: string[] = [];
     if (shortages.length) warnings.push(`Short${each}: ${shortages.join(', ')}.`);

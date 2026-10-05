@@ -44,6 +44,8 @@ export interface PriceLine {
   unit: string;
   /** Price per unit, dollars */
   price: string;
+  /** Where the line came from in the job ("concrete", "item:<id>" ...), so it can stay in sync. Blank = typed by you. */
+  src?: string;
 }
 
 /** A finger signature: the strokes as an SVG path, in a box w × h. */

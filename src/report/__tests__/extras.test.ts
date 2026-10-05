@@ -80,3 +80,51 @@ test('pour-day warnings: hot, cold, freezing, rain, wind', () => {
   expect(pourWarnings({ date: '', hi: 40, lo: 25, rain: 0, wind: 5 })[0]).toMatch(/^Freezing/);
   expect(pourWarnings({ date: '', hi: 70, lo: 50, rain: 60, wind: 25 })).toEqual(['Rain likely. Have plastic ready.', 'Windy: the top dries fast.']);
 });
+
+describe('bids and bills that keep themselves up to date', () => {
+  const { syncLines, deliveredYd } = require('../billing') as typeof import('../billing');
+
+  test('sync: job lines get new quantities, your prices and your own lines stay, gone ones drop off', () => {
+    const current = [
+      { id: '1', desc: 'Garage slab: form, pour and finish', qty: '600', unit: 'sq ft', price: '9', src: 'item:s' },
+      { id: '2', desc: 'Haul off old concrete', qty: '1', unit: 'job', price: '300' }, // typed by you
+      { id: '3', desc: 'Porch piers: drill and pour', qty: '4', unit: 'ea', price: '125', src: 'item:p' },
+    ];
+    const fresh = [
+      { desc: 'Slab: form, pour and finish', qty: '650', unit: 'sq ft', price: '8.5', src: 'item:s' },
+      { desc: 'Concrete', qty: '8.25', unit: 'yd', price: '160', src: 'concrete' },
+    ];
+    const out = syncLines(current, fresh);
+    expect(out).toEqual([
+      { id: '1', desc: 'Garage slab: form, pour and finish', qty: '650', unit: 'sq ft', price: '9', src: 'item:s' },
+      { id: '2', desc: 'Haul off old concrete', qty: '1', unit: 'job', price: '300' },
+      { desc: 'Concrete', qty: '8.25', unit: 'yd', price: '160', src: 'concrete' },
+    ]);
+  });
+
+  test('delivered yards: a short last truck, or extra trucks', () => {
+    const pour = (trucksIn: number) => ({ startedAt: 0, trucksIn, trucks: 3, totalYd: 28.25, truckYd: 10, done: true });
+    expect(deliveredYd({ ...job, pour: pour(3) })).toBe(28.25);
+    expect(deliveredYd({ ...job, pour: pour(4) })).toBe(38.25);
+    expect(deliveredYd({ ...job, pour: { ...pour(3), done: false } })).toBeNull();
+  });
+
+  test('a finished pour bills the delivered concrete; a pump order adds the pump', () => {
+    const s = { ...DEFAULT_SETTINGS, prices: { ...DEFAULT_SETTINGS.prices, pumpPour: '450' } };
+    const done = { ...job, pour: { startedAt: 0, trucksIn: 1, trucks: 1, totalYd: 8.25, truckYd: 10, done: true }, order: { psi: '3000', place: 'pump' as const, when: '' } };
+    const lines = suggestLines(figureItems(done), s, done);
+    expect(lines.find((l) => l.src === 'concrete')).toMatchObject({ desc: 'Concrete (delivered)', qty: '8.25' });
+    expect(lines.find((l) => l.src === 'pump')).toMatchObject({ price: '450' });
+  });
+
+  test('bid shows good-through and the deposit; bill shows when it is due', () => {
+    const s = { ...DEFAULT_SETTINGS, prices: { ...DEFAULT_SETTINGS.prices, depositPct: '30', termsDays: '15' } };
+    const now = new Date(2026, 9, 5);
+    const bid = buildBid(job, s, figureItems(job), now).html;
+    expect(bid).toContain('Good through Nov 4, 2026');
+    expect(bid).toContain('Deposit to start (30%)');
+    expect(bid).toContain('$1,440.00'); // 30% of 4,800
+    expect(buildBill(job, s, figureItems(job), now).html).toContain('Due Oct 20, 2026');
+    expect(buildBill(job, DEFAULT_SETTINGS, figureItems(job), now).html).toContain('Due on receipt');
+  });
+});

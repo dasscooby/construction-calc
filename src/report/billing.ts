@@ -37,40 +37,95 @@ export function priceTotals(job: Job, withChanges = false): Money {
   return { subtotal, tax, total, paid, balance: Math.round((total - paid) * 100) / 100 };
 }
 
+/** Concrete actually delivered on a finished pour (trucks counted in), or null if there's no finished pour. */
+export function deliveredYd(job?: Job): number | null {
+  const p = job?.pour;
+  if (!p?.done || !p.trucksIn) return null;
+  const planned = Math.max(1, Math.ceil(p.totalYd / p.truckYd - 1e-9));
+  // Up to the planned trucks the last one is short; trucks past the plan count full.
+  return p.trucksIn <= planned ? Math.min(p.totalYd, p.trucksIn * p.truckYd) : p.totalYd + (p.trucksIn - planned) * p.truckYd;
+}
+
 /**
- * Starting lines from what's in the job: each slab, wall, footing, pier and set of steps,
- * then concrete, rebar and labor. Prices come from your price book (Settings); blank ones are left for you.
+ * Lines from what's in the job: each slab, wall, footing, pier and set of steps; excavation, base rock,
+ * vapor barrier and dowels; then concrete (what was delivered, once the pour is done), rebar, a pump
+ * if you ordered one, and labor. Prices come from your price book (Settings); blank ones are left for you.
+ * Each line remembers where it came from (src) so it can stay in sync with the job.
  */
-export function suggestLines(items: FiguredItem[], s?: Settings): Omit<PriceLine, 'id'>[] {
+export function suggestLines(items: FiguredItem[], s?: Settings, job?: Job): Omit<PriceLine, 'id'>[] {
   const lines: Omit<PriceLine, 'id'>[] = [];
   const t = jobTotals(items);
   const p = s?.prices;
   const price = (v: string | undefined) => (v && num(v) ? dec(num(v), 2) : '');
+  const rowNum = (rows: { label: string; value: string }[], label: string) => {
+    const r = rows.find((x) => x.label === label);
+    return r ? numberIn(r.value) : 0;
+  };
   const ft = (v: unknown) => parseLength(v as RawLength) ?? 0;
   for (const { item, tool, result } of items) {
     if (result.status !== 'ok') continue;
     const name = item.label || tool.title;
     const raw = item.raw;
-    const area = result.result.rows.find((r) => r.label === 'Slab area' || r.label === 'Area');
-    if (area) lines.push({ desc: `${name}: form, pour and finish`, qty: dec(numberIn(area.value), 1), unit: 'sq ft', price: price(p?.slabSqFt) });
+    const rows = result.result.rows;
+    const src = `item:${item.id}`;
+    const area = rows.find((r) => r.label === 'Slab area' || (r.label === 'Area' && !['fill-base', 'vapor-barrier'].includes(tool.id)));
+    if (area) lines.push({ desc: `${name}: form, pour and finish`, qty: dec(numberIn(area.value), 1), unit: 'sq ft', price: price(p?.slabSqFt), src });
     else if (tool.id === 'wall-forms') {
       const total = ((raw.walls as RawWallRow[]) ?? []).reduce((a, w) => a + ft(w.length), 0);
-      lines.push({ desc: `${name}: form and pour walls`, qty: dec(total, 1), unit: 'ft', price: price(p?.wallFt) });
+      lines.push({ desc: `${name}: form and pour walls`, qty: dec(total, 1), unit: 'ft', price: price(p?.wallFt), src });
     } else if (tool.id === 'footings') {
-      lines.push({ desc: `${name}: dig, form and pour`, qty: dec(ft(raw.length) * (Number(raw.qty) || 1), 1), unit: 'ft', price: price(p?.footingFt) });
+      lines.push({ desc: `${name}: dig, form and pour`, qty: dec(ft(raw.length) * (Number(raw.qty) || 1), 1), unit: 'ft', price: price(p?.footingFt), src });
     } else if (tool.id === 'piers') {
-      lines.push({ desc: `${name}: drill and pour`, qty: String(Number(raw.qty) || 1), unit: 'ea', price: price(p?.pierEa) });
+      lines.push({ desc: `${name}: drill and pour`, qty: String(Number(raw.qty) || 1), unit: 'ea', price: price(p?.pierEa), src });
     } else if (tool.id === 'steps') {
-      lines.push({ desc: `${name}: form and pour steps`, qty: '1', unit: 'set', price: price(p?.stepsSet) });
+      lines.push({ desc: `${name}: form and pour steps`, qty: '1', unit: 'set', price: price(p?.stepsSet), src });
+    } else if (tool.id === 'excavation') {
+      lines.push({ desc: `${item.label || 'Excavation'}: dig and haul`, qty: dec(rowNum(rows, 'In the ground'), 2), unit: 'yd', price: price(p?.excavYd), src });
+    } else if (tool.id === 'fill-base') {
+      lines.push({ desc: `${item.label || 'Base rock'}: placed and compacted`, qty: dec(rowNum(rows, 'Tons'), 1), unit: 'tons', price: price(p?.baseTon), src });
+    } else if (tool.id === 'vapor-barrier') {
+      lines.push({ desc: 'Vapor barrier', qty: dec(rowNum(rows, 'Area'), 1), unit: 'sq ft', price: price(p?.barrierSqFt), src });
+    } else if (tool.id === 'dowels') {
+      lines.push({ desc: `${item.label || 'Dowels'}: drilled and set`, qty: String(rowNum(rows, 'Total')), unit: 'ea', price: price(p?.dowelEa), src });
     }
+    // Dowels into the house or an existing slab, from a slab.
+    const dowels = rows.find((r) => r.label === 'Dowels');
+    if (dowels) lines.push({ desc: `${name}: dowels drilled and epoxied`, qty: String(numberIn(dowels.value)), unit: 'ea', price: price(p?.dowelEa), src: `${src}:dowels` });
   }
-  if (t.concreteOrderYd) {
+  const delivered = deliveredYd(job);
+  if (delivered !== null) {
+    lines.push({ desc: 'Concrete (delivered)', qty: dec(delivered, 2), unit: 'yd', price: price(s?.defaults.price) || (t.concreteCost && t.concreteOrderYd ? dec(t.concreteCost / t.concreteOrderYd, 2) : ''), src: 'concrete' });
+  } else if (t.concreteOrderYd) {
     const perYd = t.concreteCost ? dec(t.concreteCost / t.concreteOrderYd, 2) : price(s?.defaults.price);
-    lines.push({ desc: 'Concrete', qty: dec(t.concreteOrderYd, 2), unit: 'yd', price: perYd });
+    lines.push({ desc: 'Concrete', qty: dec(t.concreteOrderYd, 2), unit: 'yd', price: perYd, src: 'concrete' });
   }
-  if (t.rebarLb) lines.push({ desc: 'Rebar, cut, bent and tied', qty: String(Math.round(t.rebarLb)), unit: 'lb', price: price(p?.rebarLb) });
-  lines.push({ desc: 'Labor', qty: '1', unit: 'job', price: price(p?.laborJob) });
+  if (t.rebarLb) lines.push({ desc: 'Rebar, cut, bent and tied', qty: String(Math.round(t.rebarLb)), unit: 'lb', price: price(p?.rebarLb), src: 'rebar' });
+  if (job?.order?.place === 'pump') lines.push({ desc: 'Pump truck', qty: '1', unit: 'pour', price: price(p?.pumpPour), src: 'pump' });
+  lines.push({ desc: 'Labor', qty: '1', unit: 'job', price: price(p?.laborJob), src: 'labor' });
   return lines;
+}
+
+/**
+ * Keeps the job's lines in step with the job: lines that came from it get fresh quantities (your
+ * prices and wording stay), new ones are added, and ones whose source is gone are dropped.
+ * Lines you typed yourself are never touched.
+ */
+export function syncLines(current: PriceLine[], fresh: Omit<PriceLine, 'id'>[]): (PriceLine | Omit<PriceLine, 'id'>)[] {
+  const bySrc = new Map(fresh.filter((l) => l.src).map((l) => [l.src!, l]));
+  const out: (PriceLine | Omit<PriceLine, 'id'>)[] = [];
+  const seen = new Set<string>();
+  for (const l of current) {
+    if (!l.src) {
+      out.push(l);
+      continue;
+    }
+    const f = bySrc.get(l.src);
+    if (!f) continue; // its tool was taken out of the job
+    seen.add(l.src);
+    out.push({ ...l, qty: f.qty, unit: f.unit, price: l.price || f.price, desc: l.src === 'concrete' ? f.desc : l.desc });
+  }
+  for (const f of fresh) if (f.src && !seen.has(f.src)) out.push(f);
+  return out;
 }
 
 const docNumber = (job: Job) => {
@@ -133,15 +188,21 @@ function moneyDoc(kind: 'bid' | 'bill', job: Job, s: Settings, items: FiguredIte
   const sumRows: [string, string, string?][] = [['Subtotal', money(m.subtotal)]];
   if (m.tax) sumRows.push([`Tax (${dec(num(job.taxPct), 2)}%)`, money(m.tax)]);
   sumRows.push(['Total', money(m.total), 'total']);
+  const depositPct = num(s.prices.depositPct);
+  if (kind === 'bid' && depositPct > 0) sumRows.push([`Deposit to start (${dec(depositPct, 1)}%)`, money(Math.round(m.total * depositPct) / 100)]);
   if (kind === 'bill') {
     if (m.paid) sumRows.push(['Paid', `−${money(m.paid)}`]);
     sumRows.push(['Balance due', money(m.balance), 'due']);
   }
+  // Calendar days (adding hours would slip a day when the clocks change).
+  const days = (d: number) => new Date(now.getFullYear(), now.getMonth(), now.getDate() + d);
+  const terms = num(s.prices.termsDays);
+  const when = kind === 'bid' ? `Good through ${fmtDate(days(30))}` : terms > 0 ? `Due ${fmtDate(days(terms))}` : 'Due on receipt';
 
   const html = `<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
 <title>${esc(job.name)} – ${kind === 'bid' ? 'Bid' : 'Invoice'}</title><style>${STYLE}${docCss(s.docs)}</style></head><body>
 <div class="top"><div class="co">${logoHtml(media.logo)}${c.name ? `<b>${esc(c.name)}</b><br>` : ''}${coLines.map(esc).join('<br>')}</div>
-<div class="doc"><h1>${title}</h1><div class="meta">#${no}</div><div class="meta">${esc(date)}</div></div></div>
+<div class="doc"><h1>${title}</h1><div class="meta">#${no}</div><div class="meta">${esc(date)}</div><div class="meta"><b>${esc(when)}</b></div></div></div>
 <div class="to">${job.customer ? `<div><h4>${kind === 'bid' ? 'Prepared for' : 'Bill to'}</h4>${esc(job.customer).replace(/\n/g, '<br>')}</div>` : ''}
 <div><h4>Job</h4>${esc(job.name)}${job.address ? `<br>${esc(job.address)}` : ''}</div></div>
 <table><tr><th>Description</th><th class="r">Qty</th><th class="r">Price</th><th class="r">Amount</th></tr>
@@ -155,7 +216,7 @@ ${noticeHtml(kind, s.docs)}
 </body></html>`;
 
   const text = [
-    `${kind === 'bid' ? 'Bid' : 'Invoice'} #${no} · ${date}`,
+    `${kind === 'bid' ? 'Bid' : 'Invoice'} #${no} · ${date} · ${when}`,
     c.name,
     job.customer ? `${kind === 'bid' ? 'For' : 'Bill to'}: ${job.customer}` : '',
     `Job: ${job.name}${job.address ? `, ${job.address}` : ''}`,
