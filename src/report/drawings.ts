@@ -3,6 +3,7 @@
 
 import { ftIn } from '../tools/format';
 import { bounds, Pt } from './geometry';
+import { printColors, withTitleBar } from './sheet';
 
 // Text inside the drawings. No XML entities: the phone's SVG reader shows them literally (&quot;),
 // so the few characters that would break the SVG are swapped for look-alikes instead.
@@ -21,62 +22,71 @@ export interface PlanInput {
   subtitle: string;
 }
 
-/** Blueprint: white lines on blue, wall lengths on the outside of each wall. */
+/**
+ * Plan, print style (same as the foundation plan): white sheet, heavy black outline (walls hatched),
+ * dimension strings with extension lines and tick marks outside each side, and a title block.
+ * Positions match the overlays that draw on top of it (slab, Slab Layout, footings).
+ */
 export function planSvg(p: PlanInput): string {
   const W = 760;
-  const pad = 70;
+  const pad = 100;
   const b = bounds(p.outer);
   const spanX = Math.max(b.maxX - b.minX, 1);
   const spanY = Math.max(b.maxY - b.minY, 1);
   const s = Math.min((W - 2 * pad) / spanX, 420 / spanY);
-  const H = Math.round(spanY * s + 2 * pad + 60);
+  const planH = spanY * s + 2 * pad;
+  const titleH = 66;
+  const H = Math.round(planH + titleH + 8);
   const tx = (q: Pt): Pt => ({ x: pad + (q.x - b.minX) * s + ((W - 2 * pad) - spanX * s) / 2, y: pad + (q.y - b.minY) * s });
   const outer = p.outer.map(tx);
   const inner = p.inner?.map(tx);
+  const INK = '#111111';
 
-  // Grid every 10 ft (or 5 ft on small jobs).
-  const step = (spanX > 60 || spanY > 60 ? 10 : 5) * s;
-  const grid: string[] = [];
-  for (let x = pad % step; x < W; x += step) grid.push(`<line x1="${n(x)}" y1="0" x2="${n(x)}" y2="${H}"/>`);
-  for (let y = pad % step; y < H; y += step) grid.push(`<line x1="0" y1="${n(y)}" x2="${W}" y2="${n(y)}"/>`);
-
-  // Labels sit outside the wall, along its outward side (left of the clockwise walk).
+  // Dimension strings: outside each side (left of the clockwise walk), with ticks at the ends.
   const dims = outer.map((a, i) => {
     const c = outer[(i + 1) % outer.length];
     const len = Math.hypot(c.x - a.x, c.y - a.y);
-    if (len < 1) return '';
+    const label = p.labels[i] ?? '';
+    if (len < 1 || !label) return '';
     const ux = (c.x - a.x) / len;
     const uy = (c.y - a.y) / len;
-    const ox = uy * 22;
-    const oy = -ux * 22;
-    const mx = (a.x + c.x) / 2 + ox;
-    const my = (a.y + c.y) / 2 + oy;
+    const nx = uy;
+    const ny = -ux;
+    const off = 38;
+    const a2 = { x: a.x + nx * off, y: a.y + ny * off };
+    const c2 = { x: c.x + nx * off, y: c.y + ny * off };
+    const ext = (q: Pt) => `<line x1="${n(q.x + nx * 6)}" y1="${n(q.y + ny * 6)}" x2="${n(q.x + nx * (off + 8))}" y2="${n(q.y + ny * (off + 8))}" stroke="${INK}" stroke-width="0.9"/>`;
+    const tick = (q: Pt) => `<line x1="${n(q.x - 6)}" y1="${n(q.y + 6)}" x2="${n(q.x + 6)}" y2="${n(q.y - 6)}" stroke="${INK}" stroke-width="2"/>`;
+    const mx = (a2.x + c2.x) / 2 + nx * 14;
+    const my = (a2.y + c2.y) / 2 + ny * 14;
     const vertical = Math.abs(uy) > Math.abs(ux);
     const rot = vertical ? ` transform="rotate(-90 ${n(mx)} ${n(my)})"` : '';
-    // Dimension line with ticks, then the length.
-    const lx1 = a.x + ox * 0.45;
-    const ly1 = a.y + oy * 0.45;
-    const lx2 = c.x + ox * 0.45;
-    const ly2 = c.y + oy * 0.45;
     return (
-      `<line x1="${n(lx1)}" y1="${n(ly1)}" x2="${n(lx2)}" y2="${n(ly2)}" stroke="#cfe3ff" stroke-width="1"/>` +
-      `<text x="${n(mx)}" y="${n(my + 5)}" text-anchor="middle"${rot}>${esc(p.labels[i] ?? '')}</text>`
+      ext(a) +
+      ext(c) +
+      `<line x1="${n(a2.x)}" y1="${n(a2.y)}" x2="${n(c2.x)}" y2="${n(c2.y)}" stroke="${INK}" stroke-width="1"/>` +
+      tick(a2) +
+      tick(c2) +
+      `<text x="${n(mx)}" y="${n(my + (vertical ? 0 : 6))}" text-anchor="middle"${rot}>${esc(label.replace(/' /, "'-"))}</text>`
     );
   });
 
   const walls = inner
-    ? `<path d="${path(outer)} ${path(inner)}" fill="rgba(255,255,255,0.22)" fill-rule="evenodd" stroke="#ffffff" stroke-width="2"/>`
-    : `<path d="${path(outer)}" fill="rgba(255,255,255,0.16)" stroke="#ffffff" stroke-width="2"/>`;
+    ? `<path d="${path(outer)} ${path(inner)}" fill="url(#phatch)" fill-rule="evenodd" stroke="${INK}" stroke-width="2.6"/>`
+    : `<path d="${path(outer)}" fill="url(#pdots)" stroke="${INK}" stroke-width="2.6"/>`;
+  const ty = H - titleH - 6;
 
   return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${W} ${H}" width="100%" role="img" aria-label="Plan view">
-<rect width="${W}" height="${H}" fill="#0b4f8a"/>
-<g stroke="rgba(255,255,255,0.08)" stroke-width="1">${grid.join('')}</g>
+<rect width="${W}" height="${H}" fill="#ffffff"/>
+<defs><pattern id="phatch" width="9" height="9" patternUnits="userSpaceOnUse" patternTransform="rotate(45)"><line x1="0" y1="0" x2="0" y2="9" stroke="${INK}" stroke-width="1.2"/></pattern><pattern id="pdots" width="12" height="12" patternUnits="userSpaceOnUse"><circle cx="3" cy="3" r="1" fill="#a0a0a0"/><circle cx="9" cy="9" r="1" fill="#a0a0a0"/></pattern></defs>
+<rect x="6" y="6" width="${W - 12}" height="${H - 12}" fill="none" stroke="${INK}" stroke-width="2"/>
 ${walls}
-<g font-family="Helvetica, Arial, sans-serif" font-size="15" font-weight="700" fill="#ffffff">${dims.join('')}</g>
-<g font-family="Helvetica, Arial, sans-serif" fill="#ffffff">
-<rect x="${W - 400}" y="${H - 58}" width="390" height="48" fill="none" stroke="#ffffff" stroke-width="1"/>
-<text x="${W - 390}" y="${H - 38}" font-size="14" font-weight="700">${esc(p.title)}</text>
-<text x="${W - 390}" y="${H - 19}" font-size="11">${esc(p.subtitle)}</text>
+<g font-family="Helvetica, Arial, sans-serif" font-size="19" font-weight="700" fill="${INK}">${dims.join('')}</g>
+<g font-family="Helvetica, Arial, sans-serif" fill="${INK}">
+<rect x="6" y="${n(ty)}" width="${W - 12}" height="${titleH}" fill="#ffffff" stroke="${INK}" stroke-width="2"/>
+<text x="22" y="${n(ty + 30)}" font-size="22" font-weight="900">${esc(p.title.toUpperCase())}</text>
+<text x="22" y="${n(ty + 52)}" font-size="13" fill="#333">${esc(p.subtitle)}</text>
+<text x="${W - 22}" y="${n(ty + 52)}" font-size="12" fill="#333" text-anchor="end">NOT TO SCALE</text>
 </g>
 </svg>`;
 }
@@ -317,7 +327,7 @@ export function slabPlanSvg(p: PlanInput & SlabPlanExtras): string {
   const base = planSvg(p);
   const b = bounds(p.outer);
   const W = 760;
-  const pad = 70;
+  const pad = 100;
   const spanX = Math.max(b.maxX - b.minX, 1);
   const spanY = Math.max(b.maxY - b.minY, 1);
   const s = Math.min((W - 2 * pad) / spanX, 420 / spanY);
@@ -340,7 +350,7 @@ export function slabPlanSvg(p: PlanInput & SlabPlanExtras): string {
     for (const y of barLines(b.minY + cover, b.maxY - cover, p.rebarFt)) g.push(seg({ x: b.minX + cover, y }, { x: b.maxX - cover, y }, ''));
     const clip = roundedRect(b, radii, cover).points.map((q) => `${X(q.x)},${Y(q.y)}`).join(' ');
     out.push(`<defs><clipPath id="slabclip"><polygon points="${clip}"/></clipPath></defs>`);
-    out.push(`<g stroke="#ffb347" stroke-width="1" opacity="0.8" clip-path="url(#slabclip)">${g.join('')}</g>`);
+    out.push(`<g stroke="#ffb347" stroke-width="1" opacity="0.4" clip-path="url(#slabclip)">${g.join('')}</g>`);
   }
 
   if (p.edgeBar) for (const run of footingRuns(b, radii, cover, (i) => p.edgeBar![i])) out.push(pl(run, 'stroke="#ff7a00" stroke-width="2.5" stroke-linejoin="round"'));
@@ -377,8 +387,8 @@ export function slabPlanSvg(p: PlanInput & SlabPlanExtras): string {
 
   // The house: a hatched wall outside each house side, and the dowels across the joint.
   if (sides) {
-    const near = 34 / s; // past the dimension labels
-    const far = 60 / s;
+    const near = 74 / s; // past the dimension strings
+    const far = 94 / s;
     for (let i = 0; i < 4; i++) {
       if (sides[i].kind === 'form') continue;
       const L = R.len(i);
@@ -402,8 +412,9 @@ export function slabPlanSvg(p: PlanInput & SlabPlanExtras): string {
       }
     }
   }
-  const marker = '<g font-family="Helvetica, Arial, sans-serif" font-size="15"';
-  return base.replace(marker, `${out.join('')}${marker}`);
+  const marker = '<g font-family="Helvetica, Arial, sans-serif" font-size="19"';
+  // The drawing on top, in print colors (black lines, red steel), under the dimension strings.
+  return base.replace(marker, `${printColors(out.join(''))}${marker}`);
 }
 
 export interface IsoSlabInput {
@@ -538,7 +549,7 @@ export function isoSlabSvg(p: IsoSlabInput): string {
     for (const y of ys) g.push(line([b0.minX + c, y, zBar], [b0.maxX - c, y, zBar]));
     const clip = roundedRect(b0, radii, c).points.map((q) => pt(q.x, q.y, zBar)).join(' ');
     out.push(`<defs><clipPath id="isoclip"><polygon points="${clip}"/></clipPath></defs>`);
-    out.push(`<g fill="none" stroke="#b5501c" stroke-width="1.1" opacity="0.85" clip-path="url(#isoclip)">${g.join('')}</g>`);
+    out.push(`<g fill="none" stroke="#b5371a" stroke-width="1.1" opacity="0.85" clip-path="url(#isoclip)">${g.join('')}</g>`);
     if (p.bentLegsTo !== undefined) {
       const to = p.bentLegsTo;
       // No legs where a rounded corner has curved the edge away.
@@ -552,17 +563,17 @@ export function isoSlabSvg(p: IsoSlabInput): string {
         if (footingOn(3) && clear(3, b0.maxY - y)) legs.push(line([b0.minX + c, y, zBar], [b0.minX + c, y, to]));
         if (footingOn(1) && clear(1, y - b0.minY)) legs.push(line([b0.maxX - c, y, zBar], [b0.maxX - c, y, to]));
       }
-      out.push(`<g fill="none" stroke="#b5501c" stroke-width="1.1" opacity="0.85">${legs.join('')}</g>`);
+      out.push(`<g fill="none" stroke="#b5371a" stroke-width="1.1" opacity="0.85">${legs.join('')}</g>`);
     }
   }
   if (p.edgeBar) {
     const g = footingRuns(b0, radii, 3 / 12, (i) => p.edgeBar![i]).map((run) => run3(run, depth - p.thick / 2));
-    out.push(`<g fill="none" stroke="#8a2e00" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">${g.join('')}</g>`);
+    out.push(`<g fill="none" stroke="#b5371a" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">${g.join('')}</g>`);
   }
   // Footing bars along the footing, around the curves.
   for (const bar of p.footingBars ?? []) {
     const g = footingRuns(b0, radii, bar.inset, footingOn).map((run) => run3(run, bar.z));
-    out.push(`<g fill="none" stroke="#8a2e00" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">${g.join('')}</g>`);
+    out.push(`<g fill="none" stroke="#b5371a" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">${g.join('')}</g>`);
   }
   // Dowels: from inside the house wall into the slab.
   if (sides && p.dowelFt && p.dowelFt > 0) {
@@ -575,7 +586,7 @@ export function isoSlabSvg(p: IsoSlabInput): string {
         g.push(line([o.x, o.y, zBar], [e.x, e.y, zBar]));
       }
     }
-    out.push(`<g fill="none" stroke="#e05a00" stroke-width="2.4" stroke-linecap="round">${g.join('')}</g>`);
+    out.push(`<g fill="none" stroke="#b5371a" stroke-width="2.4" stroke-linecap="round">${g.join('')}</g>`);
   }
   for (const i of NEAR) if (houseAt(i)) houseWall(i, true);
   if (p.note) out.push(`<text x="${W - 14}" y="${H - 12}" text-anchor="end" font-family="Helvetica, Arial, sans-serif" font-size="12" fill="#666">${esc(p.note)}</text>`);
@@ -616,7 +627,7 @@ export function sectionSvg(p: SectionInput): string {
     const row = (count: number, yIn: number) => {
       for (let i = 0; i < count; i++) {
         const xIn = count === 1 ? p.footWIn / 2 : 3 + ((p.footWIn - 6) * i) / (count - 1);
-        parts.push(`<circle cx="${n(X(xIn))}" cy="${n(Y(yIn))}" r="${n(r)}" fill="#c0622b" stroke="#5a2a0f"/>`);
+        parts.push(`<circle cx="${n(X(xIn))}" cy="${n(Y(yIn))}" r="${n(r)}" fill="#b5371a" stroke="#5a2a0f"/>`);
       }
     };
     const bottom = Math.min(2, p.bars);
@@ -629,11 +640,11 @@ export function sectionSvg(p: SectionInput): string {
     if (p.tie === 'bend') {
       // Bent down just inside the footing bars it ties to.
       const legX = Math.min(p.footWIn / 2, 4.5);
-      parts.push(`<polyline points="${n(X(right))},${n(Y(yb))} ${n(X(legX))},${n(Y(yb))} ${n(X(legX))},${n(Y(p.footDIn - 4))}" fill="none" stroke="#c0622b" stroke-width="${n(sw)}"/>`);
+      parts.push(`<polyline points="${n(X(right))},${n(Y(yb))} ${n(X(legX))},${n(Y(yb))} ${n(X(legX))},${n(Y(p.footDIn - 4))}" fill="none" stroke="#b5371a" stroke-width="${n(sw)}"/>`);
     } else {
-      parts.push(`<line x1="${n(X(3))}" y1="${n(Y(yb))}" x2="${n(X(right))}" y2="${n(Y(yb))}" stroke="#c0622b" stroke-width="${n(sw)}"/>`);
+      parts.push(`<line x1="${n(X(3))}" y1="${n(Y(yb))}" x2="${n(X(right))}" y2="${n(Y(yb))}" stroke="#b5371a" stroke-width="${n(sw)}"/>`);
       if (p.tie === 'lbars') {
-        parts.push(`<polyline points="${n(X(p.footWIn + 24))},${n(Y(yb + 1))} ${n(X(5))},${n(Y(yb + 1))} ${n(X(5))},${n(Y(p.footDIn - 3))}" fill="none" stroke="#e08a2a" stroke-width="${n(sw * 0.8)}"/>`);
+        parts.push(`<polyline points="${n(X(p.footWIn + 24))},${n(Y(yb + 1))} ${n(X(5))},${n(Y(yb + 1))} ${n(X(5))},${n(Y(p.footDIn - 3))}" fill="none" stroke="#b5371a" stroke-width="${n(sw * 0.8)}"/>`);
       }
     }
   }
@@ -648,7 +659,10 @@ export function sectionSvg(p: SectionInput): string {
   if (p.bars) legend.push(`${p.bars} #${p.barSize} in the footing (${Math.min(2, p.bars)} bottom${p.bars > 2 ? ` + ${p.bars - 2} top` : ''}), L-bars at corners`);
   if (p.slabBars) legend.push(p.tie === 'bend' ? `#${p.slabBarSize} slab bars bent down into the footing` : p.tie === 'lbars' ? 'L-bars tie the slab to the footing' : 'Slab bars stop at the edge');
   legend.forEach((l, i) => parts.push(`<text x="${W - 20}" y="${H - 20 - i * 20}" text-anchor="end" font-size="13">${esc(l)}</text>`));
-  return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${W} ${H}" width="100%" role="img" aria-label="Edge detail"><rect width="${W}" height="${H}" fill="#ffffff"/><g font-family="Helvetica, Arial, sans-serif" fill="#222">${parts.join('')}</g></svg>`;
+  return withTitleBar(
+    `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${W} ${H}" width="100%" role="img" aria-label="Edge detail"><rect width="${W}" height="${H}" fill="#ffffff"/><g font-family="Helvetica, Arial, sans-serif" fill="#222">${parts.join('')}</g></svg>`,
+    'Edge detail',
+  );
 }
 
 export interface HouseSectionInput {
@@ -700,7 +714,7 @@ export function houseSectionSvg(p: HouseSectionInput): string {
     const yb = p.slabIn / 2;
     const sw = Math.max(3, (p.dowelSize / 8) * k * 0.8);
     const into = Math.min(half, slabNext ? 9 : 7);
-    parts.push(`<line x1="${n(X(-into))}" y1="${n(Y(yb))}" x2="${n(X(p.dowelIn - into))}" y2="${n(Y(yb))}" stroke="#e05a00" stroke-width="${n(sw)}" stroke-linecap="round"/>`);
+    parts.push(`<line x1="${n(X(-into))}" y1="${n(Y(yb))}" x2="${n(X(p.dowelIn - into))}" y2="${n(Y(yb))}" stroke="#b5371a" stroke-width="${n(sw)}" stroke-linecap="round"/>`);
     parts.push(
       slabNext
         ? `<text x="${n(X(-wallW))}" y="${n(Y(p.slabIn) + 22)}" font-size="13">Drill + epoxy ${n(into)}"</text>`
@@ -712,5 +726,8 @@ export function houseSectionSvg(p: HouseSectionInput): string {
   const what = slabNext ? 'the existing slab' : 'the house';
   const legend = p.dowelIn > 0 ? `#${p.dowelSize} dowels, ${n(p.dowelIn)}" long, drilled and epoxied into ${what}` : `Poured against ${what}, no dowels`;
   parts.push(`<text x="${W - 20}" y="${H - 20}" text-anchor="end" font-size="13">${esc(legend)}</text>`);
-  return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${W} ${H}" width="100%" role="img" aria-label="${slabNext ? 'Existing slab detail' : 'House detail'}"><rect width="${W}" height="${H}" fill="#ffffff"/><g font-family="Helvetica, Arial, sans-serif" fill="#222">${parts.join('')}</g></svg>`;
+  return withTitleBar(
+    `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${W} ${H}" width="100%" role="img" aria-label="${slabNext ? 'Existing slab detail' : 'House detail'}"><rect width="${W}" height="${H}" fill="#ffffff"/><g font-family="Helvetica, Arial, sans-serif" fill="#222">${parts.join('')}</g></svg>`,
+    slabNext ? 'At the existing slab' : 'At the house',
+  );
 }

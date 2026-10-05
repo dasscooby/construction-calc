@@ -5,6 +5,7 @@ import type { PadSolution } from '../lib/padSolve';
 import { ftIn } from '../tools/format';
 import { pointName } from '../tools/sketchTool';
 import { bounds } from './geometry';
+import { printColors, withTitleBar } from './sheet';
 
 const n = (v: number) => Math.round(v * 10) / 10;
 const esc = (s: string) => s.replace(/&/g, '+').replace(/</g, '‹').replace(/>/g, '›');
@@ -62,8 +63,11 @@ export function sketchSvg(s: PadSolution, title: string): string {
       `<text x="${n(Number(X(p.x)) + (dx / d) * 32)}" y="${n(Number(Y(p.y)) + (dy / d) * 32 + 12)}" text-anchor="middle" ${font} font-size="32" font-weight="800" fill="#ffffff">${pointName(i)}</text>`,
     );
   });
-  out.push(`<text x="16" y="${H - 14}" ${font} font-size="18" fill="#cfe0f5">${esc(title)} · white = measured, orange = figured</text>`);
-  return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${W} ${H}" width="100%" role="img" aria-label="Plan view">${out.join('')}</svg>`;
+  return withTitleBar(
+    printColors(`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${W} ${H}" width="100%" role="img" aria-label="Plan view">${out.join('')}</svg>`),
+    'Layout sketch',
+    `${title} · SOLID = MEASURED · RED DASHED = FIGURED`,
+  );
 }
 
 type P3 = [number, number, number];
@@ -122,7 +126,7 @@ export function sketchIsoSvg(s: PadSolution, loop: number[], thickFt: number): s
     if (onLoop(e.a, e.b)) continue;
     const p = s.points[e.a];
     const q = s.points[e.b];
-    out.push(`<polyline points="${pt(p.x, p.y, t)} ${pt(q.x, q.y, t)}" fill="none" stroke="#e05a00" stroke-width="2.5" stroke-dasharray="8 6"/>`);
+    out.push(`<polyline points="${pt(p.x, p.y, t)} ${pt(q.x, q.y, t)}" fill="none" stroke="#b5371a" stroke-width="2.5" stroke-dasharray="8 6"/>`);
   }
   if (z > 1.5) out.push(`<text x="${W - 14}" y="${H - 10}" text-anchor="end" font-family="Helvetica, Arial, sans-serif" font-size="12" fill="#666">Height exaggerated to show the slab</text>`);
   return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${W} ${H}" width="100%" role="img" aria-label="3D view">${out.join('')}</svg>`;

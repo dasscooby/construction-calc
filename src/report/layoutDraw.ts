@@ -5,6 +5,7 @@ import { ftIn } from '../tools/format';
 import type { EdgeKind, OutlineRow } from '../tools/types';
 import { planSvg } from './drawings';
 import { bounds, Pt } from './geometry';
+import { printColors } from './sheet';
 import { alongSide, BarSegment, buildLayout, cornerArc, insetRuns, Layout, outlinePoints, sideRun } from './layoutGeom';
 
 const n = (v: number) => Math.round(v * 10) / 10;
@@ -51,7 +52,7 @@ export function layoutPlanSvg(p: LayoutDrawInput): string {
   // Same placement as planSvg.
   const b = bounds(outer);
   const W = 760;
-  const pad = 70;
+  const pad = 100;
   const spanX = Math.max(b.maxX - b.minX, 1);
   const spanY = Math.max(b.maxY - b.minY, 1);
   const s = Math.min((W - 2 * pad) / spanX, 420 / spanY);
@@ -62,7 +63,7 @@ export function layoutPlanSvg(p: LayoutDrawInput): string {
   const out: string[] = [];
   const footOn = (k: number) => !!p.footingFt && L.sides[k].edge === 'form';
 
-  if (p.bars?.length) out.push(`<g stroke="#ffb347" stroke-width="1" opacity="0.85">${p.bars.map((sg) => pl([sg.a, sg.b], '')).join('')}</g>`);
+  if (p.bars?.length) out.push(`<g stroke="#ffb347" stroke-width="1" opacity="0.4">${p.bars.map((sg) => pl([sg.a, sg.b], '')).join('')}</g>`);
 
   if (p.edgeBar) for (const run of insetRuns(L, p.edgeBar.inset, p.edgeBar.on)) out.push(pl(run, 'stroke="#ff7a00" stroke-width="2.5" stroke-linejoin="round"'));
 
@@ -89,8 +90,8 @@ export function layoutPlanSvg(p: LayoutDrawInput): string {
   });
 
   // What the non-formed sides butt against, and their dowels.
-  const near = 34 / s;
-  const far = 58 / s;
+  const near = 74 / s;
+  const far = 94 / s;
   L.sides.forEach((side, k) => {
     const label = AGAINST[side.edge];
     if (!label) return;
@@ -113,8 +114,9 @@ export function layoutPlanSvg(p: LayoutDrawInput): string {
       out.push(`<g stroke="#ff7a00" stroke-width="2.5" stroke-linecap="round">${ticks.join('')}</g>`);
     }
   });
-  const marker = '<g font-family="Helvetica, Arial, sans-serif" font-size="15"';
-  return base.replace(marker, `${out.join('')}${marker}`);
+  const marker = '<g font-family="Helvetica, Arial, sans-serif" font-size="19"';
+  // The drawing on top, in print colors (black lines, red steel), under the dimension strings.
+  return base.replace(marker, `${printColors(out.join(''))}${marker}`);
 }
 
 type P3 = [number, number, number];
@@ -228,15 +230,15 @@ export function layoutIsoSvg(p: LayoutIsoInput): string {
         if (sg.footAtB) g.push(line([sg.b.x, sg.b.y, zBar], [sg.b.x, sg.b.y, p.bentLegsTo]));
       }
     }
-    out.push(`<g fill="none" stroke="#b5501c" stroke-width="1.1" opacity="0.85">${g.join('')}</g>`);
+    out.push(`<g fill="none" stroke="#b5371a" stroke-width="1.1" opacity="0.85">${g.join('')}</g>`);
   }
   if (p.edgeBar) {
     const g = insetRuns(L, p.edgeBar.inset, p.edgeBar.on).map((run) => `<polyline points="${run.map((q) => pt(q.x, q.y, zBar)).join(' ')}"/>`);
-    out.push(`<g fill="none" stroke="#8a2e00" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">${g.join('')}</g>`);
+    out.push(`<g fill="none" stroke="#b5371a" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">${g.join('')}</g>`);
   }
   for (const bar of p.footingBars ?? []) {
     const g = insetRuns(L, bar.inset, footOn).map((run) => `<polyline points="${run.map((q) => pt(q.x, q.y, bar.z)).join(' ')}"/>`);
-    out.push(`<g fill="none" stroke="#8a2e00" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">${g.join('')}</g>`);
+    out.push(`<g fill="none" stroke="#b5371a" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">${g.join('')}</g>`);
   }
   if (p.dowelFt) {
     const g: string[] = [];
@@ -245,7 +247,7 @@ export function layoutIsoSvg(p: LayoutIsoInput): string {
       const nk = { x: -L.dir[k].y, y: L.dir[k].x };
       for (const q of alongSide(L, k, p.dowelFt!, 0)) g.push(line([q.x - nk.x * 0.7, q.y - nk.y * 0.7, zBar], [q.x + nk.x * 1.2, q.y + nk.y * 1.2, zBar]));
     });
-    out.push(`<g fill="none" stroke="#e05a00" stroke-width="2.4" stroke-linecap="round">${g.join('')}</g>`);
+    out.push(`<g fill="none" stroke="#b5371a" stroke-width="2.4" stroke-linecap="round">${g.join('')}</g>`);
   }
   for (let k = 0; k < N; k++) if (!farSide(k)) neighbour(k, true);
   if (p.note) out.push(`<text x="${W - 14}" y="${H - 12}" text-anchor="end" font-family="Helvetica, Arial, sans-serif" font-size="12" fill="#666">${esc(p.note)}</text>`);
@@ -303,5 +305,5 @@ export function layoutSketchSvg(sides: OutlineRow[]): string | null {
   } else {
     out.push(`<text x="${W / 2}" y="${H - 20}" text-anchor="middle" ${font} font-size="24" font-weight="700" fill="#3ddc84">Shape closes</text>`);
   }
-  return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${W} ${H}" width="100%" role="img" aria-label="Shape so far">${out.join('')}</svg>`;
+  return printColors(`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${W} ${H}" width="100%" role="img" aria-label="Shape so far">${out.join('')}</svg>`);
 }
