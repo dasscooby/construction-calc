@@ -53,3 +53,8 @@ test('company line goes at the bottom of shared numbers', () => {
   expect(text.endsWith('\n\nSmith Concrete · (406) 555-1234 · Lic #123')).toBe(true);
   expect(companyLine(DEFAULT_SETTINGS)).toBe('');
 });
+
+test('document settings: junk falls back to the standard look, notices kept', () => {
+  const s = cleanSettings({ docs: { color: 'purple', font: 'comic', header: 'sideways', billNotice: 'Net 30' } });
+  expect(s.docs).toMatchObject({ color: 'black', font: 'clean', header: 'side', billNotice: 'Net 30', bidNotice: '' });
+});

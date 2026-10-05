@@ -4,6 +4,7 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useSyncExternalStore } from 'react';
 
+import { DEFAULT_DOCS, DOC_COLORS, DOC_FONTS, DocSettings } from '../report/docStyle';
 import { AccentId, ACCENTS, applyTheme, Mode, TEXT_SIZES, TextSize } from '../theme';
 import type { RawValues } from '../tools/run';
 import type { Tool } from '../tools/types';
@@ -29,6 +30,8 @@ export interface Settings {
     stockLength: string;
   };
   company: { name: string; phone: string; email: string; license: string };
+  /** How bids, bills and crew sheets look */
+  docs: DocSettings;
   favorites: string[];
   hidden: string[];
   tabOrder: TabId[];
@@ -41,6 +44,7 @@ export const DEFAULT_SETTINGS: Settings = {
   haptics: true,
   defaults: { waste: '', truck: '', price: '', slabThick: '', wallThick: '', spacing: '', lap: '', stockLength: '' },
   company: { name: '', phone: '', email: '', license: '' },
+  docs: DEFAULT_DOCS,
   favorites: [],
   hidden: [],
   tabOrder: [...TAB_IDS],
@@ -68,6 +72,15 @@ export function cleanSettings(saved: unknown): Settings {
     haptics: s.haptics !== false,
     defaults: strings(DEFAULT_SETTINGS.defaults, s.defaults),
     company: strings(DEFAULT_SETTINGS.company, s.company),
+    docs: (() => {
+      const d = strings({ ...DEFAULT_DOCS }, s.docs) as DocSettings;
+      return {
+        ...d,
+        color: d.color in DOC_COLORS ? d.color : DEFAULT_DOCS.color,
+        font: d.font in DOC_FONTS ? d.font : DEFAULT_DOCS.font,
+        header: d.header === 'center' ? 'center' : 'side',
+      };
+    })(),
     favorites: ids(s.favorites),
     hidden: ids(s.hidden),
     // Keep their order, and add any tab they don't have saved (new tabs in an update).

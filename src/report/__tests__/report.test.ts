@@ -155,3 +155,19 @@ test('a Slab Layout and the cut list sent from it: the steel is counted once', (
   expect([...t2.sticks]).toEqual([...t1.sticks]);
   expect([...t1.sticks].length).toBe(1); // one line per size, not a second "20' sticks" line
 });
+
+test('documents: formal notice at the bottom, no app name, your own notice, color and font', () => {
+  const bid = buildBid(job, DEFAULT_SETTINGS, figureItems(job)).html;
+  expect(bid).not.toContain('Made with');
+  expect(bid).toContain('This proposal is valid for 30 days');
+  expect(buildReport(job, DEFAULT_SETTINGS, { crew: true }).html).toContain('Verify all dimensions against the approved plans');
+  expect(buildBill(job, DEFAULT_SETTINGS, figureItems(job)).html).toContain('Payment is due upon receipt');
+
+  const mine = { ...DEFAULT_SETTINGS, docs: { ...DEFAULT_SETTINGS.docs, color: 'navy' as const, font: 'classic' as const, header: 'center' as const, bidNotice: 'Net 15. Good for 14 days.' } };
+  const custom = buildBid(job, mine, figureItems(job)).html;
+  expect(custom).toContain('Net 15. Good for 14 days.');
+  expect(custom).not.toContain('valid for 30 days');
+  expect(custom).toContain('#1f3a5f');
+  expect(custom).toContain('Georgia');
+  expect(custom).toContain('flex-direction: column');
+});

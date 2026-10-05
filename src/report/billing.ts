@@ -5,6 +5,7 @@ import type { Job, PriceLine } from '../lib/jobs';
 import type { Settings } from '../lib/settings';
 import { commas, dec, money } from '../tools/format';
 import { parseNumber } from '../tools/run';
+import { docCss, noticeHtml } from './docStyle';
 import { FiguredItem, jobDrawings, jobTotals, numberIn } from './report';
 
 const esc = (s: string) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
@@ -103,7 +104,7 @@ function moneyDoc(kind: 'bid' | 'bill', job: Job, s: Settings, items: FiguredIte
   }
 
   const html = `<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
-<title>${esc(job.name)} – ${kind === 'bid' ? 'Bid' : 'Invoice'}</title><style>${STYLE}</style></head><body>
+<title>${esc(job.name)} – ${kind === 'bid' ? 'Bid' : 'Invoice'}</title><style>${STYLE}${docCss(s.docs)}</style></head><body>
 <div class="top"><div class="co">${c.name ? `<b>${esc(c.name)}</b><br>` : ''}${coLines.map(esc).join('<br>')}</div>
 <div class="doc"><h1>${title}</h1><div class="meta">#${no}</div><div class="meta">${esc(date)}</div></div></div>
 <div class="to">${job.customer ? `<div><h4>${kind === 'bid' ? 'Prepared for' : 'Bill to'}</h4>${esc(job.customer).replace(/\n/g, '<br>')}</div>` : ''}
@@ -112,14 +113,9 @@ function moneyDoc(kind: 'bid' | 'bill', job: Job, s: Settings, items: FiguredIte
 ${lines.map((l) => `<tr><td>${esc(l.desc)}</td><td class="r">${esc(qtyText(l))}</td><td class="r">${num(l.price) ? money(num(l.price)) : ''}</td><td class="r">${money(lineAmount(l))}</td></tr>`).join('')}
 </table>
 <table class="sum">${sumRows.map(([k, v, cls]) => `<tr class="${cls ?? ''}"><td>${k}</td><td class="r">${v}</td></tr>`).join('')}</table>
-<div class="terms">${
-    kind === 'bid'
-      ? 'This bid is good for 30 days. Price covers the work listed above. Changes or extra work are billed separately.'
-      : 'Thank you for your business.'
-  }</div>
 ${kind === 'bid' ? '<div class="sign"><div>Accepted by</div><div>Date</div></div>' : ''}
 ${plan ? `<div class="draw">${plan}</div>` : ''}
-<div class="foot">Made with Construction Calc</div>
+${noticeHtml(kind, s.docs)}
 <button class="print" onclick="window.print()">Save as PDF / Print</button>
 </body></html>`;
 
@@ -133,7 +129,6 @@ ${plan ? `<div class="draw">${plan}</div>` : ''}
     '',
     ...sumRows.map(([k, v]) => `${k}: ${v}`),
     '',
-    kind === 'bid' ? 'Good for 30 days.' : 'Thank you for your business.',
     [c.phone, c.email].filter(Boolean).join(' · '),
   ]
     .filter((l, i, a) => l !== '' || a[i - 1] !== '')

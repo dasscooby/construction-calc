@@ -11,6 +11,7 @@ import type { ResultRow, Tool } from '../tools/types';
 import { houseSectionSvg, isoSlabSvg, isoSvg, planSvg, roundedLabels, roundedRect, sectionSvg, sideLabels, SlabSide, slabPlanSvg } from './drawings';
 import { insetOutline, Pt, wallOutline } from './geometry';
 import { layoutIsoSvg, layoutPlanSvg } from './layoutDraw';
+import { docCss, noticeHtml } from './docStyle';
 import { buildLayout, matBars } from './layoutGeom';
 import { slabBarPlan } from '../tools/slabLayoutTool';
 import { slabBarsAdvice } from '../lib/rebar';
@@ -447,6 +448,7 @@ export function buildReport(job: Job, s: Settings, opts: { now?: Date; scans?: s
   .foot { margin-top: 24px; font-size: 11px; color: #888; text-align: center; }
   .print { position: fixed; right: 16px; bottom: 16px; padding: 12px 18px; border-radius: 999px; border: 0; background: #ff9f0a; color: #000; font-size: 16px; font-weight: 700; }
   @media print { .print { display: none; } body { padding: 0; } }
+${docCss(s.docs)}
 </style></head><body>
 <div class="top"><div>${crew ? '<div class="kind">CREW SHEET</div>' : ''}<h1>${esc(job.name)}</h1>${job.address ? `<div class="meta">${esc(job.address)}</div>` : ''}<div class="meta">${esc(date)}</div></div>
 ${company ? `<div class="co">${esc(company).replace(/ · /g, '<br>')}</div>` : ''}</div>
@@ -458,7 +460,7 @@ ${drawings?.house ? `<h2>At the house</h2><div class="draw">${drawings.house}</d
 ${items.length ? `<h2>Details</h2>${itemHtml}` : '<p>Nothing added to this job yet.</p>'}
 ${crew ? '' : notesHtml}
 ${scans.map((src, i) => `<div class="scan"><h2>Plans · page ${i + 1}</h2><img src="${src}" alt="Plan page ${i + 1}"></div>`).join('')}
-<div class="foot">Made with Construction Calc · Field numbers — always follow your plans and your engineer.</div>
+${noticeHtml('crew', s.docs)}
 <button class="print" onclick="window.print()">Save as PDF / Print</button>
 </body></html>`;
 

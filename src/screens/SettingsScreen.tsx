@@ -1,7 +1,12 @@
 import { useEffect } from 'react';
 import { BackHandler, Platform, Pressable, ScrollView, Text, TextInput, View } from 'react-native';
 
+import type { Job } from '../lib/jobs';
 import { companyLine, Settings, settings, TabId, useSettings } from '../lib/settings';
+import { buildBid, buildBill } from '../report/billing';
+import { DEFAULT_NOTICE, DOC_COLORS, DOC_FONTS, DocColor, DocFont, DocKind } from '../report/docStyle';
+import { openReport } from '../report/open';
+import { buildReport } from '../report/report';
 import { TABS } from '../tabs';
 import { AccentId, ACCENTS, colors, onThemeChange, TEXT_SIZES, TextSize, themed } from '../theme';
 
@@ -29,6 +34,27 @@ export default function SettingsScreen({ onClose }: { onClose: () => void }) {
     settings.update({ tabOrder: order });
   };
   const footer = companyLine(s);
+  const setDocs = (patch: Partial<Settings['docs']>) => settings.update({ docs: { ...s.docs, ...patch } });
+  // A made-up job to see how the documents look.
+  const sample: Job = {
+    id: 'sample',
+    name: 'Sample job',
+    address: '123 Main St',
+    notes: 'Pump at 7. Gate code 1234.',
+    createdAt: Date.now(),
+    items: [],
+    customer: 'Customer name\n456 Oak Ave',
+    lines: [
+      { id: '1', desc: 'Garage slab: form, pour and finish', qty: '600', unit: 'sq ft', price: '8.50' },
+      { id: '2', desc: 'Rebar, cut, bent and tied', qty: '650', unit: 'lb', price: '1.25' },
+    ],
+    taxPct: '',
+    paid: '1000',
+  };
+  const preview = (kind: DocKind) => {
+    const r = kind === 'bid' ? buildBid(sample, s, []) : kind === 'bill' ? buildBill(sample, s, []) : buildReport(sample, s, { crew: true });
+    openReport(r.html, r.text, kind === 'bid' ? 'Sample bid' : kind === 'bill' ? 'Sample bill' : 'Sample crew sheet');
+  };
 
   return (
     <View style={styles.page}>
@@ -127,6 +153,83 @@ export default function SettingsScreen({ onClose }: { onClose: () => void }) {
           <Field label="Email" value={s.company.email} placeholder="you@example.com" onChange={(v) => setCompany('email', v)} text keyboard="email-address" />
           <Field label="License #" value={s.company.license} placeholder="optional" onChange={(v) => setCompany('license', v)} text />
           {footer ? <Text style={styles.preview}>Shows as: {footer}</Text> : null}
+        </View>
+
+        {/* ---------------- Documents ---------------- */}
+        <Text style={styles.section}>Documents</Text>
+        <Text style={styles.sectionHelp}>How your bids, bills and crew sheets look.</Text>
+        <View style={styles.card}>
+          <Text style={styles.label}>Color</Text>
+          <View style={styles.swatches}>
+            {(Object.keys(DOC_COLORS) as DocColor[]).map((id) => {
+              const on = s.docs.color === id;
+              return (
+                <Pressable
+                  key={id}
+                  onPress={() => setDocs({ color: id })}
+                  accessibilityRole="button"
+                  accessibilityLabel={`Document color ${DOC_COLORS[id].label}`}
+                  accessibilityState={{ selected: on }}
+                  style={[styles.swatch, { backgroundColor: DOC_COLORS[id].hex }, on && styles.swatchOn]}
+                >
+                  {on ? <Text style={[styles.check, { color: '#ffffff' }]}>✓</Text> : null}
+                </Pressable>
+              );
+            })}
+          </View>
+          <Text style={styles.label}>Font</Text>
+          <Chips value={s.docs.font} options={(Object.keys(DOC_FONTS) as DocFont[]).map((k) => [k, DOC_FONTS[k].label])} onPick={(font) => setDocs({ font })} />
+          <Text style={styles.label}>Company name</Text>
+          <Chips
+            value={s.docs.header}
+            options={[
+              ['side', 'Top left'],
+              ['center', 'Centered'],
+            ]}
+            onPick={(header) => setDocs({ header })}
+          />
+          {(
+            [
+              ['crew', 'Crew sheet notice'],
+              ['bid', 'Bid notice'],
+              ['bill', 'Bill notice'],
+            ] as [DocKind, string][]
+          ).map(([kind, label]) => {
+            const k = `${kind}Notice` as const;
+            return (
+              <View key={kind}>
+                <View style={styles.noticeHead}>
+                  <Text style={styles.label}>{label}</Text>
+                  {s.docs[k] ? (
+                    <Pressable onPress={() => setDocs({ [k]: '' })} accessibilityRole="button" accessibilityLabel={`Reset ${label}`}>
+                      <Text style={styles.resetText}>Reset</Text>
+                    </Pressable>
+                  ) : null}
+                </View>
+                <TextInput
+                  style={styles.notice}
+                  value={s.docs[k] || DEFAULT_NOTICE[kind]}
+                  onChangeText={(v) => setDocs({ [k]: v === DEFAULT_NOTICE[kind] ? '' : v })}
+                  multiline
+                  accessibilityLabel={label}
+                />
+              </View>
+            );
+          })}
+          <Text style={styles.label}>See how they look</Text>
+          <View style={styles.chips}>
+            {(
+              [
+                ['bid', 'Bid'],
+                ['bill', 'Bill'],
+                ['crew', 'Crew sheet'],
+              ] as [DocKind, string][]
+            ).map(([kind, label]) => (
+              <Pressable key={kind} onPress={() => preview(kind)} style={styles.chip} accessibilityRole="button" accessibilityLabel={`Preview ${label}`}>
+                <Text style={styles.chipText}>{label}</Text>
+              </Pressable>
+            ))}
+          </View>
         </View>
 
         {/* ---------------- My tools ---------------- */}
@@ -296,6 +399,9 @@ const getStyles = themed(() => ({
   inputWide: { width: 190, textAlign: 'left' },
   unit: { width: 44, paddingLeft: 8, fontSize: 15, color: colors.subtext },
   preview: { fontSize: 14, color: colors.subtext, marginTop: 4 },
+  noticeHead: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'baseline', marginTop: 8 },
+  resetText: { fontSize: 15, fontWeight: '700', color: colors.accent },
+  notice: { backgroundColor: colors.panel2, borderRadius: 12, padding: 12, fontSize: 15, lineHeight: 20, color: colors.text, minHeight: 90, textAlignVertical: 'top' },
   orderRow: { flexDirection: 'row', alignItems: 'center', paddingVertical: 4 },
   orderName: { flex: 1, fontSize: 17, color: colors.text },
   arrow: { width: 44, height: 40, borderRadius: 10, backgroundColor: colors.panel2, alignItems: 'center', justifyContent: 'center', marginLeft: 8 },
