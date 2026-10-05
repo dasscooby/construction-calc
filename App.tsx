@@ -30,8 +30,8 @@ const TAB_SYMBOLS: Record<TabId, string> = {
   jobs: 'folder.fill',
 };
 const SHOW_ICONS = Platform.OS === 'ios';
-// iOS 26 Liquid Glass tab bar. Off for now: the TestFlight build closed itself right after
-// opening on iOS 26, and the glass bar is one of the things that runs then. Plain bar until tested.
+// iOS 26 Liquid Glass tab bar (back on after build 8 tested fine). Any trouble checking for glass
+// falls back to the plain bar.
 const GLASS_TAB_BAR = true;
 const GLASS = (() => {
   try {
