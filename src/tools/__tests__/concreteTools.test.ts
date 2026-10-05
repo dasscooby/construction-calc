@@ -469,8 +469,8 @@ describe('rebar in footings and walls', () => {
 describe('Footings & Walls around a building', () => {
   test('square / rectangle: 30 × 40 outside, 8" × 8 ft wall → 140 ft around, 137.33 ft along the middle', () => {
     // 137.33 × 8/12 × 8 = 732.4 cu ft = 27.13 yd before waste
-    const r = runTool(tool('footings'), { shape: 'rect', bLength: 40, bWidth: 30, depth: 8, width: { ft: '', in: '8' } as never });
-    expect(rowValue(r, 'Around the outside')).toBe('140 ft');
+    const r = runTool(tool('footings'), { kind: 'wall', shape: 'rect', bLength: 40, bWidth: 30, depth: 8, width: { ft: '', in: '8' } as never });
+    expect(rowValue(r, 'House, around the outside')).toBe('140 ft');
     expect(rowValue(r, 'Along the middle')).toBe('137.3 ft');
     expect(rowValue(r, 'Before waste')).toBe('27.13 cu yd');
   });
@@ -478,12 +478,13 @@ describe('Footings & Walls around a building', () => {
   test('odd shape, wall by wall: an L with one inside corner', () => {
     // 30 + 20 + 15 + 10 + 15 + 30... walls: outside 5 corners, inside 1 → middle = outside − 4 × t
     const r = runTool(tool('footings'), {
+      kind: 'wall',
       shape: 'odd',
       walls: [[30, 'oo'], [20, 'oo'], [15, 'oi'], [10, 'oi'], [15, 'oo'], [30, 'oo']],
       depth: { ft: '', in: '10' } as never,
       width: { ft: '', in: '20' } as never,
     });
-    expect(rowValue(r, 'Around the outside')).toBe('120 ft');
+    expect(rowValue(r, 'House, around the outside')).toBe('120 ft');
     // 120 − 4 × 20" = 113.33
     expect(rowValue(r, 'Along the middle')).toBe('113.3 ft');
   });
@@ -493,4 +494,21 @@ describe('Footings & Walls around a building', () => {
     expect(rowValue(r, 'Bars along it')).toBeDefined();
     if (r.status === 'ok') expect(r.result.rows.find((x) => x.label === 'Bars along it')!.note).toContain('8 corner L-bars');
   });
+});
+
+test('a 70 × 70 footing is entered at the house size and runs centered under the 8" wall', () => {
+  // House 280 ft around. Middle of the 8" wall: 280 − 4 × 8" = 277.33 ft, a few inches in from the edge.
+  // 277.33 × 20" × 10" = 385.2 cu ft = 14.27 yd before waste
+  const r = runTool(CONCRETE_TOOLS.find((t) => t.id === 'footings')!, {
+    kind: 'footing',
+    shape: 'rect',
+    bLength: 70,
+    bWidth: 70,
+    wallOn: 8,
+    width: { ft: '', in: '20' } as never,
+    depth: { ft: '', in: '10' } as never,
+  });
+  expect(rowValue(r, 'House, around the outside')).toBe('280 ft');
+  expect(rowValue(r, 'Along the middle')).toBe('277.3 ft');
+  expect(rowValue(r, 'Before waste')).toBe('14.27 cu yd');
 });

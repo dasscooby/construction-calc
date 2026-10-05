@@ -18,7 +18,7 @@ import { orderText, PLACE_TEXT, sendOrder } from '../lib/order';
 import { dayName, fetchForecast, pourWarnings } from '../lib/weather';
 import type { ConcreteOrder } from '../lib/jobs';
 import { buildReport, figureItems, FiguredItem, jobTotals } from '../report/report';
-import { findFoundation, foundationLines } from '../report/foundation';
+import { findFoundation, foundationLines, foundationParts } from '../report/foundation';
 import { money } from '../tools/format';
 import { colors, onThemeChange, themed } from '../theme';
 
@@ -85,7 +85,7 @@ function JobDetail({ job, onBack, onOpenItem }: { job: Job; onBack: () => void; 
   const [confirmDelete, setConfirmDelete] = useState(false);
   const figured = useMemo(() => figureItems(job), [job]);
   const report = useMemo(() => buildReport(job, prefs, { crew: true }), [job, prefs]);
-  const totals = useMemo(() => jobTotals(figured), [figured]);
+  const totals = useMemo(() => jobTotals(figured, job), [figured, job]);
   const [scanning, setScanning] = useState(false);
   const [scanError, setScanError] = useState('');
   const canScan = useMemo(scannerAvailable, []);
@@ -610,9 +610,30 @@ export function sendDoc(job: Job | null, s: Settings, make: (m: DocMedia) => { h
 
 /** Walls, footings and slab that make one foundation, and how the slab is bid. */
 function FoundationCard({ job, figured }: { job: Job; figured: FiguredItem[] }) {
-  const f = useMemo(() => findFoundation(figured), [figured]);
+  const f = useMemo(() => findFoundation(figured, job), [figured, job]);
   if (!f) return null;
   const lines = foundationLines(f).filter((l) => !l.startsWith('Bid the slab'));
+  const toggle = () => {
+    feel.tap();
+    jobStore.edit(job.id, { together: f.confirmed ? undefined : { ids: f.ids, slabDropIn: job.together?.slabDropIn ?? '' } });
+  };
+  if (!f.confirmed) {
+    return (
+      <View style={styles.card}>
+        <Text style={styles.label}>These look like they go together</Text>
+        {foundationParts(f).map((l) => (
+          <Text key={l} style={styles.fndLine}>
+            • {l}
+          </Text>
+        ))}
+        <Pressable onPress={toggle} style={[styles.checkRow, styles.lineGap]} accessibilityRole="checkbox" accessibilityState={{ checked: false }}>
+          <View style={styles.checkBox} />
+          <Text style={styles.checkText}>They go together ({f.kind.toLowerCase()})</Text>
+        </Pressable>
+        <Text style={styles.help}>Check it and the slab is figured inside the walls, the footings under them, and the bid groups them.</Text>
+      </View>
+    );
+  }
   const chip = (on: boolean, label: string, onPress: () => void) => (
     <Pressable key={label} onPress={onPress} style={[styles.chip, on && styles.chipOn]} accessibilityRole="button" accessibilityState={{ selected: on }}>
       <Text style={[styles.chipText, on && styles.chipTextOn]}>{label}</Text>
@@ -621,17 +642,39 @@ function FoundationCard({ job, figured }: { job: Job; figured: FiguredItem[] }) 
   const inside = job.slabBid === 'inside';
   return (
     <View style={styles.card}>
-      <Text style={styles.label}>Foundation: {f.kind}</Text>
+      <Pressable onPress={toggle} style={styles.checkRow} accessibilityRole="checkbox" accessibilityState={{ checked: true }}>
+        <View style={[styles.checkBox, styles.checkOn]}>
+          <Text style={styles.checkMark}>✓</Text>
+        </View>
+        <Text style={styles.label}>Foundation: {f.kind}</Text>
+      </Pressable>
       {lines.map((l) => (
         <Text key={l} style={styles.fndLine}>
           • {l}
         </Text>
       ))}
+      {f.slab ? (
+        <View style={[styles.sumRow, styles.lineGap]}>
+          <Text style={styles.sumLabel}>Top of slab below top of wall</Text>
+          <View style={styles.dropBox}>
+            <TextInput
+              style={[styles.lineInput, styles.dropInput]}
+              value={job.together?.slabDropIn ?? ''}
+              onChangeText={(slabDropIn) => jobStore.edit(job.id, { together: { ids: f.ids, slabDropIn } })}
+              placeholder="0"
+              placeholderTextColor={colors.faint}
+              keyboardType="decimal-pad"
+              accessibilityLabel="Top of slab below top of wall, inches"
+            />
+            <Text style={styles.sumLabel}>in</Text>
+          </View>
+        </View>
+      ) : null}
       {f.slab && f.slabAtOutside ? (
         <>
           <Text style={[styles.cardSub, styles.lineGap]}>Bid the slab at</Text>
           <View style={styles.chipRow}>
-            {chip(!inside, 'Outside (as measured)', () => jobStore.edit(job.id, { slabBid: 'outside' }))}
+            {chip(!inside, 'House size (as measured)', () => jobStore.edit(job.id, { slabBid: 'outside' }))}
             {chip(inside, 'Inside (what you pour)', () => jobStore.edit(job.id, { slabBid: 'inside' }))}
           </View>
         </>
@@ -950,6 +993,13 @@ function Prices({ job, figured }: { job: Job; figured: FiguredItem[] }) {
 const getStyles = themed(() => ({
   primarySub: { fontSize: 13, color: colors.accentText, opacity: 0.8, marginTop: 2 },
   sendRow: { flexDirection: 'row', gap: 10 },
+  checkRow: { flexDirection: 'row', alignItems: 'center', gap: 10 },
+  checkBox: { width: 28, height: 28, borderRadius: 8, borderWidth: 2, borderColor: colors.accent, alignItems: 'center', justifyContent: 'center' },
+  checkOn: { backgroundColor: colors.accent },
+  checkMark: { fontSize: 18, fontWeight: '900', color: colors.accentText },
+  checkText: { flex: 1, fontSize: 17, fontWeight: '700', color: colors.text },
+  dropBox: { flexDirection: 'row', alignItems: 'center', gap: 6, width: 100 },
+  dropInput: { width: 64 },
   fndLine: { fontSize: 15, color: colors.text, lineHeight: 21, marginBottom: 4 },
   chipRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginTop: 6, marginBottom: 8 },
   chip: { backgroundColor: colors.panel2, borderRadius: 999, paddingHorizontal: 14, paddingVertical: 9 },

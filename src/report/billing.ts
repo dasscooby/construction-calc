@@ -6,7 +6,7 @@ import type { Settings } from '../lib/settings';
 import { commas, dec, ftIn, money } from '../tools/format';
 import { parseLength, parseNumber, RawLength, RawWallRow } from '../tools/run';
 import { DocMedia, docCss, logoHtml, noticeHtml } from './docStyle';
-import { findFoundation } from './foundation';
+import { confirmedFoundation } from './foundation';
 import { FiguredItem, jobDrawings, jobTotals, numberIn } from './report';
 
 const esc = (s: string) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
@@ -55,7 +55,7 @@ export function deliveredYd(job?: Job): number | null {
  */
 export function suggestLines(items: FiguredItem[], s?: Settings, job?: Job): Omit<PriceLine, 'id'>[] {
   const lines: Omit<PriceLine, 'id'>[] = [];
-  const t = jobTotals(items);
+  const t = jobTotals(items, job);
   const p = s?.prices;
   const price = (v: string | undefined) => (v && num(v) ? dec(num(v), 2) : '');
   const rowNum = (rows: { label: string; value: string }[], label: string) => {
@@ -63,7 +63,7 @@ export function suggestLines(items: FiguredItem[], s?: Settings, job?: Job): Omi
     return r ? numberIn(r.value) : 0;
   };
   // Walls, footings and slab that make one foundation are bid together under its name.
-  const fnd = findFoundation(items);
+  const fnd = confirmedFoundation(items, job);
   const inFnd = (id: string) => !!fnd && [...fnd.walls, ...fnd.footings, ...(fnd.slab ? [fnd.slab] : [])].some((f) => f.item.id === id);
   const wallText = fnd ? `${Math.round(fnd.thickFt * 12)}" × ${ftIn(fnd.heightFt)}` : '';
   const ft = (v: unknown) => parseLength(v as RawLength) ?? 0;

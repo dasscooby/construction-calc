@@ -105,6 +105,8 @@ export interface Job {
   taxPct?: string;
   /** Already paid (deposit), dollars, as typed */
   paid?: string;
+  /** Walls, footings and slab you said go together (item ids), and how far the slab sits below the top of the wall */
+  together?: { ids: string[]; slabDropIn: string };
   /** A slab measured to the outside of the walls: bid it at that size, or at the inside (what's poured). */
   slabBid?: 'outside' | 'inside';
   /** The customer's signature accepting the bid */
@@ -157,7 +159,7 @@ export const jobStore = {
     set([job, ...jobs]);
     return job.id;
   },
-  edit(id: string, patch: Partial<Pick<Job, 'name' | 'address' | 'notes' | 'customer' | 'taxPct' | 'paid' | 'slabBid'>>) {
+  edit(id: string, patch: Partial<Pick<Job, 'name' | 'address' | 'notes' | 'customer' | 'taxPct' | 'paid' | 'slabBid' | 'together'>>) {
     update(id, (j) => ({ ...j, ...patch }));
   },
   remove(id: string) {

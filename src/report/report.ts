@@ -16,7 +16,7 @@ import { insetOutline, Pt, wallOutline } from './geometry';
 import { layoutIsoSvg, layoutPlanSvg } from './layoutDraw';
 import { DocMedia, docCss, logoHtml, noticeHtml } from './docStyle';
 import { buildLayout, matBars } from './layoutGeom';
-import { findFoundation, foundationLines } from './foundation';
+import { confirmedFoundation, foundationLines } from './foundation';
 import { slabBarPlan } from '../tools/slabLayoutTool';
 import { slabBarsAdvice } from '../lib/rebar';
 
@@ -65,10 +65,11 @@ export function figureItems(job: Job): FiguredItem[] {
 }
 
 /** Adds up the order across everything in the job. */
-export function jobTotals(items: FiguredItem[]): Totals {
+export function jobTotals(items: FiguredItem[], job?: Job): Totals {
   const t = rawTotals(items);
-  // A slab measured to the outside of basement or stem walls is poured inside them: order for the inside.
-  const f = findFoundation(items);
+  // A slab measured to the outside of basement or stem walls is poured inside them: order for the inside
+  // (once you've said they go together).
+  const f = confirmedFoundation(items, job);
   if (f?.slabOrder && f.slabOrder.inside < f.slabOrder.asMeasured) {
     const { asMeasured, inside } = f.slabOrder;
     const cost = f.slab && f.slab.result.status === 'ok' ? f.slab.result.result.rows.find((r) => r.label === 'Concrete cost') : undefined;
@@ -486,8 +487,8 @@ export function buildReport(job: Job, s: Settings, opts: { now?: Date; crew?: bo
   const items = figureItems(job).map((f) =>
     crew && f.result.status === 'ok' ? { ...f, result: { ...f.result, result: { ...f.result.result, rows: f.result.result.rows.filter(priced) } } } : f,
   );
-  const totals = jobTotals(items);
-  const foundation = findFoundation(items);
+  const totals = jobTotals(items, job);
+  const foundation = confirmedFoundation(items, job);
   const drawings = jobDrawings(job, items);
   const company = companyLine(s);
   const sum = totalsRows(totals).filter(priced);

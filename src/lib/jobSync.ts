@@ -12,7 +12,7 @@ const pourShown = new Map<string, string>();
 
 export function syncWidgets(jobs: Job[]): void {
   const job = latestJob(jobs);
-  const t = job ? jobTotals(figureItems(job)) : null;
+  const t = job ? jobTotals(figureItems(job), job) : null;
   const panels = t ? [...t.panels.values()].reduce((a, b) => a + b, 0) : 0;
   const fillers = t ? [...t.fillers.values()].reduce((a, b) => a + b, 0) : 0;
   const widget = {

@@ -47,13 +47,16 @@ function steelRows(sticks: Map<number, number>, totalLb: number, stockFt: number
 
 /** Footings & Walls measured around a building: outside length, the middle-of-the-wall run, and corners. */
 export function footingRun(inp: Inputs): { error?: string; outsideFt: number; centerFt: number; corners: number; ends: boolean } {
-  const t = inp.len('width');
+  // A wall's outside is the house. A footing is entered at the house size and runs centered under the
+  // wall on it, so its run follows the middle of that wall, a few inches in from the house edge.
+  const footing = inp.choice('kind') === 'footing';
+  const t = footing ? inp.num('wallOn') / 12 : inp.len('width');
   const shape = inp.choice('shape');
   if (shape === 'rect') {
     const L = inp.len('bLength');
     const W = inp.len('bWidth');
     if (L <= 0 || W <= 0) return { error: 'Building length and width must be more than 0.', outsideFt: 0, centerFt: 0, corners: 0, ends: false };
-    if (2 * t >= Math.min(L, W)) return { error: 'The thickness is too much for that building.', outsideFt: 0, centerFt: 0, corners: 0, ends: false };
+    if (2 * Math.max(t, inp.len('width')) >= Math.min(L, W)) return { error: 'The thickness is too much for that building.', outsideFt: 0, centerFt: 0, corners: 0, ends: false };
     // Measured on the outside; the middle of the wall is a thickness shorter at each of the 4 corners.
     return { outsideFt: 2 * (L + W), centerFt: 2 * (L + W) - 4 * t, corners: 4, ends: false };
   }
@@ -76,6 +79,16 @@ const footings: Tool = {
   blurb: 'Around a building or a straight run, with the rebar',
   fields: [
     {
+      key: 'kind',
+      label: 'It’s a',
+      kind: 'choice',
+      options: [
+        { value: 'footing', label: 'Footing' },
+        { value: 'wall', label: 'Wall / mono edge' },
+      ],
+      default: 'footing',
+    },
+    {
       key: 'shape',
       label: 'Shape',
       kind: 'choice',
@@ -86,9 +99,19 @@ const footings: Tool = {
       ],
       default: 'rect',
     },
-    { key: 'bLength', label: 'Building length', kind: 'length', help: 'Outside of the wall or footing', showIf: ['shape=rect'] },
-    { key: 'bWidth', label: 'Building width', kind: 'length', help: 'Outside of the wall or footing', showIf: ['shape=rect'] },
-    { key: 'walls', label: 'Walls', kind: 'walls', help: 'Measure on the outside. Go around one wall at a time.', showIf: ['shape=odd'] },
+    { key: 'bLength', label: 'House length', kind: 'length', help: 'Outside of the wall (the house size)', showIf: ['shape=rect'] },
+    { key: 'bWidth', label: 'House width', kind: 'length', help: 'Outside of the wall (the house size)', showIf: ['shape=rect'] },
+    { key: 'walls', label: 'Walls', kind: 'walls', help: 'The house size: outside of the walls, one wall at a time.', showIf: ['shape=odd'] },
+    {
+      key: 'wallOn',
+      label: 'Wall on it',
+      kind: 'number',
+      unit: 'in',
+      default: '8',
+      help: 'Thickness of the wall that sits centered on the footing',
+      showIf: ['kind=footing'],
+      showIfAny: ['shape=rect', 'shape=odd'],
+    },
     { key: 'length', label: 'Length', kind: 'length', showIf: ['shape=run'] },
     { key: 'qty', label: 'How many', kind: 'count', default: '1', showIf: ['shape=run'] },
     { key: 'depth', label: 'Height (depth)', kind: 'length', help: 'Wall height, or footing thickness' },
@@ -110,8 +133,12 @@ const footings: Tool = {
     if (run.error) return { error: run.error };
     const rows: ResultRow[] = [];
     if (!run.ends) {
-      rows.push({ label: 'Around the outside', value: `${commasTrim(run.outsideFt, 1)} ft` });
-      rows.push({ label: 'Along the middle', value: `${commasTrim(run.centerFt, 1)} ft`, note: `What the concrete and bars follow · ${run.corners} corners` });
+      rows.push({ label: 'House, around the outside', value: `${commasTrim(run.outsideFt, 1)} ft` });
+      rows.push({
+        label: 'Along the middle',
+        value: `${commasTrim(run.centerFt, 1)} ft`,
+        note: `${inp.choice('kind') === 'footing' ? 'Centered under the wall, in from the house edge' : 'Middle of the wall'}: what the concrete and bars follow · ${run.corners} corners`,
+      });
     }
     rows.push(...concreteRows(run.centerFt * t * h, inp));
     if (!inp.on('bars')) return { rows };
