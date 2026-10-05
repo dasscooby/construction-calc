@@ -18,6 +18,7 @@ import { orderText, PLACE_TEXT, sendOrder } from '../lib/order';
 import { dayName, fetchForecast, pourWarnings } from '../lib/weather';
 import type { ConcreteOrder } from '../lib/jobs';
 import { buildReport, figureItems, FiguredItem, jobTotals } from '../report/report';
+import { findFoundation, foundationLines } from '../report/foundation';
 import { money } from '../tools/format';
 import { colors, onThemeChange, themed } from '../theme';
 
@@ -165,6 +166,8 @@ function JobDetail({ job, onBack, onOpenItem }: { job: Job; onBack: () => void; 
             ))}
           </View>
         )}
+
+        <FoundationCard job={job} figured={figured} />
 
         <Text style={styles.section}>Send out</Text>
         <Pressable onPress={viewReport} style={[styles.primary, styles.wide]} accessibilityRole="button">
@@ -605,6 +608,38 @@ export function sendDoc(job: Job | null, s: Settings, make: (m: DocMedia) => { h
   })();
 }
 
+/** Walls, footings and slab that make one foundation, and how the slab is bid. */
+function FoundationCard({ job, figured }: { job: Job; figured: FiguredItem[] }) {
+  const f = useMemo(() => findFoundation(figured), [figured]);
+  if (!f) return null;
+  const lines = foundationLines(f).filter((l) => !l.startsWith('Bid the slab'));
+  const chip = (on: boolean, label: string, onPress: () => void) => (
+    <Pressable key={label} onPress={onPress} style={[styles.chip, on && styles.chipOn]} accessibilityRole="button" accessibilityState={{ selected: on }}>
+      <Text style={[styles.chipText, on && styles.chipTextOn]}>{label}</Text>
+    </Pressable>
+  );
+  const inside = job.slabBid === 'inside';
+  return (
+    <View style={styles.card}>
+      <Text style={styles.label}>Foundation: {f.kind}</Text>
+      {lines.map((l) => (
+        <Text key={l} style={styles.fndLine}>
+          • {l}
+        </Text>
+      ))}
+      {f.slab && f.slabAtOutside ? (
+        <>
+          <Text style={[styles.cardSub, styles.lineGap]}>Bid the slab at</Text>
+          <View style={styles.chipRow}>
+            {chip(!inside, 'Outside (as measured)', () => jobStore.edit(job.id, { slabBid: 'outside' }))}
+            {chip(inside, 'Inside (what you pour)', () => jobStore.edit(job.id, { slabBid: 'inside' }))}
+          </View>
+        </>
+      ) : null}
+    </View>
+  );
+}
+
 /** The concrete order: PSI, how it goes in, when; one tap texts it to the supplier. */
 function OrderCard({ job, yd }: { job: Job; yd: number }) {
   const prefs = useSettings();
@@ -915,6 +950,7 @@ function Prices({ job, figured }: { job: Job; figured: FiguredItem[] }) {
 const getStyles = themed(() => ({
   primarySub: { fontSize: 13, color: colors.accentText, opacity: 0.8, marginTop: 2 },
   sendRow: { flexDirection: 'row', gap: 10 },
+  fndLine: { fontSize: 15, color: colors.text, lineHeight: 21, marginBottom: 4 },
   chipRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginTop: 6, marginBottom: 8 },
   chip: { backgroundColor: colors.panel2, borderRadius: 999, paddingHorizontal: 14, paddingVertical: 9 },
   chipOn: { backgroundColor: colors.accent },

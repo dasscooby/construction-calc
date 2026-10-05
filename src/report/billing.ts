@@ -3,9 +3,10 @@
 
 import type { ChangeOrder, Job, PriceLine, Signature } from '../lib/jobs';
 import type { Settings } from '../lib/settings';
-import { commas, dec, money } from '../tools/format';
+import { commas, dec, ftIn, money } from '../tools/format';
 import { parseLength, parseNumber, RawLength, RawWallRow } from '../tools/run';
 import { DocMedia, docCss, logoHtml, noticeHtml } from './docStyle';
+import { findFoundation } from './foundation';
 import { FiguredItem, jobDrawings, jobTotals, numberIn } from './report';
 
 const esc = (s: string) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
@@ -61,20 +62,34 @@ export function suggestLines(items: FiguredItem[], s?: Settings, job?: Job): Omi
     const r = rows.find((x) => x.label === label);
     return r ? numberIn(r.value) : 0;
   };
+  // Walls, footings and slab that make one foundation are bid together under its name.
+  const fnd = findFoundation(items);
+  const inFnd = (id: string) => !!fnd && [...fnd.walls, ...fnd.footings, ...(fnd.slab ? [fnd.slab] : [])].some((f) => f.item.id === id);
+  const wallText = fnd ? `${Math.round(fnd.thickFt * 12)}" × ${ftIn(fnd.heightFt)}` : '';
   const ft = (v: unknown) => parseLength(v as RawLength) ?? 0;
   for (const { item, tool, result } of items) {
     if (result.status !== 'ok') continue;
-    const name = item.label || tool.title;
+    const name = inFnd(item.id) ? fnd!.kind : item.label || tool.title;
     const raw = item.raw;
     const rows = result.result.rows;
     const src = `item:${item.id}`;
     const area = rows.find((r) => r.label === 'Slab area' || (r.label === 'Area' && !['fill-base', 'vapor-barrier'].includes(tool.id)));
-    if (area) lines.push({ desc: `${name}: form, pour and finish`, qty: dec(numberIn(area.value), 1), unit: 'sq ft', price: price(p?.slabSqFt), src });
+    if (area && fnd?.slab?.item.id === item.id) {
+      const inside = fnd.slabAtOutside && job?.slabBid === 'inside';
+      const sqft = fnd.slabAtOutside ? (inside ? fnd.insideArea : fnd.outsideArea) : numberIn(area.value);
+      lines.push({ desc: `${name}: slab${inside || !fnd.slabAtOutside ? ' inside the walls' : ''}, pour and finish`, qty: dec(sqft, 1), unit: 'sq ft', price: price(p?.slabSqFt), src });
+    } else if (area) lines.push({ desc: `${name}: form, pour and finish`, qty: dec(numberIn(area.value), 1), unit: 'sq ft', price: price(p?.slabSqFt), src });
     else if (tool.id === 'wall-forms') {
       const total = ((raw.walls as RawWallRow[]) ?? []).reduce((a, w) => a + ft(w.length), 0);
-      lines.push({ desc: `${name}: form and pour walls`, qty: dec(total, 1), unit: 'ft', price: price(p?.wallFt), src });
+      lines.push({ desc: `${name}: form and pour ${inFnd(item.id) ? `${wallText} ` : ''}walls`, qty: dec(total, 1), unit: 'ft', price: price(p?.wallFt), src });
     } else if (tool.id === 'footings') {
-      lines.push({ desc: `${name}: dig, form and pour`, qty: dec(ft(raw.length) * (Number(raw.qty) || 1), 1), unit: 'ft', price: price(p?.footingFt), src });
+      lines.push({
+        desc: `${name}: ${inFnd(item.id) ? 'footings under the walls, ' : ''}dig, form and pour`,
+        qty: dec(ft(raw.length) * (Number(raw.qty) || 1), 1),
+        unit: 'ft',
+        price: price(p?.footingFt),
+        src,
+      });
     } else if (tool.id === 'piers') {
       lines.push({ desc: `${name}: drill and pour`, qty: String(Number(raw.qty) || 1), unit: 'ea', price: price(p?.pierEa), src });
     } else if (tool.id === 'steps') {

@@ -16,6 +16,7 @@ import { insetOutline, Pt, wallOutline } from './geometry';
 import { layoutIsoSvg, layoutPlanSvg } from './layoutDraw';
 import { DocMedia, docCss, logoHtml, noticeHtml } from './docStyle';
 import { buildLayout, matBars } from './layoutGeom';
+import { findFoundation, foundationLines } from './foundation';
 import { slabBarPlan } from '../tools/slabLayoutTool';
 import { slabBarsAdvice } from '../lib/rebar';
 
@@ -65,6 +66,19 @@ export function figureItems(job: Job): FiguredItem[] {
 
 /** Adds up the order across everything in the job. */
 export function jobTotals(items: FiguredItem[]): Totals {
+  const t = rawTotals(items);
+  // A slab measured to the outside of basement or stem walls is poured inside them: order for the inside.
+  const f = findFoundation(items);
+  if (f?.slabOrder && f.slabOrder.inside < f.slabOrder.asMeasured) {
+    const { asMeasured, inside } = f.slabOrder;
+    const cost = f.slab && f.slab.result.status === 'ok' ? f.slab.result.result.rows.find((r) => r.label === 'Concrete cost') : undefined;
+    t.concreteOrderYd = Math.round((t.concreteOrderYd - asMeasured + inside) * 100) / 100;
+    if (cost && asMeasured > 0) t.concreteCost = Math.round((t.concreteCost - numberIn(cost.value) * (1 - inside / asMeasured)) * 100) / 100;
+  }
+  return t;
+}
+
+function rawTotals(items: FiguredItem[]): Totals {
   const t: Totals = {
     concreteOrderYd: 0,
     concreteCost: 0,
@@ -449,6 +463,7 @@ export function buildReport(job: Job, s: Settings, opts: { now?: Date; crew?: bo
     crew && f.result.status === 'ok' ? { ...f, result: { ...f.result, result: { ...f.result.result, rows: f.result.result.rows.filter(priced) } } } : f,
   );
   const totals = jobTotals(items);
+  const foundation = findFoundation(items);
   const drawings = jobDrawings(job, items);
   const company = companyLine(s);
   const sum = totalsRows(totals).filter(priced);
@@ -491,6 +506,7 @@ export function buildReport(job: Job, s: Settings, opts: { now?: Date; crew?: bo
   .warn { background: #fff4dc; border: 1px solid #e0a000; border-radius: 6px; padding: 6px 8px; font-size: 13px; margin-bottom: 6px; }
   .draw { border: 1px solid #ccc; border-radius: 10px; overflow: hidden; margin-bottom: 12px; break-inside: avoid; }
   .notes { white-space: pre-wrap; font-size: 14px; }
+  .fnd { margin: 0; padding-left: 18px; font-size: 14px; line-height: 1.5; }
   .kind { font-size: 12px; font-weight: 800; letter-spacing: .12em; color: #b25c00; margin-bottom: 2px; }
   .scan { break-before: page; }
   .scan img { width: 100%; border: 1px solid #ccc; }
@@ -507,6 +523,7 @@ ${drawings?.plan ? `<h2>Plan</h2><div class="draw">${drawings.plan}</div>` : ''}
 ${drawings?.section ? `<h2>Edge detail</h2><div class="draw">${drawings.section}</div>` : ''}
 ${drawings?.house ? `<h2>At the house</h2><div class="draw">${drawings.house}</div>` : ''}
 ${opts.photos?.length ? `<h2>Photos</h2><div class="photos">${opts.photos.map((src, i) => `<img src="${src}" alt="Photo ${i + 1}">`).join('')}</div>` : ''}
+${foundation ? `<h2>Foundation: ${esc(foundation.kind)}</h2><div class="item"><ul class="fnd">${foundationLines(foundation, job).map((l) => `<li>${esc(l)}</li>`).join('')}</ul></div>` : ''}
 ${items.length ? `<h2>Details</h2>${itemHtml}` : '<p>Nothing added to this job yet.</p>'}
 ${crew ? '' : notesHtml}
 ${scans.map((src, i) => `<div class="scan"><h2>Plans · page ${i + 1}</h2><img src="${src}" alt="Plan page ${i + 1}"></div>`).join('')}
