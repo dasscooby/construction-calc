@@ -15,6 +15,7 @@ import HistoryScreen from './src/screens/HistoryScreen';
 import JobsScreen from './src/screens/JobsScreen';
 import SettingsScreen from './src/screens/SettingsScreen';
 import ToolsTab, { OpenRequest } from './src/screens/ToolsTab';
+import { UpdateBar } from './src/lib/appUpdate';
 import { startPlanQueue } from './src/lib/planReader';
 import { TABS } from './src/tabs';
 import { migrateItem } from './src/tools';
@@ -185,6 +186,7 @@ export default function App() {
           })}
         </TabBarBackground>
       </SafeAreaView>
+      <UpdateBar />
     </SafeAreaProvider>
   );
 }
