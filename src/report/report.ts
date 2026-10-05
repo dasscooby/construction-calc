@@ -16,7 +16,9 @@ import { insetOutline, Pt, wallOutline } from './geometry';
 import { layoutIsoSvg, layoutPlanSvg } from './layoutDraw';
 import { DocMedia, docCss, logoHtml, noticeHtml } from './docStyle';
 import { buildLayout, matBars } from './layoutGeom';
-import { confirmedFoundation, foundationLines } from './foundation';
+import { confirmedFoundation, Foundation, foundationLines } from './foundation';
+import { daylightWall, splitOutline, WallSteel } from './heightRuns';
+import { concreteResult } from '../lib/concrete';
 import { FoundationDraw, foundationIsoSvg, foundationPlanSvg, foundationSectionSvg } from './foundationDraw';
 import { slabBarPlan } from '../tools/slabLayoutTool';
 import { slabBarsAdvice } from '../lib/rebar';
@@ -73,6 +75,12 @@ export function figureItems(job: Job): FiguredItem[] {
  */
 export function builtItems(items: FiguredItem[], job?: Job): { items: FiguredItem[]; slabInside: boolean } {
   const f = confirmedFoundation(items, job);
+  // Walls that change height: their concrete and steel, run by run.
+  if (f?.runs && f.outline && !f.runsOver) {
+    const wall = f.walls[0];
+    const refigured = daylightItem(wall, f);
+    if (refigured) items = items.map((x) => (x.item.id === wall.item.id ? refigured : x));
+  }
   if (!f?.slab || !f.slabAtOutside || f.slab.tool.id !== 'slab') return { items, slabInside: false };
   const raw = f.slab.item.raw;
   const areas = (raw.areas as RawArea[]) ?? [];
@@ -86,6 +94,52 @@ export function builtItems(items: FiguredItem[], job?: Job): { items: FiguredIte
   const slab = f.slab;
   const refigured: FiguredItem = { ...slab, result: runTool(slab.tool, insideRaw) };
   return { items: items.map((x) => (x.item.id === slab.item.id ? refigured : x)), slabInside: true };
+}
+
+/** A wall item refigured for heights that change around the house. */
+function daylightItem(wall: FiguredItem, f: Foundation): FiguredItem | null {
+  if (wall.result.status !== 'ok' || !f.runs || !f.outline) return null;
+  const raw = wall.item.raw;
+  const num = (v: unknown, d: number) => parseNumber(String(v ?? '')) ?? d;
+  const isForms = wall.tool.id === 'wall-forms';
+  let steel: WallSteel = { horiz: null, vert: null };
+  if (isForms && raw.wallRebar === '1') {
+    steel = { horiz: { size: num(raw.hBarSize, 4), spacingIn: num(raw.hSpacing, 24) }, vert: { size: num(raw.vBarSize, 4), spacingIn: num(raw.vSpacing, 24) } };
+  } else if (!isForms && raw.bars === '1') {
+    steel = {
+      horiz: { size: num(raw.barSize, 4), spacingIn: 0 },
+      horizLines: num(raw.lines, 2),
+      vert: String(raw.vSpacing ?? '').trim() ? { size: num(raw.barSize, 4), spacingIn: num(raw.vSpacing, 24) } : null,
+    };
+  }
+  const stockFt = num(raw.stockLength, 20);
+  const lap = String(raw.lap ?? '').trim() ? num(raw.lap, 20) : undefined;
+  const d = daylightWall(f.outline, f.runs, f.thickFt, f.centerFt, f.outsideFt, steel, stockFt, lap);
+  const drop = /^(Concrete in the wall|Cubic yards|Cubic feet|Order|Concrete cost|Trucks|Before waste|Horizontal bars|Vertical bars|Bars along it|Verticals|Rebar weight|Wall height|#\d+ sticks|.* lb bags)$/;
+  const rows: ResultRow[] = wall.result.result.rows.filter((r) => !drop.test(r.label));
+  const heights = d.byHeight.map((h) => `${ftIn(h.length)} at ${ftIn(h.height)}`).join(', ');
+  const steelRows: ResultRow[] = [];
+  if (d.horizFt) steelRows.push({ label: 'Horizontal bars', value: `${commas(Math.round(d.horizFt * 10) / 10, 1)} ft`, note: `More rows where the wall is taller · ${commas(d.horizLaps)} laps · ${commas(d.cornerBars)} corner L-bars` });
+  if (d.vertCount) steelRows.push({ label: 'Vertical bars', value: `${commas(d.vertCount)} bars`, note: `${commas(Math.round(d.vertFt))} ft, each cut to its wall height, 3" from the top` });
+  for (const [size, k] of [...d.sticks].sort((a, b) => a[0] - b[0])) steelRows.push({ label: `#${size} sticks`, value: `${commas(k)} × ${stockFt}'` });
+  if (d.lb) steelRows.push({ label: 'Rebar weight', value: `${commas(Math.round(d.lb))} lb`, note: `${dec(d.lb / 2000, 2)} tons` });
+  const concrete: ResultRow[] = [];
+  if (isForms) {
+    concrete.push({ label: 'Concrete in the wall', value: cuYd(d.cuFt / 27), note: 'No waste added · figured run by run' });
+  } else {
+    const c = concreteResult(d.cuFt, raw.waste === '' ? 0 : num(raw.waste, 10));
+    concrete.push({ label: 'Cubic yards', value: dec(c.cuYd, 2), big: true, note: 'Figured run by run, with waste' });
+    concrete.push({ label: 'Order', value: `${c.orderCuYd.toFixed(2)} yd`, big: true, note: 'Rounded up to the next ¼ yard' });
+  }
+  const warnings = [...(wall.result.result.warnings ?? [])];
+  if (isForms) warnings.push('Panels and fillers are counted at the full height. The shorter runs need fewer.');
+  return {
+    ...wall,
+    result: {
+      status: 'ok',
+      result: { rows: [{ label: 'Wall heights', value: 'Change', note: heights }, ...rows, ...concrete, ...steelRows], warnings },
+    },
+  };
 }
 
 /** Adds up the order across everything in the job. */
@@ -499,6 +553,7 @@ export function foundationDrawings(job: Job, items: FiguredItem[], company = '')
     footing,
     slab,
     vaporBarrier: items.some((x) => x.tool.id === 'vapor-barrier'),
+    runs: f.runs && !f.runsOver ? splitOutline(f.outline, f.runs) : undefined,
     title: job.name,
     job: job.name,
     company,
@@ -658,7 +713,9 @@ export function buildReport(job: Job, s: Settings, opts: { now?: Date; crew?: bo
   const notesHtml = job.notes ? `<h2>Notes</h2><div class="notes">${esc(job.notes)}</div>` : '';
   const date = now.toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' });
 
-  const itemHtml = items
+  // Shown as built: a slab inside checked walls, walls whose height changes.
+  const shown = builtItems(items, job).items;
+  const itemHtml = shown
     .map(({ item, tool, result, inputs }) => {
       const head = `<h3>${esc(item.label || tool.title)}${item.label ? ` <span class="tool">${esc(tool.title)}</span>` : ''}</h3>`;
       const inp = `<div class="inputs">${inputs.map((i) => `<span><b>${esc(i.label)}:</b> ${esc(i.value)}</span>`).join('')}</div>`;
@@ -732,7 +789,7 @@ ${noticeHtml('crew', s.docs)}
     ...(crew && job.notes ? ['NOTES', job.notes, ''] : []),
     ...(schedule.length ? ['REBAR', ...schedule.map((r) => `${r.where} · ${r.what}: ${r.amount}`), ''] : []),
     ...(sum.length ? [crew ? 'LOAD LIST' : 'ORDER SUMMARY', ...sum.map((r) => `${r.label}: ${r.value}`), ''] : []),
-    ...items.flatMap(({ item, tool, result }) => [
+    ...shown.flatMap(({ item, tool, result }) => [
       `— ${item.label || tool.title}`,
       ...(result.status === 'ok' ? result.result.rows.filter((r) => r.big).map((r) => `${r.label.trim()}: ${r.value}`) : [`Not finished: ${result.message}`]),
       '',

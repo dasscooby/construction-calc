@@ -19,6 +19,7 @@ import { dayName, fetchForecast, pourWarnings } from '../lib/weather';
 import type { ConcreteOrder } from '../lib/jobs';
 import { buildReport, figureItems, FiguredItem, foundationDrawings, jobTotals } from '../report/report';
 import DrawingView from './DrawingView';
+import HeightRuns from './HeightRuns';
 import { findFoundation, foundationLines, foundationParts } from '../report/foundation';
 import { money } from '../tools/format';
 import { colors, onThemeChange, themed } from '../theme';
@@ -673,6 +674,7 @@ function FoundationCard({ job, figured }: { job: Job; figured: FiguredItem[] }) 
           </View>
         </View>
       ) : null}
+      {f.outline ? <HeightRuns job={job} f={f} /> : null}
       {drawings ? (
         <View style={styles.lineGap}>
           <DrawingView drawings={drawings} />

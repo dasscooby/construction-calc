@@ -4,7 +4,7 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useSyncExternalStore } from 'react';
 
-import type { RawValues } from '../tools/run';
+import type { RawLength, RawValues } from '../tools/run';
 import type { PlanRead } from './planReader';
 
 /** A plan picked with no signal, read when the phone is back online. */
@@ -106,7 +106,12 @@ export interface Job {
   /** Already paid (deposit), dollars, as typed */
   paid?: string;
   /** Walls, footings and slab you said go together (item ids), and how far the slab sits below the top of the wall */
-  together?: { ids: string[]; slabDropIn: string };
+  together?: {
+    ids: string[];
+    slabDropIn: string;
+    /** Walls that change height (daylight basement): from corner A clockwise, how far each height runs; the rest at `rest` */
+    heights?: { runs: { length: RawLength; height: RawLength }[]; rest: RawLength };
+  };
   /** A slab measured to the outside of the walls: bid it at that size, or at the inside (what's poured). */
   slabBid?: 'outside' | 'inside';
   /** The customer's signature accepting the bid */

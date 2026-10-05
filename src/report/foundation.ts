@@ -12,6 +12,7 @@ import type { Job } from '../lib/jobs';
 import { ftIn } from '../tools/format';
 import { parseLength, parseNumber, RawLength, RawWallRow } from '../tools/run';
 import { wallOutline } from './geometry';
+import { fullRuns, HeightRun } from './heightRuns';
 import type { FiguredItem } from './report';
 
 const firstNumber = (v: string) => {
@@ -54,6 +55,10 @@ export interface Foundation {
   slabDropIn: number;
   /** The slab's concrete order, as measured and as poured inside the walls (yd) */
   slabOrder: { asMeasured: number; inside: number } | null;
+  /** Walls that change height (daylight basement), all the way around; null if one height */
+  runs: HeightRun[] | null;
+  /** Feet the entered heights go past the walls (0 = fine) */
+  runsOver: number;
 }
 
 function shoelace(pts: { x: number; y: number }[]): number {
@@ -100,7 +105,7 @@ export function findFoundation(items: FiguredItem[], job?: Job): Foundation | nu
   }
   const t = main?.thickFt ?? wallInfo(walls[0])!.thickFt;
   const heights = walls.map((f) => wallInfo(f)!.heightFt);
-  const heightFt = Math.max(...heights);
+  let heightFt = Math.max(...heights);
   const outsideFt = main ? main.rows.reduce((s, r) => s + r.length, 0) : walls.reduce((s, f) => s + wallInfo(f)!.rows.reduce((a, r) => a + r.length, 0), 0);
   // A closed foundation has 4 more outside corners than inside: the middle of the wall is 4 thicknesses shorter.
   const centerFt = main ? outsideFt - 4 * t : outsideFt;
@@ -165,8 +170,23 @@ export function findFoundation(items: FiguredItem[], job?: Job): Foundation | nu
   const ids = [...walls, ...footings, ...footingBars, ...(slab ? [slab] : [])].map((f) => f.item.id);
   const saved = job?.together?.ids ?? [];
   const confirmed = saved.length === ids.length && ids.every((id) => saved.includes(id));
+  // Heights that change around the house (daylight basement), from corner A clockwise.
+  let runs: HeightRun[] | null = null;
+  let runsOver = 0;
+  const hs = job?.together?.heights;
+  if (hs && main) {
+    const entered = hs.runs
+      .map((r) => ({ length: parseLength(r.length) ?? 0, height: parseLength(r.height) ?? 0 }))
+      .filter((r) => r.length > 0 && r.height > 0);
+    const rest = parseLength(hs.rest) ?? 0;
+    const full = fullRuns(outsideFt, entered, rest > 0 ? rest : heightFt);
+    runs = full.runs;
+    runsOver = full.over;
+  }
+  const varies = !!runs && new Set(runs.map((r) => r.height)).size > 1;
+  if (runs) heightFt = Math.max(heightFt, ...runs.map((r) => r.height));
   const tall = heightFt >= 6;
-  const stepped = walls.length > 1 && Math.max(...heights) - Math.min(...heights) >= 1;
+  const stepped = varies || (walls.length > 1 && Math.max(...heights) - Math.min(...heights) >= 1);
   const anySlab = !!slab || items.some((f) => ok(f) && !!row(f, 'Slab area'));
   const kind: FoundationKind = tall ? (stepped ? 'Daylight basement' : 'Basement') : anySlab ? 'Stem wall and slab' : 'Crawlspace';
   // How far the top of the slab sits below the top of the wall. Blank: a basement slab sits down on the
@@ -193,6 +213,8 @@ export function findFoundation(items: FiguredItem[], job?: Job): Foundation | nu
     slabAtOutside,
     slabDropIn,
     slabOrder,
+    runs,
+    runsOver,
   };
 }
 
@@ -217,7 +239,12 @@ export function foundationParts(f: Foundation): string[] {
 export function foundationLines(f: Foundation, job?: Job): string[] {
   const t = Math.round(f.thickFt * 12);
   const house = f.rect ? `${ftIn(f.rect.L)} × ${ftIn(f.rect.W)}` : `${ftIn(f.outsideFt)} around the outside`;
-  const lines = [`Walls: ${house}, ${t}" thick, ${ftIn(f.heightFt)} tall`];
+  const lines = [`Walls: ${house}, ${t}" thick, ${f.runs ? 'height changes' : `${ftIn(f.heightFt)} tall`}`];
+  if (f.runs) {
+    const by = new Map<number, number>();
+    for (const r of f.runs) by.set(r.height, (by.get(r.height) ?? 0) + r.length);
+    lines.push(`Wall heights: ${[...by].sort((a, b) => b[0] - a[0]).map(([h, l]) => `${ftIn(l)} at ${ftIn(h)}`).join(', ')}`);
+  }
   if (f.footings.length) lines.push(`Footings centered under the walls: ${ftIn(f.centerFt)} along the middle, in from the house edge`);
   if (f.footingBars.length) lines.push('Footing bars run with the walls');
   if (f.slab) {

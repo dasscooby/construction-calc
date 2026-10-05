@@ -29,6 +29,8 @@ export interface FoundationDraw {
   footing: { widthIn: number; depthIn: number; lines: number; barSize: number } | null;
   slab: { thickIn: number; dropIn: number; steel: string; bar: { size: number; spacingIn: number } | null } | null;
   vaporBarrier: boolean;
+  /** Walls that change height: pieces of the outline, each at its height (from corner A clockwise) */
+  runs?: { a: Pt; b: Pt; height: number; run: number }[];
   title: string;
   job: string;
   company: string;
@@ -47,7 +49,7 @@ export function foundationPlanSvg(d: FoundationDraw): string {
   const b = bounds(outer);
   const W = 760;
   const pad = 95;
-  const legendH = 120;
+  const legendH = 150;
   const titleH = 76;
   const spanX = Math.max(b.maxX - b.minX, 1);
   const spanY = Math.max(b.maxY - b.minY, 1);
@@ -76,6 +78,41 @@ export function foundationPlanSvg(d: FoundationDraw): string {
   }
   // Walls: hatched, heavy outline.
   out.push(`<path d="${path(outer)} ${path([...inner].reverse())}" fill="url(#hatch)" fill-rule="evenodd" stroke="#111" stroke-width="2.6"/>`);
+
+  // Walls that change height: each run labeled inside the wall line, a heavy tick where it changes.
+  if (d.runs?.length) {
+    const cxm = (b.minX + b.maxX) / 2;
+    const cym = (b.minY + b.maxY) / 2;
+    const longest = new Map<number, { a: Pt; b: Pt; height: number }>();
+    for (const g of d.runs) {
+      const cur = longest.get(g.run);
+      if (!cur || Math.hypot(g.b.x - g.a.x, g.b.y - g.a.y) > Math.hypot(cur.b.x - cur.a.x, cur.b.y - cur.a.y)) longest.set(g.run, g);
+    }
+    for (const g of longest.values()) {
+      const mx = (g.a.x + g.b.x) / 2;
+      const my = (g.a.y + g.b.y) / 2;
+      const len = Math.hypot(g.b.x - g.a.x, g.b.y - g.a.y) || 1;
+      let nx = -(g.b.y - g.a.y) / len;
+      let ny = (g.b.x - g.a.x) / len;
+      if ((cxm - mx) * nx + (cym - my) * ny < 0) {
+        nx = -nx;
+        ny = -ny;
+      }
+      const tx = Number(X(mx)) + nx * (t * s + 18);
+      const ty = Number(Y(my)) + ny * (t * s + 18);
+      const vertical = Math.abs(g.b.x - g.a.x) < Math.abs(g.b.y - g.a.y);
+      out.push(
+        `<text x="${n(tx)}" y="${n(ty + (vertical ? 0 : 5))}" text-anchor="middle" ${FONT} font-size="14" font-weight="800" fill="#111"${vertical ? ` transform="rotate(-90 ${n(tx)} ${n(ty)})"` : ''}>${esc(`${dim(g.height)} WALL`)}</text>`,
+      );
+    }
+    d.runs.forEach((g, i) => {
+      if (i === 0 || d.runs![i - 1].run === g.run) return;
+      const len = Math.hypot(g.b.x - g.a.x, g.b.y - g.a.y) || 1;
+      const nx = -(g.b.y - g.a.y) / len;
+      const ny = (g.b.x - g.a.x) / len;
+      out.push(`<line x1="${n(Number(X(g.a.x)) - nx * 10)}" y1="${n(Number(Y(g.a.y)) - ny * 10)}" x2="${n(Number(X(g.a.x)) + nx * (t * s + 10))}" y2="${n(Number(Y(g.a.y)) + ny * (t * s + 10))}" stroke="#111" stroke-width="4"/>`);
+    });
+  }
 
   // Dimension strings outside each side: extension lines, dimension line, tick marks, size.
   const cx = (b.minX + b.maxX) / 2;
@@ -140,8 +177,12 @@ export function foundationPlanSvg(d: FoundationDraw): string {
   const ly = planH + 6;
   out.push(`<line x1="20" y1="${n(ly)}" x2="${W - 20}" y2="${n(ly)}" stroke="#111" stroke-width="1"/>`);
   const legend: [string, string][] = [
-    [`<rect x="28" y="${n(ly + 14)}" width="44" height="18" fill="url(#hatch)" stroke="#111" stroke-width="1.5"/>`, `${inch(d.wallIn)} CONCRETE WALL, ${dim(d.wallFt)} TALL${d.wallSteel ? `, ${d.wallSteel}` : ''}`],
+    [
+      `<rect x="28" y="${n(ly + 14)}" width="44" height="18" fill="url(#hatch)" stroke="#111" stroke-width="1.5"/>`,
+      `${inch(d.wallIn)} CONCRETE WALL, ${d.runs?.length ? 'HEIGHT VARIES (SEE PLAN)' : `${dim(d.wallFt)} TALL`}`,
+    ],
   ];
+  if (d.wallSteel) legend.push(['', `WALL STEEL: ${d.wallSteel}`]);
   if (d.footing) {
     legend.push([
       `<line x1="28" y1="${n(ly + 23 + 34)}" x2="72" y2="${n(ly + 23 + 34)}" stroke="#111" stroke-width="1.6" stroke-dasharray="12 7"/>`,
@@ -285,6 +326,7 @@ export function foundationSectionSvg(d: FoundationDraw): string {
   out.push(`<circle cx="44" cy="${H - 34}" r="18" fill="#fff" stroke="#111" stroke-width="2"/><line x1="26" y1="${H - 34}" x2="62" y2="${H - 34}" stroke="#111" stroke-width="1.2"/>`);
   out.push(`<text x="44" y="${H - 38}" text-anchor="middle" ${FONT} font-size="14" font-weight="800">1</text><text x="44" y="${H - 22}" text-anchor="middle" ${FONT} font-size="10" font-weight="700">S1</text>`);
   out.push(`<text x="74" y="${H - 28}" ${FONT} font-size="22" font-weight="900" fill="#111">TYPICAL SECTION</text>`);
+  if (d.runs?.length) out.push(`<text x="74" y="${H - 10}" ${FONT} font-size="12" font-weight="700" fill="#333">TALLEST WALL SHOWN. HEIGHT VARIES, SEE PLAN.</text>`);
   out.push(`<text x="${W - 22}" y="${H - 28}" text-anchor="end" ${FONT} font-size="13" fill="#333">NOT TO SCALE · ${esc(d.job)}</text>`);
   return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${W} ${H}" width="100%" role="img" aria-label="Edge detail">${out.join('')}</svg>`;
 }
@@ -343,14 +385,46 @@ export function foundationIsoSvg(d: FoundationDraw): string {
     out.push(ring(fo, fi, Hf, '#cfcac1'));
   }
   // 2. The far walls' inside faces (seen across the building), above the slab.
-  for (const e of edges(inner).filter((e) => !facing(e) && e.q.x - e.p.x - (e.q.y - e.p.y) > 1e-9).sort((a, b) => depth(a) - depth(b))) {
+  for (const e of d.runs?.length ? [] : edges(inner).filter((e) => !facing(e) && e.q.x - e.p.x - (e.q.y - e.p.y) > 1e-9).sort((a, b) => depth(a) - depth(b))) {
     out.push(face(e.p, e.q, Hf, top, '#bdb8af'));
   }
   // 3. The slab inside, set down from the top of the wall.
-  if (d.slab) out.push(`<polygon points="${inner.map((p) => pt(p.x, p.y, slabTop)).join(' ')}" fill="#dedad2" stroke="#55514b" stroke-width="0.9"/>`);
+  if (d.slab && !d.runs?.length) out.push(`<polygon points="${inner.map((p) => pt(p.x, p.y, slabTop)).join(' ')}" fill="#dedad2" stroke="#55514b" stroke-width="0.9"/>`);
   // 4. Top of the walls, then their outside faces toward the viewer.
-  out.push(ring(outer, inner, top, '#ece9e3'));
-  for (const e of edges(outer).filter(facing).sort((a, b) => depth(a) - depth(b))) out.push(face(e.p, e.q, Hf, top, shade(e, '#c9c5bd', '#a9a49b')));
+  if (d.runs?.length) {
+    // Walls that change height: each piece at its own height, with the step where it changes.
+    const innerAt = (p: Pt, nx: number, ny: number) => {
+      const v = outer.findIndex((o) => Math.hypot(o.x - p.x, o.y - p.y) < 1e-6);
+      return v >= 0 ? inner[v] : { x: p.x + nx * t, y: p.y + ny * t };
+    };
+    const pieces = d.runs.map((g) => {
+      const len = Math.hypot(g.b.x - g.a.x, g.b.y - g.a.y) || 1;
+      const nx = -(g.b.y - g.a.y) / len;
+      const ny = (g.b.x - g.a.x) / len;
+      return { ...g, ai: innerAt(g.a, nx, ny), bi: innerAt(g.b, nx, ny), h: Hf + g.height * z };
+    });
+    const d2 = (p: { a: Pt; b: Pt }) => p.a.x + p.a.y + p.b.x + p.b.y;
+    for (const p of [...pieces].sort((u, v) => d2(u) - d2(v))) {
+      const e = { p: p.ai, q: p.bi };
+      if (e.q.x - e.p.x - (e.q.y - e.p.y) > 1e-9) out.push(face(p.ai, p.bi, Hf, p.h, '#bdb8af'));
+    }
+    if (d.slab) out.push(`<polygon points="${inner.map((p) => pt(p.x, p.y, Math.min(slabTop, Hf + Math.min(...pieces.map((q) => q.h - Hf)) - 0.01))).join(' ')}" fill="#dedad2" stroke="#55514b" stroke-width="0.9"/>`);
+    for (const p of [...pieces].sort((u, v) => d2(u) - d2(v))) {
+      out.push(`<polygon points="${pt(p.a.x, p.a.y, p.h)} ${pt(p.b.x, p.b.y, p.h)} ${pt(p.bi.x, p.bi.y, p.h)} ${pt(p.ai.x, p.ai.y, p.h)}" fill="#ece9e3" stroke="#55514b" stroke-width="0.9"/>`);
+      if (facing({ p: p.a, q: p.b })) out.push(face(p.a, p.b, Hf, p.h, shade({ p: p.a, q: p.b }, '#c9c5bd', '#a9a49b')));
+    }
+    // The step where the height changes: the end of the taller piece.
+    pieces.forEach((p, i) => {
+      const prev = pieces[(i + pieces.length - 1) % pieces.length];
+      if (prev.run === p.run || prev.h === p.h) return;
+      const lo = Math.min(prev.h, p.h);
+      const hi = Math.max(prev.h, p.h);
+      out.push(`<polygon points="${pt(p.a.x, p.a.y, lo)} ${pt(p.ai.x, p.ai.y, lo)} ${pt(p.ai.x, p.ai.y, hi)} ${pt(p.a.x, p.a.y, hi)}" fill="#b3aea5" stroke="#55514b" stroke-width="0.9"/>`);
+    });
+  } else {
+    out.push(ring(outer, inner, top, '#ece9e3'));
+    for (const e of edges(outer).filter(facing).sort((a, b) => depth(a) - depth(b))) out.push(face(e.p, e.q, Hf, top, shade(e, '#c9c5bd', '#a9a49b')));
+  }
   if (z > 1.5) out.push(`<text x="${W - 14}" y="${H - 10}" text-anchor="end" ${FONT} font-size="12" fill="#666">Height stretched to show the footing, wall and slab</text>`);
   return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${W} ${H}" width="100%" role="img" aria-label="3D view">${out.join('')}</svg>`;
 }

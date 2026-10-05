@@ -145,3 +145,35 @@ describe('bill and crew sheet for the 70 × 70 stem wall', () => {
     expect(slabRow(stem).note).toContain("sized for a 68' 8\" long");
   });
 });
+
+describe('daylight basement: walls that change height', () => {
+  const day = (heights: Job['together']) => ({ ...basement, items: basement.items.map((i) => (i.id === 'w' ? { ...i, raw: { ...i.raw, wallRebar: '1' } } : i)), together: heights });
+  // From corner A clockwise: the first two walls (30 + 40 = 70 ft) are 8 ft; the rest of the way (70 ft) is 4 ft.
+  const heights = { ids: ['w', 'f', 's'], slabDropIn: '', heights: { runs: [{ length: len('70'), height: len('8') }], rest: len('4') } };
+
+  test('it is a daylight basement, with the rest of the way filled in', () => {
+    const f = findFoundation(figureItems(day(heights)), day(heights))!;
+    expect(f.kind).toBe('Daylight basement');
+    expect(f.runs).toEqual([
+      { length: 70, height: 8 },
+      { length: 70, height: 4 },
+    ]);
+    expect(f.runsOver).toBe(0);
+  });
+
+  test('wall concrete is figured run by run', () => {
+    // Middle of the wall ÷ outside = (140 − 4 × 8") ÷ 140 = 0.98095.
+    // (70 × 8 + 70 × 4) × 0.98095 × 8/12 = 549.3 cu ft = 20.35 yd (it was 29.0 yd at 8 ft all the way round)
+    const { builtItems } = require('../report') as typeof import('../report');
+    const wall = builtItems(figureItems(day(heights)), day(heights)).items.find((x) => x.item.id === 'w')!;
+    const row = (l: string) => (wall.result.status === 'ok' ? wall.result.result.rows.find((r) => r.label === l) : undefined);
+    expect(row('Concrete in the wall')?.value).toBe('20.35 cu yd');
+    expect(row('Wall heights')?.note).toBe(`70' 0" at 8' 0", 70' 0" at 4' 0"`);
+    expect(row('Vertical bars')).toBeDefined();
+  });
+
+  test('heights that run past the walls are caught', () => {
+    const tooLong = { ...heights, heights: { runs: [{ length: len('150'), height: len('8') }], rest: len('4') } };
+    expect(findFoundation(figureItems(day(tooLong)), day(tooLong))!.runsOver).toBe(10);
+  });
+});
