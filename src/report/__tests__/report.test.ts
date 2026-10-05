@@ -171,3 +171,15 @@ test('documents: formal notice at the bottom, no app name, your own notice, colo
   expect(custom).toContain('Georgia');
   expect(custom).toContain('flex-direction: column');
 });
+
+test('your logo goes on the bid, bill and crew sheet; job photos go on the crew sheet', () => {
+  const logo = 'data:image/jpeg;base64,LOGO';
+  const photo = 'data:image/jpeg;base64,PHOTO';
+  expect(buildBid(job, DEFAULT_SETTINGS, figureItems(job), undefined, { logo }).html).toContain(`<img class="logo" src="${logo}"`);
+  expect(buildBill(job, DEFAULT_SETTINGS, figureItems(job), undefined, { logo }).html).toContain(`<img class="logo" src="${logo}"`);
+  const crew = buildReport(job, DEFAULT_SETTINGS, { crew: true, logo, photos: [photo] }).html;
+  expect(crew).toContain(`<img class="logo" src="${logo}"`);
+  expect(crew).toContain('<h2>Photos</h2>');
+  expect(crew).toContain(photo);
+  expect(buildBid(job, DEFAULT_SETTINGS, figureItems(job)).html).not.toContain('class="logo"');
+});

@@ -5,7 +5,7 @@ import type { Job, PriceLine } from '../lib/jobs';
 import type { Settings } from '../lib/settings';
 import { commas, dec, money } from '../tools/format';
 import { parseNumber } from '../tools/run';
-import { docCss, noticeHtml } from './docStyle';
+import { DocMedia, docCss, logoHtml, noticeHtml } from './docStyle';
 import { FiguredItem, jobDrawings, jobTotals, numberIn } from './report';
 
 const esc = (s: string) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
@@ -84,7 +84,7 @@ const STYLE = `
   .print { position: fixed; right: 16px; bottom: 16px; padding: 12px 18px; border-radius: 999px; border: 0; background: #ff9f0a; color: #000; font-size: 16px; font-weight: 700; }
   @media print { .print { display: none; } body { padding: 0; } }`;
 
-function moneyDoc(kind: 'bid' | 'bill', job: Job, s: Settings, items: FiguredItem[], now: Date): { html: string; text: string } {
+function moneyDoc(kind: 'bid' | 'bill', job: Job, s: Settings, items: FiguredItem[], now: Date, media: DocMedia): { html: string; text: string } {
   const c = s.company;
   const lines = (job.lines ?? []).filter((l) => l.desc.trim() || num(l.price));
   const m = priceTotals({ ...job, lines });
@@ -105,7 +105,7 @@ function moneyDoc(kind: 'bid' | 'bill', job: Job, s: Settings, items: FiguredIte
 
   const html = `<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
 <title>${esc(job.name)} – ${kind === 'bid' ? 'Bid' : 'Invoice'}</title><style>${STYLE}${docCss(s.docs)}</style></head><body>
-<div class="top"><div class="co">${c.name ? `<b>${esc(c.name)}</b><br>` : ''}${coLines.map(esc).join('<br>')}</div>
+<div class="top"><div class="co">${logoHtml(media.logo)}${c.name ? `<b>${esc(c.name)}</b><br>` : ''}${coLines.map(esc).join('<br>')}</div>
 <div class="doc"><h1>${title}</h1><div class="meta">#${no}</div><div class="meta">${esc(date)}</div></div></div>
 <div class="to">${job.customer ? `<div><h4>${kind === 'bid' ? 'Prepared for' : 'Bill to'}</h4>${esc(job.customer).replace(/\n/g, '<br>')}</div>` : ''}
 <div><h4>Job</h4>${esc(job.name)}${job.address ? `<br>${esc(job.address)}` : ''}</div></div>
@@ -137,5 +137,5 @@ ${noticeHtml(kind, s.docs)}
   return { html, text };
 }
 
-export const buildBid = (job: Job, s: Settings, items: FiguredItem[], now = new Date()) => moneyDoc('bid', job, s, items, now);
-export const buildBill = (job: Job, s: Settings, items: FiguredItem[], now = new Date()) => moneyDoc('bill', job, s, items, now);
+export const buildBid = (job: Job, s: Settings, items: FiguredItem[], now = new Date(), media: DocMedia = {}) => moneyDoc('bid', job, s, items, now, media);
+export const buildBill = (job: Job, s: Settings, items: FiguredItem[], now = new Date(), media: DocMedia = {}) => moneyDoc('bill', job, s, items, now, media);

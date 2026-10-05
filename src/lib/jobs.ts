@@ -58,6 +58,8 @@ export interface Job {
   pour?: Pour;
   /** Scanned plan pages: image files saved on the phone */
   scans?: string[];
+  /** Job photos: image files saved on the phone (crew sheet) */
+  photos?: string[];
   /** Who the bid and bill go to */
   customer?: string;
   /** Bid / bill lines */
@@ -165,6 +167,12 @@ export const jobStore = {
   },
   setPlanFound(jobId: string, found: PlanRead | undefined) {
     update(jobId, (j) => ({ ...j, planFound: found, planError: undefined }));
+  },
+  addPhotos(jobId: string, uris: string[]) {
+    update(jobId, (j) => ({ ...j, photos: [...(j.photos ?? []), ...uris] }));
+  },
+  removePhoto(jobId: string, uri: string) {
+    update(jobId, (j) => ({ ...j, photos: (j.photos ?? []).filter((p) => p !== uri) }));
   },
   removeScan(jobId: string, uri: string) {
     update(jobId, (j) => ({ ...j, scans: (j.scans ?? []).filter((s) => s !== uri) }));

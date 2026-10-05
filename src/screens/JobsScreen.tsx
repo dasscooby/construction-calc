@@ -6,7 +6,9 @@ import { dayLabel, timeLabel } from '../lib/history';
 import { Job, JobItem, jobStore, PriceLine, useJobs, yardsIn } from '../lib/jobs';
 import { deleteJobScans, deleteScanFile, scanPages, scannerAvailable, scansForReport } from '../lib/scanner';
 import { pickError, pickPlanFileNative, pickPlanFileWeb, pickPlanPhotoNative, PlanSlab, processPlanQueue, savePendingFile, slabToRaw } from '../lib/planReader';
-import { useSettings } from '../lib/settings';
+import { asDataUris, deleteFile, photosAvailable, pickJobPhotos } from '../lib/media';
+import { Settings, useSettings } from '../lib/settings';
+import type { DocMedia } from '../report/docStyle';
 import { dec } from '../tools/format';
 import { liveActivitiesSupported } from '../widgets/bridge';
 import { openReport } from '../report/open';
@@ -82,14 +84,20 @@ function JobDetail({ job, onBack, onOpenItem }: { job: Job; onBack: () => void; 
   const [scanning, setScanning] = useState(false);
   const [scanError, setScanError] = useState('');
   const canScan = useMemo(scannerAvailable, []);
-  const viewReport = () => {
-    // Phone app: put the scanned plan pages in the PDF too.
-    if (Platform.OS !== 'web' && job.scans?.length) {
-      void scansForReport(job.scans).then((scans) => {
-        const r = buildReport(job, prefs, { scans, crew: true });
-        openReport(r.html, r.text, job.name);
-      });
-    } else openReport(report.html, report.text, job.name);
+  const viewReport = () => sendDoc(job, prefs, (m) => buildReport(job, prefs, { crew: true, ...m }), job.name);
+  const [photoError, setPhotoError] = useState('');
+  const canPhoto = useMemo(() => Platform.OS !== 'web' && photosAvailable(), []);
+  const addPhotos = async () => {
+    setPhotoError('');
+    try {
+      const uris = await pickJobPhotos(job.id);
+      if (uris.length) {
+        jobStore.addPhotos(job.id, uris);
+        feel.success();
+      }
+    } catch (e) {
+      setPhotoError(pickError(e));
+    }
   };
   const scan = async () => {
     setScanning(true);
@@ -161,20 +169,14 @@ function JobDetail({ job, onBack, onOpenItem }: { job: Job; onBack: () => void; 
         </Pressable>
         <View style={styles.sendRow}>
           <Pressable
-            onPress={() => {
-              const r = buildBid(job, prefs, figured);
-              openReport(r.html, r.text, `${job.name} bid`);
-            }}
+            onPress={() => sendDoc(job, prefs, (m) => buildBid(job, prefs, figured, undefined, m), `${job.name} bid`)}
             style={[styles.secondary, styles.half]}
             accessibilityRole="button"
           >
             <Text style={styles.secondaryText}>Bid</Text>
           </Pressable>
           <Pressable
-            onPress={() => {
-              const r = buildBill(job, prefs, figured);
-              openReport(r.html, r.text, `${job.name} bill`);
-            }}
+            onPress={() => sendDoc(job, prefs, (m) => buildBill(job, prefs, figured, undefined, m), `${job.name} bill`)}
             style={[styles.secondary, styles.half]}
             accessibilityRole="button"
           >
@@ -267,6 +269,38 @@ function JobDetail({ job, onBack, onOpenItem }: { job: Job; onBack: () => void; 
             {scanError ? <Text style={styles.warn}>{scanError}</Text> : null}
           </>
         )}
+
+        {canPhoto || (job.photos?.length ?? 0) > 0 ? (
+          <>
+            <Text style={styles.section}>Photos</Text>
+            {job.photos?.length ? (
+              <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.scans}>
+                {job.photos.map((uri, i) => (
+                  <Pressable
+                    key={uri}
+                    onPress={() => {
+                      jobStore.removePhoto(job.id, uri);
+                      deleteFile(uri);
+                    }}
+                    accessibilityRole="button"
+                    accessibilityLabel={`Delete photo ${i + 1}`}
+                    style={styles.scanThumb}
+                  >
+                    <Image source={{ uri }} style={styles.photoImg} resizeMode="cover" />
+                    <Text style={styles.scanLabel}>Tap to delete</Text>
+                  </Pressable>
+                ))}
+              </ScrollView>
+            ) : null}
+            {canPhoto ? (
+              <Pressable onPress={() => void addPhotos()} style={styles.secondary} accessibilityRole="button">
+                <Text style={styles.secondaryText}>Add photos</Text>
+              </Pressable>
+            ) : null}
+            {photoError ? <Text style={styles.warn}>{photoError}</Text> : null}
+            {job.photos?.length ? <Text style={styles.help}>Photos go on the crew sheet.</Text> : null}
+          </>
+        ) : null}
 
         <Text style={styles.section}>Notes</Text>
         <TextInput
@@ -545,6 +579,25 @@ function PlanReader({ job }: { job: Job }) {
   );
 }
 
+/**
+ * Makes a document with your logo (and, on the phone, the job's photos and scanned plans) and opens it.
+ * Web: everything is already in memory, so it opens straight from the tap (Safari only allows that).
+ */
+export function sendDoc(job: Job | null, s: Settings, make: (m: DocMedia) => { html: string; text: string }, title: string): void {
+  if (Platform.OS === 'web') {
+    const r = make({ logo: s.docs.logo || undefined });
+    openReport(r.html, r.text, title);
+    return;
+  }
+  void (async () => {
+    const [logo] = s.docs.logo ? await asDataUris([s.docs.logo]) : [];
+    const photos = job?.photos?.length ? await asDataUris(job.photos) : [];
+    const scans = job?.scans?.length ? await scansForReport(job.scans) : [];
+    const r = make({ logo, photos, scans });
+    openReport(r.html, r.text, title);
+  })();
+}
+
 /** Customer and price lines for the bid and the final bill. */
 function Prices({ job, figured }: { job: Job; figured: FiguredItem[] }) {
   const lines = job.lines ?? [];
@@ -699,6 +752,7 @@ const getStyles = themed(() => ({
   pourBig: { fontSize: 28, fontWeight: '300', color: colors.accent, marginVertical: 2 },
   scans: { gap: 10, paddingBottom: 10 },
   scanThumb: { width: 130 },
+  photoImg: { width: 130, height: 130, borderRadius: 10, backgroundColor: colors.panel2 },
   scanImg: { width: 130, height: 170, borderRadius: 10, backgroundColor: colors.panel2 },
   scanLabel: { fontSize: 12, color: colors.subtext, marginTop: 4 },
 }));

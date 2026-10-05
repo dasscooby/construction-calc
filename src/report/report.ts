@@ -11,7 +11,7 @@ import type { ResultRow, Tool } from '../tools/types';
 import { houseSectionSvg, isoSlabSvg, isoSvg, planSvg, roundedLabels, roundedRect, sectionSvg, sideLabels, SlabSide, slabPlanSvg } from './drawings';
 import { insetOutline, Pt, wallOutline } from './geometry';
 import { layoutIsoSvg, layoutPlanSvg } from './layoutDraw';
-import { docCss, noticeHtml } from './docStyle';
+import { DocMedia, docCss, logoHtml, noticeHtml } from './docStyle';
 import { buildLayout, matBars } from './layoutGeom';
 import { slabBarPlan } from '../tools/slabLayoutTool';
 import { slabBarsAdvice } from '../lib/rebar';
@@ -391,7 +391,7 @@ function totalsRows(t: Totals): { label: string; value: string }[] {
  * The job report. `crew`: the crew sheet, with no prices and the notes up top.
  * `scans`: scanned plan pages as data URIs (phone app), added at the end.
  */
-export function buildReport(job: Job, s: Settings, opts: { now?: Date; scans?: string[]; crew?: boolean } = {}): { html: string; text: string } {
+export function buildReport(job: Job, s: Settings, opts: { now?: Date; crew?: boolean } & DocMedia = {}): { html: string; text: string } {
   const now = opts.now ?? new Date();
   const scans = opts.scans ?? [];
   const crew = !!opts.crew;
@@ -451,12 +451,13 @@ export function buildReport(job: Job, s: Settings, opts: { now?: Date; scans?: s
 ${docCss(s.docs)}
 </style></head><body>
 <div class="top"><div>${crew ? '<div class="kind">CREW SHEET</div>' : ''}<h1>${esc(job.name)}</h1>${job.address ? `<div class="meta">${esc(job.address)}</div>` : ''}<div class="meta">${esc(date)}</div></div>
-${company ? `<div class="co">${esc(company).replace(/ · /g, '<br>')}</div>` : ''}</div>
+${company || opts.logo ? `<div class="co">${logoHtml(opts.logo)}${esc(company).replace(/ · /g, '<br>')}</div>` : ''}</div>
 ${crew ? notesHtml : ''}
 ${sum.length ? `<h2>${crew ? 'Load list' : 'Order summary'}</h2><table class="sum">${sum.map((r) => `<tr><td>${esc(r.label)}</td><td class="v">${esc(r.value)}</td></tr>`).join('')}</table>` : ''}
 ${drawings ? `<h2>Plan</h2><div class="draw">${drawings.plan}</div><h2>3D view</h2><div class="draw">${drawings.iso}</div>` : ''}
 ${drawings?.section ? `<h2>Edge detail</h2><div class="draw">${drawings.section}</div>` : ''}
 ${drawings?.house ? `<h2>At the house</h2><div class="draw">${drawings.house}</div>` : ''}
+${opts.photos?.length ? `<h2>Photos</h2><div class="photos">${opts.photos.map((src, i) => `<img src="${src}" alt="Photo ${i + 1}">`).join('')}</div>` : ''}
 ${items.length ? `<h2>Details</h2>${itemHtml}` : '<p>Nothing added to this job yet.</p>'}
 ${crew ? '' : notesHtml}
 ${scans.map((src, i) => `<div class="scan"><h2>Plans · page ${i + 1}</h2><img src="${src}" alt="Plan page ${i + 1}"></div>`).join('')}

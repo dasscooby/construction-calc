@@ -1,11 +1,13 @@
-import { useEffect } from 'react';
-import { BackHandler, Platform, Pressable, ScrollView, Text, TextInput, View } from 'react-native';
+import { useEffect, useState } from 'react';
+import { BackHandler, Image, Platform, Pressable, ScrollView, Text, TextInput, View } from 'react-native';
 
 import type { Job } from '../lib/jobs';
 import { companyLine, Settings, settings, TabId, useSettings } from '../lib/settings';
 import { buildBid, buildBill } from '../report/billing';
 import { DEFAULT_NOTICE, DOC_COLORS, DOC_FONTS, DocColor, DocFont, DocKind } from '../report/docStyle';
-import { openReport } from '../report/open';
+import { deleteFile, photosAvailable, pickLogo } from '../lib/media';
+import { pickError } from '../lib/planReader';
+import { sendDoc } from './JobsScreen';
 import { buildReport } from '../report/report';
 import { TABS } from '../tabs';
 import { AccentId, ACCENTS, colors, onThemeChange, TEXT_SIZES, TextSize, themed } from '../theme';
@@ -51,9 +53,25 @@ export default function SettingsScreen({ onClose }: { onClose: () => void }) {
     taxPct: '',
     paid: '1000',
   };
-  const preview = (kind: DocKind) => {
-    const r = kind === 'bid' ? buildBid(sample, s, []) : kind === 'bill' ? buildBill(sample, s, []) : buildReport(sample, s, { crew: true });
-    openReport(r.html, r.text, kind === 'bid' ? 'Sample bid' : kind === 'bill' ? 'Sample bill' : 'Sample crew sheet');
+  const preview = (kind: DocKind) =>
+    sendDoc(
+      null,
+      s,
+      (m) => (kind === 'bid' ? buildBid(sample, s, [], undefined, m) : kind === 'bill' ? buildBill(sample, s, [], undefined, m) : buildReport(sample, s, { crew: true, logo: m.logo })),
+      kind === 'bid' ? 'Sample bid' : kind === 'bill' ? 'Sample bill' : 'Sample crew sheet',
+    );
+  const [logoError, setLogoError] = useState('');
+  const canLogo = photosAvailable();
+  const addLogo = async () => {
+    setLogoError('');
+    try {
+      const logo = await pickLogo();
+      if (!logo) return;
+      deleteFile(s.docs.logo);
+      setDocs({ logo });
+    } catch (e) {
+      setLogoError(pickError(e));
+    }
   };
 
   return (
@@ -159,6 +177,30 @@ export default function SettingsScreen({ onClose }: { onClose: () => void }) {
         <Text style={styles.section}>Documents</Text>
         <Text style={styles.sectionHelp}>How your bids, bills and crew sheets look.</Text>
         <View style={styles.card}>
+          <Text style={styles.label}>Logo</Text>
+          {s.docs.logo ? <Image source={{ uri: s.docs.logo }} style={styles.logo} resizeMode="contain" accessibilityLabel="Your logo" /> : null}
+          {canLogo ? (
+            <View style={styles.chips}>
+              <Pressable onPress={() => void addLogo()} style={styles.chip} accessibilityRole="button">
+                <Text style={styles.chipText}>{s.docs.logo ? 'Change logo' : 'Add logo'}</Text>
+              </Pressable>
+              {s.docs.logo ? (
+                <Pressable
+                  onPress={() => {
+                    deleteFile(s.docs.logo);
+                    setDocs({ logo: '' });
+                  }}
+                  style={styles.chip}
+                  accessibilityRole="button"
+                >
+                  <Text style={styles.chipText}>Remove</Text>
+                </Pressable>
+              ) : null}
+            </View>
+          ) : (
+            <Text style={styles.preview}>Adding a logo needs the newest app version from TestFlight.</Text>
+          )}
+          {logoError ? <Text style={styles.preview}>{logoError}</Text> : null}
           <Text style={styles.label}>Color</Text>
           <View style={styles.swatches}>
             {(Object.keys(DOC_COLORS) as DocColor[]).map((id) => {
@@ -399,6 +441,7 @@ const getStyles = themed(() => ({
   inputWide: { width: 190, textAlign: 'left' },
   unit: { width: 44, paddingLeft: 8, fontSize: 15, color: colors.subtext },
   preview: { fontSize: 14, color: colors.subtext, marginTop: 4 },
+  logo: { width: 200, height: 80, backgroundColor: '#ffffff', borderRadius: 10, marginBottom: 8 },
   noticeHead: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'baseline', marginTop: 8 },
   resetText: { fontSize: 15, fontWeight: '700', color: colors.accent },
   notice: { backgroundColor: colors.panel2, borderRadius: 12, padding: 12, fontSize: 15, lineHeight: 20, color: colors.text, minHeight: 90, textAlignVertical: 'top' },

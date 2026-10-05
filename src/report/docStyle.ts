@@ -29,9 +29,22 @@ export interface DocSettings {
   crewNotice: string;
   bidNotice: string;
   billNotice: string;
+  /** Company logo: a picture file on the phone, or a data URI on the web. '' = none */
+  logo: string;
 }
 
-export const DEFAULT_DOCS: DocSettings = { color: 'black', font: 'clean', header: 'side', crewNotice: '', bidNotice: '', billNotice: '' };
+export const DEFAULT_DOCS: DocSettings = { color: 'black', font: 'clean', header: 'side', crewNotice: '', bidNotice: '', billNotice: '', logo: '' };
+
+/** Pictures that go in a document, as data URIs (loaded before the document is made). */
+export interface DocMedia {
+  logo?: string;
+  /** Job photos (crew sheet) */
+  photos?: string[];
+  /** Scanned plan pages (crew sheet) */
+  scans?: string[];
+}
+
+export const logoHtml = (logo?: string) => (logo ? `<img class="logo" src="${logo}" alt="Logo">` : '');
 
 export const DEFAULT_NOTICE: Record<DocKind, string> = {
   crew:
@@ -60,11 +73,15 @@ export function docCss(d: DocSettings): string {
   th { border-bottom-color: ${ink} !important; color: ${ink}; }
   .sum tr.total td { border-top-color: ${ink} !important; }
   .kind { color: ${ink}; }
+  .logo { display: block; max-height: 72px; max-width: 220px; margin-bottom: 6px; }
+  .photos { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+  .photos img { width: 100%; border-radius: 6px; border: 1px solid #ccc; break-inside: avoid; }
   .notice { margin-top: 30px; padding-top: 10px; border-top: 1px solid #bbb; font-size: 10.5px; line-height: 1.5; color: #555; text-align: justify; break-inside: avoid; }
   ${
     d.header === 'center'
       ? `.top { flex-direction: column; align-items: center; text-align: center; }
   .top > div { text-align: center !important; }
+  .top .co .logo, .top .logo { margin-left: auto; margin-right: auto; }
   .co { order: -1; }`
       : ''
   }`;
