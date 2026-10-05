@@ -48,5 +48,10 @@
   "jest": {
     "preset": "jest-expo"
   },
-  "private": true
+  "private": true,
+  "overrides": {
+    "expo-quick-actions": {
+      "@expo/image-utils": "^0.11.5"
+    }
+  }
 }
