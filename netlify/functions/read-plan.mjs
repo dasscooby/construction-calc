@@ -42,6 +42,66 @@ const SLAB_SCHEMA = {
   required: ['name', 'sides'],
 };
 
+const WALL_SCHEMA = {
+  type: 'object',
+  description: 'Poured concrete foundation / stem walls (formed with wall forms)',
+  properties: {
+    name: { type: 'string' },
+    sides: {
+      type: 'array',
+      description: 'Walk the OUTSIDE face of the walls clockwise, one entry per wall, length corner to corner. turn = R at an outside corner, L at an inside corner.',
+      items: {
+        type: 'object',
+        properties: { length_ft: { type: 'number' }, turn: { type: 'string', enum: ['R', 'L'] } },
+        required: ['length_ft', 'turn'],
+      },
+    },
+    thickness_in: { type: ['number', 'null'] },
+    height_in: { type: ['number', 'null'], description: 'Wall height, top of footing to top of wall' },
+  },
+  required: ['name', 'sides'],
+};
+
+const FOOTING_SCHEMA = {
+  type: 'object',
+  description: 'Continuous strip footings under walls (not the thickened edge of a slab)',
+  properties: {
+    name: { type: 'string' },
+    length_ft: { type: 'number', description: 'Total length of this footing run (e.g. the whole perimeter)' },
+    width_in: { type: 'number' },
+    depth_in: { type: 'number', description: 'Footing thickness' },
+    corners: { type: ['integer', 'null'], description: 'Corners in the run, if it goes around a building' },
+    bars: { type: ['object', 'null'], properties: { size: { type: 'integer' }, count: { type: 'integer', description: 'Continuous bars, e.g. 2 #4 = 2' } } },
+  },
+  required: ['name', 'length_ft', 'width_in', 'depth_in'],
+};
+
+const PIER_SCHEMA = {
+  type: 'object',
+  description: 'Piers, pads under posts, or columns',
+  properties: {
+    name: { type: 'string' },
+    shape: { type: 'string', enum: ['round', 'square'] },
+    size_in: { type: 'number', description: 'Diameter, or side if square' },
+    depth_in: { type: 'number' },
+    count: { type: 'integer' },
+  },
+  required: ['name', 'shape', 'size_in', 'depth_in', 'count'],
+};
+
+const STEPS_SCHEMA = {
+  type: 'object',
+  properties: {
+    name: { type: 'string' },
+    steps: { type: 'integer' },
+    rise_in: { type: 'number' },
+    run_in: { type: 'number' },
+    width_in: { type: 'number' },
+    landing_in: { type: ['number', 'null'], description: 'Landing depth at the top' },
+  },
+  required: ['name', 'steps', 'rise_in', 'run_in', 'width_in'],
+};
+
 const TOOL = {
   name: 'plan_data',
   description: 'Report what the plan shows.',
@@ -49,6 +109,10 @@ const TOOL = {
     type: 'object',
     properties: {
       slabs: { type: 'array', items: SLAB_SCHEMA },
+      walls: { type: 'array', items: WALL_SCHEMA },
+      footings: { type: 'array', items: FOOTING_SCHEMA },
+      piers: { type: 'array', items: PIER_SCHEMA },
+      steps: { type: 'array', items: STEPS_SCHEMA },
       notes: { type: 'array', items: { type: 'string' }, description: 'Other callouts a concrete crew needs: concrete strength, vapor barrier, base rock, mesh, joints, etc. Short, plain words.' },
       unsure: { type: 'array', items: { type: 'string' }, description: 'Anything you could not read or had to guess. Short.' },
     },
@@ -57,7 +121,9 @@ const TOOL = {
 };
 
 const PROMPT = `You are reading a construction plan for a concrete foundation and slab crew.
-Find every concrete slab or flatwork area with its dimensions and turn each into a clockwise walk of its sides.
+Find ALL the concrete work: slabs and flatwork, foundation walls, strip footings, piers or post pads, and steps.
+Turn each slab into a clockwise walk of its sides; turn foundation walls into a clockwise walk of their outside face.
+For footings give the total run length (the whole perimeter if it goes around), width, thickness and the bars in it.
 Use the written dimensions, not measurements of the drawing. Feet and inches like 14'-6" are 14.5 ft.
 If only overall length and width are given, it's a rectangle: 4 sides, all right turns.
 Read slab thickness, thickened edge / footing size, rebar size and spacing (e.g. #4 @ 18" O.C.), footing bars, and dowels if shown.
@@ -98,7 +164,7 @@ export default async (req) => {
     headers: { 'content-type': 'application/json', 'x-api-key': key, 'anthropic-version': '2023-06-01' },
     body: JSON.stringify({
       model: MODEL,
-      max_tokens: 4000,
+      max_tokens: 8000,
       tools: [TOOL],
       messages: [{ role: 'user', content: [file, { type: 'text', text: PROMPT }] }],
     }),

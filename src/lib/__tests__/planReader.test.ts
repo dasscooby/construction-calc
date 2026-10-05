@@ -50,3 +50,43 @@ test('no signal: the plan waits in the job, then gets read when signal is back',
   expect(job().planFound?.slabs[0].name).toBe('Patio');
   expect(job().planFound?.notes).toEqual(['6 mil vapor barrier']);
 });
+
+test('everything on a plan becomes a working tool: walls, footings + bars, piers, steps', () => {
+  const { planItems } = require('../planReader') as typeof import('../planReader');
+  const { ALL_TOOLS } = require('../../tools') as typeof import('../../tools');
+  const items = planItems({
+    slabs: [],
+    walls: [
+      {
+        name: 'Foundation',
+        // 30 x 20 with a 4 x 4 notch: R R R R L R... walked clockwise
+        sides: [
+          { length_ft: 30, turn: 'R' },
+          { length_ft: 20, turn: 'R' },
+          { length_ft: 26, turn: 'R' },
+          { length_ft: 4, turn: 'L' },
+          { length_ft: 4, turn: 'R' },
+          { length_ft: 16, turn: 'R' },
+        ],
+        thickness_in: 8,
+        height_in: 96,
+      },
+    ],
+    footings: [{ name: 'Footing', length_ft: 100, width_in: 20, depth_in: 10, corners: 6, bars: { size: 4, count: 2 } }],
+    piers: [{ name: 'Porch piers', shape: 'round', size_in: 12, depth_in: 36, count: 4 }],
+    steps: [{ name: 'Front steps', steps: 3, rise_in: 7, run_in: 11, width_in: 48, landing_in: 36 }],
+    notes: [],
+    unsure: [],
+  });
+  expect(items.map((i) => i.toolId)).toEqual(['wall-forms', 'footings', 'beam-bars', 'piers', 'steps']);
+  for (const it of items) {
+    const tool = ALL_TOOLS.find((t) => t.id === it.toolId)!;
+    expect(runTool(tool, it.raw).status).toBe('ok');
+  }
+  // Wall ends from the turns: the wall after the inside (left) corner and the one before it are outside + inside.
+  const walls = items[0].raw.walls as { ends: string }[];
+  expect(walls.map((w) => w.ends)).toEqual(['oo', 'oo', 'oo', 'oi', 'oi', 'oo']);
+  // 8' wall: 4' panels with 4' stacked on top
+  expect(items[0].raw.height1).toEqual({ ft: '4', in: '' });
+  expect(items[0].raw.height2).toEqual({ ft: '4', in: '' });
+});

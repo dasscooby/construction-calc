@@ -5,7 +5,7 @@ import { feel } from '../lib/feel';
 import { dayLabel, timeLabel } from '../lib/history';
 import { Job, JobItem, jobStore, PriceLine, useJobs, yardsIn } from '../lib/jobs';
 import { deleteJobScans, deleteScanFile, scanPages, scannerAvailable, scansForReport } from '../lib/scanner';
-import { pickError, pickPlanFileNative, pickPlanFileWeb, pickPlanPhotoNative, PlanSlab, processPlanQueue, savePendingFile, slabToRaw } from '../lib/planReader';
+import { pickError, pickPlanFileNative, pickPlanFileWeb, pickPlanPhotoNative, planItems, processPlanQueue, savePendingFile } from '../lib/planReader';
 import { asDataUris, deleteFile, photosAvailable, pickJobPhotos } from '../lib/media';
 import { Settings, useSettings } from '../lib/settings';
 import type { DocMedia } from '../report/docStyle';
@@ -416,7 +416,7 @@ function PourCard({ job, orderYd, truckYd }: { job: Job; orderYd: number; truckY
  */
 function PlanReader({ job }: { job: Job }) {
   // Every plan goes in the job's queue first, so with no signal it waits and is read later.
-  const [added, setAdded] = useState<number[]>([]);
+  const [added, setAdded] = useState<string[]>([]);
   const found = job.planFound;
   const error = job.planError ?? '';
   const waiting = job.planQueue?.length ?? 0;
@@ -467,16 +467,19 @@ function PlanReader({ job }: { job: Job }) {
     setBusy(false);
   };
   const scans = job.scans ?? [];
-  const summary = (s: PlanSlab) =>
-    [
-      `${s.sides.length} sides`,
-      s.thickness_in ? `${s.thickness_in}" slab` : '',
-      s.footing ? `${s.footing.width_in}" × ${s.footing.depth_in}" edge` : '',
-      s.rebar ? `#${s.rebar.size} at ${s.rebar.spacing_in}"` : '',
-      s.dowels ? `#${s.dowels.size} dowels` : '',
-    ]
-      .filter(Boolean)
-      .join(' · ');
+  const items = useMemo(() => (found ? planItems(found) : []), [found]);
+  const add = (it: (typeof items)[number]) => {
+    feel.tap();
+    jobStore.addItem(job.id, { toolId: it.toolId, title: it.title, label: it.label, raw: it.raw });
+    setAdded((x) => [...x, it.key]);
+  };
+  // Everything on the plan into the job, so the order summary and "Fill in from job" on the bid have it all.
+  const addAll = () => {
+    const todo = items.filter((it) => !added.includes(it.key));
+    todo.forEach((it) => jobStore.addItem(job.id, { toolId: it.toolId, title: it.title, label: it.label, raw: it.raw }));
+    setAdded((x) => [...x, ...todo.map((it) => it.key)]);
+    feel.success();
+  };
 
   return (
     <>
@@ -520,7 +523,7 @@ function PlanReader({ job }: { job: Job }) {
         </Text>
       ) : null}
       {error ? <Text style={styles.warn}>{error}</Text> : null}
-      {found && (found.slabs.length > 0 || found.notes.length > 0) ? (
+      {found && (items.length > 0 || found.notes.length > 0) ? (
         <View style={styles.card}>
           <View style={styles.cardHead}>
             <Text style={styles.label}>On the plan</Text>
@@ -535,21 +538,19 @@ function PlanReader({ job }: { job: Job }) {
               <Text style={styles.smallBtnText}>Clear</Text>
             </Pressable>
           </View>
-          {found.slabs.map((s, i) => (
-            <View key={i} style={styles.line}>
-              <Text style={styles.cardTitle}>{s.name || `Slab ${i + 1}`}</Text>
-              <Text style={styles.cardSub}>{summary(s)}</Text>
-              <Pressable
-                onPress={() => {
-                  feel.tap();
-                  jobStore.addItem(job.id, { toolId: 'slab-layout', title: 'Slab Layout', label: s.name || `Slab ${i + 1}`, raw: slabToRaw(s) });
-                  setAdded((a) => [...a, i]);
-                }}
-                disabled={added.includes(i)}
-                style={[styles.smallBtn, styles.lineGap]}
-                accessibilityRole="button"
-              >
-                <Text style={styles.smallBtnText}>{added.includes(i) ? 'Added. Open it below to check.' : 'Add to job'}</Text>
+          {items.filter((it) => !added.includes(it.key)).length > 1 ? (
+            <Pressable onPress={addAll} style={[styles.primary, styles.lineGap]} accessibilityRole="button">
+              <Text style={styles.primaryText}>Add everything to the job</Text>
+            </Pressable>
+          ) : null}
+          {items.map((it) => (
+            <View key={it.key} style={styles.line}>
+              <Text style={styles.cardTitle}>{it.label}</Text>
+              <Text style={styles.cardSub}>
+                {it.title} · {it.summary}
+              </Text>
+              <Pressable onPress={() => add(it)} disabled={added.includes(it.key)} style={[styles.smallBtn, styles.lineGap]} accessibilityRole="button">
+                <Text style={styles.smallBtnText}>{added.includes(it.key) ? 'Added to the job. Open it to check.' : 'Add to job'}</Text>
               </Pressable>
             </View>
           ))}

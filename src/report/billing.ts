@@ -4,7 +4,7 @@
 import type { Job, PriceLine } from '../lib/jobs';
 import type { Settings } from '../lib/settings';
 import { commas, dec, money } from '../tools/format';
-import { parseNumber } from '../tools/run';
+import { parseLength, parseNumber, RawLength, RawWallRow } from '../tools/run';
 import { DocMedia, docCss, logoHtml, noticeHtml } from './docStyle';
 import { FiguredItem, jobDrawings, jobTotals, numberIn } from './report';
 
@@ -32,22 +32,36 @@ export function priceTotals(job: Job): Money {
   return { subtotal, tax, total, paid, balance: Math.round((total - paid) * 100) / 100 };
 }
 
-/** Starting lines from what's in the job: slab areas, concrete, rebar, forms, then labor. Prices left for you. */
+/**
+ * Starting lines from what's in the job: each slab, wall, footing, pier and set of steps,
+ * then concrete, rebar and labor. Prices left for you.
+ */
 export function suggestLines(items: FiguredItem[]): Omit<PriceLine, 'id'>[] {
   const lines: Omit<PriceLine, 'id'>[] = [];
   const t = jobTotals(items);
+  const ft = (v: unknown) => parseLength(v as RawLength) ?? 0;
   for (const { item, tool, result } of items) {
     if (result.status !== 'ok') continue;
+    const name = item.label || tool.title;
+    const raw = item.raw;
     const area = result.result.rows.find((r) => r.label === 'Slab area' || r.label === 'Area');
-    if (area) lines.push({ desc: `${item.label || tool.title}: form, pour and finish`, qty: dec(numberIn(area.value), 1), unit: 'sq ft', price: '' });
+    if (area) lines.push({ desc: `${name}: form, pour and finish`, qty: dec(numberIn(area.value), 1), unit: 'sq ft', price: '' });
+    else if (tool.id === 'wall-forms') {
+      const total = ((raw.walls as RawWallRow[]) ?? []).reduce((a, w) => a + ft(w.length), 0);
+      lines.push({ desc: `${name}: form and pour walls`, qty: dec(total, 1), unit: 'ft', price: '' });
+    } else if (tool.id === 'footings') {
+      lines.push({ desc: `${name}: dig, form and pour`, qty: dec(ft(raw.length) * (Number(raw.qty) || 1), 1), unit: 'ft', price: '' });
+    } else if (tool.id === 'piers') {
+      lines.push({ desc: `${name}: drill and pour`, qty: String(Number(raw.qty) || 1), unit: 'ea', price: '' });
+    } else if (tool.id === 'steps') {
+      lines.push({ desc: `${name}: form and pour steps`, qty: '1', unit: 'set', price: '' });
+    }
   }
   if (t.concreteOrderYd) {
     const perYd = t.concreteCost ? dec(t.concreteCost / t.concreteOrderYd, 2) : '';
     lines.push({ desc: 'Concrete', qty: dec(t.concreteOrderYd, 2), unit: 'yd', price: perYd });
   }
   if (t.rebarLb) lines.push({ desc: 'Rebar, cut, bent and tied', qty: String(Math.round(t.rebarLb)), unit: 'lb', price: '' });
-  const panels = [...t.panels.values()].reduce((a, b) => a + b, 0);
-  if (panels) lines.push({ desc: 'Wall forms, set and strip', qty: '1', unit: 'job', price: '' });
   lines.push({ desc: 'Labor', qty: '1', unit: 'job', price: '' });
   return lines;
 }

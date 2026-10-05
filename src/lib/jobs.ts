@@ -159,8 +159,18 @@ export const jobStore = {
   planDone(jobId: string, planId: string, out: { found?: PlanRead; error?: string }) {
     update(jobId, (j) => {
       const prev = j.planFound;
-      const found = out.found
-        ? { slabs: [...(prev?.slabs ?? []), ...out.found.slabs], notes: [...(prev?.notes ?? []), ...out.found.notes], unsure: [...(prev?.unsure ?? []), ...out.found.unsure] }
+      const both = <T>(a: T[] | undefined, b: T[] | undefined): T[] => [...(a ?? []), ...(b ?? [])];
+      const f = out.found;
+      const found: PlanRead | undefined = f
+        ? {
+            slabs: both(prev?.slabs, f.slabs),
+            walls: both(prev?.walls, f.walls),
+            footings: both(prev?.footings, f.footings),
+            piers: both(prev?.piers, f.piers),
+            steps: both(prev?.steps, f.steps),
+            notes: both(prev?.notes, f.notes),
+            unsure: both(prev?.unsure, f.unsure),
+          }
         : prev;
       return { ...j, planQueue: (j.planQueue ?? []).filter((p) => p.id !== planId), planFound: found, planError: out.error };
     });

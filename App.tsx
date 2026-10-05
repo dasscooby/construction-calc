@@ -32,8 +32,14 @@ const TAB_SYMBOLS: Record<TabId, string> = {
 const SHOW_ICONS = Platform.OS === 'ios';
 // iOS 26 Liquid Glass tab bar. Off for now: the TestFlight build closed itself right after
 // opening on iOS 26, and the glass bar is one of the things that runs then. Plain bar until tested.
-const GLASS_TAB_BAR = false;
-const GLASS = GLASS_TAB_BAR && Platform.OS === 'ios' && isLiquidGlassAvailable();
+const GLASS_TAB_BAR = true;
+const GLASS = (() => {
+  try {
+    return GLASS_TAB_BAR && Platform.OS === 'ios' && isLiquidGlassAvailable();
+  } catch {
+    return false; // no glass on this phone: plain tab bar
+  }
+})();
 
 export default function App() {
   const prefs = useSettings();
