@@ -62,7 +62,8 @@ export function figureItems(job: Job): FiguredItem[] {
       const v = fieldText(f, raw[f.key]);
       return v === null ? [] : [{ label: f.label, value: v }];
     });
-    out.push({ item, tool, result: runTool(tool, raw), inputs });
+    // Every box filled in (older saved jobs miss boxes added since), so nothing reads a missing one.
+    out.push({ item: { ...item, toolId: m.toolId, raw }, tool, result: runTool(tool, raw), inputs });
   }
   return out;
 }

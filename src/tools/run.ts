@@ -38,6 +38,8 @@ const blankLength = (r: RawLength) => r.ft.trim() === '' && r.in.trim() === '';
 
 /** Feet + inches boxes → feet. null if blank, NaN if it can't be read. */
 export function parseLength(r: RawLength): number | null {
+  // A box that was never saved (an older job) reads as blank.
+  if (!r || typeof r.ft !== 'string' || typeof r.in !== 'string') return null;
   if (blankLength(r)) return null;
   const ft = r.ft.trim() === '' ? 0 : parseNumber(r.ft);
   const inch = r.in.trim() === '' ? 0 : parseNumber(r.in);
