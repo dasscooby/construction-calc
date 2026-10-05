@@ -7,7 +7,8 @@
 // L-shaped corner bars bent at each corner so the running bars are continuous, and the slab tied
 // to the edge by bending slab bars down into it or with L-bars along the edge.
 
-import { beamBars, Bar, BARS, countAlong, getBar, lapIn, LB_PER_TON, planRun, sticksToCut, weightLb } from '../lib/rebar';
+import { beamBars, Bar, BARS, countAlong, getBar, lapIn, LB_PER_TON, planRun, slabBarsAdvice, sticksToCut, weightLb } from '../lib/rebar';
+import { buildLayout, insetRuns } from '../report/layoutGeom';
 import { concreteRows, CUFT_PER_CUYD, ORDER_FIELDS } from './concreteShared';
 import { commas, commasTrim, cuYd, dec, ftIn, inches, lb, sqFt, tons } from './format';
 import { ChoiceField, ResultRow, Tool } from './types';
@@ -139,8 +140,9 @@ export const slab: Tool = {
     { key: 'iDepth', label: 'Interior footing depth', kind: 'length', default: { in: '16' }, help: 'Top of slab to bottom of footing', showIf: ['interior'] },
 
     { key: 'slabRebar', label: 'Rebar in the slab', kind: 'toggle' },
-    barChoice('barSize', 3, 5, '4', 'Slab bar size', ['slabRebar']),
-    { key: 'spacing', label: 'On center', kind: 'number', unit: 'in', default: '18', showIf: ['slabRebar'] },
+    { key: 'pickBars', label: 'Pick my own bars', kind: 'toggle', help: 'Off: sized for how long and thick the slab is', showIf: ['slabRebar'] },
+    barChoice('barSize', 3, 5, '4', 'Slab bar size', ['slabRebar', 'pickBars']),
+    { key: 'spacing', label: 'On center', kind: 'number', unit: 'in', default: '18', showIf: ['slabRebar', 'pickBars'] },
     {
       key: 'edgeTie',
       label: 'Tie the slab to the footing',
@@ -323,10 +325,15 @@ export const slab: Tool = {
       const legFt = Math.max(0, d - t / 2 - COVER_IN / 12);
 
       if (slabRebar) {
-        const bar = getBar(inp.choice('barSize'));
-        const spacing = inp.num('spacing');
+        // Your own bars, or sized for the slab's length and thickness (a small slab gets just the edge bar).
+        const own = inp.on('pickBars');
+        if (own && inp.num('spacing') <= 0) return { error: 'On center must be more than 0.' };
+        const longest = Math.max(...rects.map((r) => Math.max(r.length, r.width)));
+        const advice = slabBarsAdvice(t * 12, longest);
+        const bar = getBar(own ? inp.choice('barSize') : advice.size);
+        const spacing = own ? inp.num('spacing') : advice.spacingIn;
+        const matOn = own || !advice.edgeOnly;
         const lapFt = lapFor(bar);
-        if (spacing <= 0) return { error: 'On center must be more than 0.' };
         if (lapFt >= stockFt) return { error: `The lap must be shorter than a ${stockFt}' stick.` };
         const tie = hasFooting ? inp.choice('edgeTie') : 'none';
         // Bars bend down only where there's a footing under that side.
@@ -335,7 +342,7 @@ export const slab: Tool = {
         let laps = 0;
         let ft = 0;
         const pieces: { lengthFt: number; count: number }[] = [];
-        for (const r of rects) {
+        for (const r of matOn ? rects : []) {
           const m = mat(r.length, r.width, spacing, stockFt, lapFt, { top: leg(0), right: leg(1), bottom: leg(2), left: leg(3) });
           bars += m.bars;
           laps += m.laps;
@@ -345,13 +352,46 @@ export const slab: Tool = {
         if (pieces.some((p) => p.lengthFt > stockFt + 1e-9)) return { error: `A bar piece is longer than a ${stockFt}' stick. Try a longer stick.` };
         let slabSticks = laps + sticksToCut(pieces, stockFt);
         const bentWhere = sides ? sides.filter((_, i) => leg(i) > 0).map((s) => s.name.toLowerCase()) : [];
-        rows.push({
-          label: 'Slab bars',
-          value: feet(ft),
-          note: `${commas(bars)} bars, #${bar.size} at ${dec(spacing)}" both ways · ${commas(laps)} laps${
-            tie === 'bend' && legFt > 0 ? ` · ends bent down ${inches(legFt * 12)} into the footing${sides ? ` (${bentWhere.join(', ')})` : ''}` : ''
-          }`,
-        });
+        const why = own ? '' : ` · sized for a ${ftIn(longest)} long, ${inches(t * 12)} slab`;
+        if (matOn) {
+          rows.push({
+            label: 'Slab bars',
+            value: feet(ft),
+            note: `${commas(bars)} bars, #${bar.size} at ${dec(spacing)}" both ways${why} · ${commas(laps)} laps${
+              tie === 'bend' && legFt > 0 ? ` · ends bent down ${inches(legFt * 12)} into the footing${sides ? ` (${bentWhere.join(', ')})` : ''}` : ''
+            }`,
+          });
+        } else {
+          rows.push({ label: 'Slab bars', value: 'Edge bar only', note: `Small enough (${ftIn(longest)} long, ${inches(t * 12)} thick) that a bar around the edge is enough` });
+        }
+
+        // A bar around the whole edge, 3" in, lapped at the corners. Where footing bars run, they are the edge bar.
+        const edgeOn = (i: number) => !(footBars && footOn(i));
+        let edgeFt = 0;
+        let edgeCorners = 0;
+        if (one) {
+          const L = buildLayout(lens.map((len, k) => ({ length: len, turn: 'R' as const, radius: radii[k], edge: 'form' as const })));
+          edgeFt = insetRuns(L, COVER_IN / 12, edgeOn).reduce((a, run) => a + run.slice(1).reduce((b, q, j) => b + Math.hypot(q.x - run[j].x, q.y - run[j].y), 0), 0);
+          edgeCorners = [0, 1, 2, 3].filter((k) => radii[k] === 0 && edgeOn(k) && edgeOn((k + 1) % 4)).length;
+        } else if (!footBars && inp.has('fPerim')) {
+          edgeFt = inp.num('fPerim');
+          edgeCorners = inp.has('corners') ? inp.count('corners') : 4;
+        } else if (!footBars) {
+          warnings.push('For the bar around the edge on a slab made of several areas, use Slab Layout (or enter the footing length).');
+        }
+        if (edgeFt > 0) {
+          const eBar = getBar(Math.max(4, bar.size));
+          const e = beamBars(edgeFt, 1, eBar, stockFt, lapFor(eBar), edgeCorners);
+          rows.push({
+            label: 'Edge bar',
+            value: feet(e.totalFt),
+            note: `1 #${eBar.size} around the edge, 3" in · ${commas(e.cornerBars)} corner L-bars ${ftIn(e.cornerBarFt)} · ${commas(e.laps)} laps${
+              footBars ? ' · footing bars are the edge bar where the footing runs' : ''
+            }`,
+          });
+          addSticks(eBar, e.sticks);
+          totalLb += e.lb;
+        }
         if (tie === 'lbars') {
           const n = countAlong(centerline * 12, spacing);
           const len = lapFt + legFt;

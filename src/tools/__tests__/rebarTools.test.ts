@@ -52,77 +52,97 @@ describe('slab-rebar', () => {
     //   each 20' − 6" = 19' 6" (fits one stick, no lap).
     // Total = 14 × 31.167 + 21 × 19.5 = 436.33 + 409.5 = 845.83 ft.  Weight = 845.83 × 0.668 = 565 lb = 0.28 tons.
     // Sticks: 14 full sticks + 21 sticks for the 19.5' bars (6" scraps) + 14 sticks for the 11.17' end pieces
-    //   (8.83' scraps, too short for anything else) = 49.  Bare minimum 845.83 ÷ 20 = 42.3 → 43.
-    const r = runTool(slab, { length: 30, width: 20 });
+    //   (8.83' scraps, too short for anything else) = 49.
+    // Edge bar, 3" in: 2 × (29.5 + 19.5) = 98 ft → (98 − 1.667) ÷ (20 − 1.667) = 5.25 → 6 sticks, 5 laps = 106.33 ft,
+    //   + 4 corner L-bars 2 × 20" = 3' 4" = 13.33 ft → 119.67 ft. Sticks: 5 full + 1 for the 6.33' end, whose
+    //   13.67' scrap holds the 4 corner bars = 6.
+    // With the edge bar: 965.5 ft, 19 laps, 55 sticks (bare minimum 965.5 ÷ 20 = 48.3 → 49), 965.5 × 0.668 = 645 lb.
+    const r = runTool(slab, { pickBars: true, length: 30, width: 20 });
     expect(rowValue(r, 'Bars long way')).toBe(`14 × 29' 6"`);
     expect(rowValue(r, 'Bars short way')).toBe(`21 × 19' 6"`);
     expect(note(r, 'Bars long way')).toBe('2 sticks lapped together');
     expect(note(r, 'Bars short way')).toBeUndefined();
     expect(rowValue(r, 'Lap')).toBe('20"');
-    expect(rowValue(r, 'Number of laps')).toBe('14');
-    expect(rowValue(r, 'Total footage')).toBe('845.8 ft');
-    expect(rowValue(r, 'Sticks to order')).toBe(`49 × 20'`);
-    expect(note(r, 'Sticks to order')).toBe('43 if you use the cut-offs');
-    expect(rowValue(r, 'Weight')).toBe('565 lb');
-    expect(note(r, 'Weight')).toBe('0.28 tons');
+    expect(rowValue(r, 'Edge bar')).toBe('119.7 ft');
+    expect(note(r, 'Edge bar')).toBe(`1 #4 around the edge · 4 corner L-bars 3' 4" · 5 laps`);
+    expect(rowValue(r, 'Number of laps')).toBe('19');
+    expect(rowValue(r, 'Total footage')).toBe('965.5 ft');
+    expect(rowValue(r, 'Sticks to order')).toBe(`55 × 20'`);
+    expect(note(r, 'Sticks to order')).toBe('49 if you use the cut-offs');
+    expect(rowValue(r, 'Weight')).toBe('645 lb');
+    expect(note(r, 'Weight')).toBe('0.32 tons');
     expect(rowValue(r, 'Chairs')).toBeUndefined(); // chair spacing blank = no chairs
   });
 
   test('chairs every 4 ft', () => {
     // (29.5 ÷ 4 = 7.4 → 8 spaces → 9) × (19.5 ÷ 4 = 4.9 → 5 spaces → 6) = 54
-    expect(rowValue(runTool(slab, { length: 30, width: 20, chairSpacing: 4 }), 'Chairs')).toBe('54');
+    expect(rowValue(runTool(slab, { pickBars: true, length: 30, width: 20, chairSpacing: 4 }), 'Chairs')).toBe('54');
   });
 
   test('two mats', () => {
-    const r = runTool(slab, { length: 30, width: 20, layers: 2, chairSpacing: 4 });
+    const r = runTool(slab, { pickBars: true, length: 30, width: 20, layers: 2, chairSpacing: 4 });
     expect(rowValue(r, 'Bars long way')).toBe(`14 × 29' 6"`);
     expect(note(r, 'Bars long way')).toBe('Each mat, 2 sticks lapped together');
-    expect(rowValue(r, 'Number of laps')).toBe('28');
-    expect(rowValue(r, 'Total footage')).toBe('1,691.7 ft');
-    expect(rowValue(r, 'Sticks to order')).toBe(`98 × 20'`);
-    expect(rowValue(r, 'Weight')).toBe('1,130 lb'); // 1691.67 × 0.668 = 1130.0
+    // Two mats + one edge bar: 2 × 845.83 + 119.67 = 1,811.33 ft
+    expect(rowValue(r, 'Number of laps')).toBe('33');
+    expect(rowValue(r, 'Total footage')).toBe('1,811.3 ft');
+    expect(rowValue(r, 'Sticks to order')).toBe(`104 × 20'`);
+    expect(rowValue(r, 'Weight')).toBe('1,210 lb'); // 1811.33 × 0.668 = 1210.0
     expect(rowValue(r, 'Chairs')).toBe('108');
   });
 
   test('typed lap is used and shown', () => {
     // 30" lap = 2.5 ft: (29.5 − 2.5) ÷ (20 − 2.5) = 1.54 → 2 sticks → 32 ft per long-way run
-    // Total = 14 × 32 + 21 × 19.5 = 448 + 409.5 = 857.5 ft
-    const r = runTool(slab, { length: 30, width: 20, lap: 30 });
+    // Mat = 14 × 32 + 21 × 19.5 = 448 + 409.5 = 857.5 ft
+    // Edge bar: (98 − 2.5) ÷ 17.5 = 5.46 → 6 sticks, 5 laps = 110.5 + 4 corner bars × 5' = 130.5 → 988 ft
+    const r = runTool(slab, { pickBars: true, length: 30, width: 20, lap: 30 });
     expect(rowValue(r, 'Lap')).toBe('30"');
-    expect(rowValue(r, 'Total footage')).toBe('857.5 ft');
+    expect(rowValue(r, 'Total footage')).toBe('988 ft');
   });
 
   test('runs shorter than one stick: no laps', () => {
     // 12 x 10 slab, #5 at 12": long way 114" ÷ 12 = 9.5 → 10 spaces → 11 bars × 11' 6";
     // short way 138" ÷ 12 = 11.5 → 12 spaces → 13 bars × 9' 6".  Total = 126.5 + 123.5 = 250 ft
-    const r = runTool(slab, { length: 12, width: 10, barSize: '5', spacing: 12 });
+    const r = runTool(slab, { pickBars: true, length: 12, width: 10, barSize: '5', spacing: 12 });
     expect(rowValue(r, 'Bars long way')).toBe(`11 × 11' 6"`);
     expect(rowValue(r, 'Bars short way')).toBe(`13 × 9' 6"`);
     expect(rowValue(r, 'Lap')).toBe('25"');
-    expect(rowValue(r, 'Number of laps')).toBe('0');
-    expect(rowValue(r, 'Total footage')).toBe('250 ft');
-    // 11 × 11.5' (one per stick, 8.5' scraps) then the 9.5' bars: 2 per stick → 7 → 18 sticks
-    expect(rowValue(r, 'Sticks to order')).toBe(`18 × 20'`);
-    expect(rowValue(r, 'Weight')).toBe('261 lb'); // 250 × 1.043 = 260.75
+    // Mat 250 ft, no laps. Edge bar, 3" in: 2 × (11.5 + 9.5) = 42 ft, 25" laps → (42 − 2.083) ÷ 17.917 = 2.2 → 3 sticks,
+    //   2 laps = 46.17 ft + 4 corner bars × 4' 2" = 16.67 → 62.83 ft.  Total 312.8 ft × 1.043 = 326 lb.
+    expect(rowValue(r, 'Number of laps')).toBe('2');
+    expect(rowValue(r, 'Total footage')).toBe('312.8 ft');
+    expect(rowValue(r, 'Sticks to order')).toBe(`22 × 20'`);
+    expect(rowValue(r, 'Weight')).toBe('326 lb');
   });
 
   test('40 ft sticks', () => {
     // No laps; 14 × 29.5' (10.5' scraps) + 21 × 19.5' (2 per stick → 11) = 25 sticks
-    const r = runTool(slab, { length: 30, width: 20, stockLength: '40' });
-    expect(rowValue(r, 'Number of laps')).toBe('0');
-    expect(rowValue(r, 'Total footage')).toBe('822.5 ft');
-    expect(rowValue(r, 'Sticks to order')).toBe(`25 × 40'`);
-    expect(note(r, 'Sticks to order')).toBe('21 if you use the cut-offs');
+    const r = runTool(slab, { pickBars: true, length: 30, width: 20, stockLength: '40' });
+    // Edge bar: 98 ft in 40' sticks → 3 sticks, 2 laps = 101.33 + 4 corner bars × 3' 4" = 114.67 → 937.2 ft
+    expect(rowValue(r, 'Number of laps')).toBe('2');
+    expect(rowValue(r, 'Total footage')).toBe('937.2 ft');
+    expect(rowValue(r, 'Sticks to order')).toBe(`28 × 40'`);
+    expect(note(r, 'Sticks to order')).toBe('24 if you use the cut-offs');
+  });
+
+  test('sized for me: 4" slab 30\' long → #4 at 18" + edge bar; a 4" pad 8\' long → edge bar only', () => {
+    const big = runTool(slab, { length: 30, width: 20 });
+    expect(rowValue(big, 'Bars long way')).toBe(`14 × 29' 6"`);
+    expect(note(big, 'Bars long way')).toContain(`Sized for a 30' 0" long, 4" slab: #4 at 18"`);
+    const pad = runTool(slab, { length: 8, width: 4 });
+    expect(rowValue(pad, 'Bars both ways')).toBe('Edge bar only');
+    expect(rowValue(pad, 'Edge bar')).toBeDefined();
+    expect(rowValue(pad, 'Bars long way')).toBeUndefined();
   });
 
   test('errors', () => {
-    expect(runTool(slab, {})).toEqual({ status: 'missing', message: 'Enter length' });
-    expect(runTool(slab, { length: 30, width: 20, lap: 240 })).toEqual({ status: 'invalid', message: `The lap must be shorter than a 20' stick.` });
-    expect(runTool(slab, { length: 0.5, width: 20 }).status).toBe('invalid'); // 6" slab, 3" from each edge
-    expect(runTool(slab, { length: 30, width: 20, cover: 120 }).status).toBe('invalid');
-    expect(runTool(slab, { length: 30, width: 20, spacing: 0 })).toEqual({ status: 'invalid', message: 'On center must be more than 0.' });
-    expect(runTool(slab, { length: 30, width: 20, layers: 0 })).toEqual({ status: 'invalid', message: 'Mats must be at least 1.' });
-    expect(runTool(slab, { length: 30, width: 20, chairSpacing: 0 }).status).toBe('invalid');
+    expect(runTool(slab, { pickBars: true })).toEqual({ status: 'missing', message: 'Enter length' });
+    expect(runTool(slab, { pickBars: true, length: 30, width: 20, lap: 240 })).toEqual({ status: 'invalid', message: `The lap must be shorter than a 20' stick.` });
+    expect(runTool(slab, { pickBars: true, length: 0.5, width: 20 }).status).toBe('invalid'); // 6" slab, 3" from each edge
+    expect(runTool(slab, { pickBars: true, length: 30, width: 20, cover: 120 }).status).toBe('invalid');
+    expect(runTool(slab, { pickBars: true, length: 30, width: 20, spacing: 0 })).toEqual({ status: 'invalid', message: 'On center must be more than 0.' });
+    expect(runTool(slab, { pickBars: true, length: 30, width: 20, layers: 0 })).toEqual({ status: 'invalid', message: 'Mats must be at least 1.' });
+    expect(runTool(slab, { pickBars: true, length: 30, width: 20, chairSpacing: 0 }).status).toBe('invalid');
   });
 });
 

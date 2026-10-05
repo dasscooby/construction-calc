@@ -13,6 +13,7 @@ import { insetOutline, Pt, wallOutline } from './geometry';
 import { layoutIsoSvg, layoutPlanSvg } from './layoutDraw';
 import { buildLayout, matBars } from './layoutGeom';
 import { slabBarPlan } from '../tools/slabLayoutTool';
+import { slabBarsAdvice } from '../lib/rebar';
 
 export interface FiguredItem {
   item: JobItem;
@@ -166,7 +167,11 @@ export function slabDrawings(raw: RawValues, title: string, date: string): Drawi
   const fW = footing ? parseLength(raw.fWidth as never) ?? 1 : 0;
   const fD = footing ? Math.max(parseLength(raw.fDepth as never) ?? 16 / 12, thick) : 0;
   const slabRebar = on('slabRebar');
-  const spacingFt = slabRebar ? (parseNumber(String(raw.spacing)) ?? 0) / 12 : 0;
+  const advice = slabBarsAdvice(thick * 12, Math.max(L, Wd));
+  const own = on('pickBars');
+  const matOn = slabRebar && (own || !advice.edgeOnly);
+  const spacingFt = matOn ? (own ? parseNumber(String(raw.spacing)) ?? 0 : advice.spacingIn) / 12 : 0;
+  const barSize = own ? String(raw.barSize) : String(advice.size);
   const footBars = footing && on('footBars') ? Number(raw.fBars) || 0 : 0;
   // Sides marked against the house (top, right, bottom, left); footing only where it runs.
   const marked = on('edges');
@@ -179,7 +184,9 @@ export function slabDrawings(raw: RawValues, title: string, date: string): Drawi
   const anyFooting = footing && (!sides || sides.some((x) => x.footing));
   const dowelFt = marked ? (parseNumber(String(raw.dowelSpacing)) ?? 24) / 12 : 0;
   const dowelLenIn = marked ? (parseLength(raw.dowelLength as never) ?? 1.5) * 12 : 0;
-  const tie = (anyFooting && slabRebar ? raw.edgeTie : 'none') as 'bend' | 'lbars' | 'none';
+  const tie = (anyFooting && matOn ? raw.edgeTie : 'none') as 'bend' | 'lbars' | 'none';
+  // The bar around the edge: footing bars take its place where the footing runs.
+  const edgeBar = slabRebar ? [0, 1, 2, 3].map((i) => !(footBars > 0 && (sides ? sides[i].footing : footing))) : undefined;
   // Slabs are thin next to their size; stretch the height so the edge and footing show in 3D.
   const realDepth = footing ? fD : thick;
   const z = Math.max(1, Math.max(L, Wd) / 10 / realDepth);
@@ -196,7 +203,7 @@ export function slabDrawings(raw: RawValues, title: string, date: string): Drawi
   }
   const parts = [`${dec(thick * 12)}" slab`];
   if (footing) parts.push(`${dec(fW * 12)}" × ${dec(fD * 12)}" edge`);
-  if (slabRebar) parts.push(`#${String(raw.barSize)} at ${dec(spacingFt * 12)}"`);
+  if (slabRebar) parts.push(matOn ? `#${barSize} at ${dec(spacingFt * 12)}"` : 'edge bar');
   return {
     plan: slabPlanSvg({
       outer,
@@ -209,6 +216,7 @@ export function slabDrawings(raw: RawValues, title: string, date: string): Drawi
       footingBars: footBars,
       sides,
       dowelFt: dowelFt || undefined,
+      edgeBar,
     }),
     iso: isoSlabSvg({
       outer,
@@ -218,6 +226,7 @@ export function slabDrawings(raw: RawValues, title: string, date: string): Drawi
       rebarFt: spacingFt || undefined,
       footingBars: bars,
       bentLegsTo: tie === 'bend' ? 4 * inch * z : undefined,
+      edgeBar,
       sides,
       dowelFt: dowelFt || undefined,
       note: z > 1.5 ? 'Height exaggerated to show the edge and rebar' : undefined,
@@ -238,8 +247,8 @@ export function slabDrawings(raw: RawValues, title: string, date: string): Drawi
           bars: footBars,
           barSize: Number(raw.fBarSize) || 4,
           tie,
-          slabBars: slabRebar,
-          slabBarSize: Number(raw.barSize) || 4,
+          slabBars: matOn,
+          slabBarSize: Number(barSize) || 4,
         })
       : undefined,
   };

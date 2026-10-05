@@ -16,6 +16,8 @@ import {
   minBendDiaIn,
   piecesToCover,
   RunPlan,
+  minSticks,
+  slabBarsAdvice,
   slabGrid,
   sticksToCut,
   tieCutLengthIn,
@@ -107,8 +109,10 @@ const slabRebar: Tool = {
   fields: [
     { key: 'length', label: 'Length', kind: 'length' },
     { key: 'width', label: 'Width', kind: 'length' },
-    barSizeField(3, 8, '4'),
-    { key: 'spacing', label: 'On center', kind: 'number', unit: 'in', default: '18' },
+    { key: 'thick', label: 'Slab thickness', kind: 'length', default: { in: '4' } },
+    { key: 'pickBars', label: 'Pick my own bars', kind: 'toggle', help: 'Off: sized for how long and thick the slab is' },
+    { ...barSizeField(3, 8, '4'), showIf: ['pickBars'] },
+    { key: 'spacing', label: 'On center', kind: 'number', unit: 'in', default: '18', showIf: ['pickBars'] },
     { key: 'cover', label: 'From edge', kind: 'number', unit: 'in', default: '3', help: 'Slab edge to the first bar' },
     STICK_FIELD,
     LAP_FIELD,
@@ -118,8 +122,14 @@ const slabRebar: Tool = {
   compute: (inp) => {
     const lengthFt = inp.len('length');
     const widthFt = inp.len('width');
-    const bar = getBar(inp.choice('barSize'));
-    const spacingIn = inp.num('spacing');
+    const thickFt = inp.len('thick');
+    const own = inp.on('pickBars');
+    if (!own && thickFt <= 0) return { error: 'Thickness must be more than 0.' };
+    // Your own bars, or sized for the slab's length and thickness (a small slab gets just the edge bar).
+    const advice = slabBarsAdvice(thickFt * 12, Math.max(lengthFt, widthFt));
+    const matOn = own || !advice.edgeOnly;
+    const bar = getBar(own ? inp.choice('barSize') : advice.size);
+    const spacingIn = own ? inp.num('spacing') : advice.spacingIn;
     const coverIn = inp.num('cover');
     const stockFt = Number(inp.choice('stockLength'));
     const layers = inp.count('layers');
@@ -134,22 +144,53 @@ const slabRebar: Tool = {
     if (layers < 1) return { error: 'Mats must be at least 1.' };
     if (inp.has('chairSpacing') && chairSpacingFt <= 0) return { error: 'Chair spacing must be more than 0.' };
 
+    // A bar around the edge, at the edge distance, with an L-bar at each corner (same size as the slab bars).
+    const edgeRun = 2 * (lengthFt + widthFt) - (8 * coverIn) / 12;
+    const e = beamBars(edgeRun, 1, bar, stockFt, lap / 12, 4);
+    const edgeRow: ResultRow = {
+      label: 'Edge bar',
+      value: feet(e.totalFt),
+      note: `1 #${bar.size} around the edge · 4 corner L-bars ${ftIn(e.cornerBarFt)} · ${commas(e.laps)} laps`,
+    };
+    const why = own ? undefined : `Sized for a ${ftIn(Math.max(lengthFt, widthFt))} long, ${inches(thickFt * 12)} slab: #${bar.size} at ${dec(spacingIn)}"`;
+
+    if (!matOn) {
+      return {
+        rows: [
+          {
+            label: 'Bars both ways',
+            value: 'Edge bar only',
+            note: `Small enough (${ftIn(Math.max(lengthFt, widthFt))} long, ${inches(thickFt * 12)} thick) that a bar around the edge is enough`,
+          },
+          edgeRow,
+          lapRow,
+          { label: 'Total footage', value: feet(e.totalFt), big: true },
+          sticksRow(e.sticks, stockFt),
+          weightRow(bar, e.totalFt),
+        ],
+      };
+    }
+
     const g = slabGrid({ lengthFt, widthFt, bar, spacingIn, coverIn, stockFt, lapIn: lap, layers, chairSpacingFt });
     const perMat = layers > 1 ? 'Each mat' : undefined;
     const join = (...parts: (string | undefined)[]) => parts.filter(Boolean).join(', ') || undefined;
+    const totalFt = g.totalFt + e.totalFt;
+    const sticks = g.sticks + e.sticks;
+    const minS = minSticks(totalFt, stockFt);
     const rows: ResultRow[] = [
-      { label: 'Bars long way', value: `${commas(g.alongLength.count)} × ${ftIn(g.alongLength.runFt)}`, note: join(perMat, runNote(g.alongLength)) },
+      { label: 'Bars long way', value: `${commas(g.alongLength.count)} × ${ftIn(g.alongLength.runFt)}`, note: join(perMat, runNote(g.alongLength), why) },
       { label: 'Bars short way', value: `${commas(g.alongWidth.count)} × ${ftIn(g.alongWidth.runFt)}`, note: join(perMat, runNote(g.alongWidth)) },
+      edgeRow,
       lapRow,
-      { label: 'Number of laps', value: commas(g.laps) },
-      { label: 'Total footage', value: feet(g.totalFt), big: true },
-      sticksRow(g.sticks, stockFt, g.minSticks < g.sticks ? `${commas(g.minSticks)} if you use the cut-offs` : undefined),
-      weightRow(bar, g.totalFt),
+      { label: 'Number of laps', value: commas(g.laps + e.laps) },
+      { label: 'Total footage', value: feet(totalFt), big: true },
+      sticksRow(sticks, stockFt, minS < sticks ? `${commas(minS)} if you use the cut-offs` : undefined),
+      weightRow(bar, totalFt),
     ];
     if (g.chairs) rows.push({ label: 'Chairs', value: commas(g.chairs) });
     return { rows };
   },
-  notes: ['Bars start at the edge distance and are never farther apart than the on center.'],
+  notes: ['Bars start at the edge distance and are never farther apart than the on center. A bar runs around the edge.'],
 };
 
 // ---------------------------------------------------------------------------------------------

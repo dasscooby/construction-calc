@@ -211,6 +211,8 @@ export interface SlabPlanExtras {
   dowelFt?: number;
   /** Corner radii (ft), corner k at the end of side k: top right, bottom right, bottom left, top left */
   radii?: number[];
+  /** The bar around the edge, 3" in: which sides (top, right, bottom, left) */
+  edgeBar?: boolean[];
 }
 
 type Box = { minX: number; minY: number; maxX: number; maxY: number };
@@ -341,6 +343,8 @@ export function slabPlanSvg(p: PlanInput & SlabPlanExtras): string {
     out.push(`<g stroke="#ffb347" stroke-width="1" opacity="0.8" clip-path="url(#slabclip)">${g.join('')}</g>`);
   }
 
+  if (p.edgeBar) for (const run of footingRuns(b, radii, cover, (i) => p.edgeBar![i])) out.push(pl(run, 'stroke="#ff7a00" stroke-width="2.5" stroke-linejoin="round"'));
+
   // Footing: dashed inside edge and the bars, on the sides that have it, around the curves.
   if (p.footingFt && p.footingFt > 0) {
     const f = p.footingFt;
@@ -422,6 +426,8 @@ export interface IsoSlabInput {
   dowelFt?: number;
   /** Corner radii (ft), corner k at the end of side k */
   radii?: number[];
+  /** The bar around the edge, 3" in: which sides (top, right, bottom, left) */
+  edgeBar?: boolean[];
 }
 
 type P3 = [number, number, number];
@@ -548,6 +554,10 @@ export function isoSlabSvg(p: IsoSlabInput): string {
       }
       out.push(`<g fill="none" stroke="#b5501c" stroke-width="1.1" opacity="0.85">${legs.join('')}</g>`);
     }
+  }
+  if (p.edgeBar) {
+    const g = footingRuns(b0, radii, 3 / 12, (i) => p.edgeBar![i]).map((run) => run3(run, depth - p.thick / 2));
+    out.push(`<g fill="none" stroke="#8a2e00" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">${g.join('')}</g>`);
   }
   // Footing bars along the footing, around the curves.
   for (const bar of p.footingBars ?? []) {

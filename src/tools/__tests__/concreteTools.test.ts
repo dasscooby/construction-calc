@@ -418,3 +418,24 @@ test('bag counts only on small pours (2 yd or less)', () => {
   expect(rowValue(runTool(tool('slab'), { areas: [[10, 10]] }), '80 lb bags')).toBe('62');
   expect(rowValue(runTool(tool('slab'), { areas: [[40, 30]] }), '80 lb bags')).toBeUndefined();
 });
+
+describe('slab bars sized for the slab, with a bar around the edge', () => {
+  test('40 x 30, 4" slab, no footing bars: #4 at 18" and an edge bar 3" in all the way around', () => {
+    const r = runTool(tool('slab'), { areas: [[40, 30]] as [number, number][], slabRebar: true });
+    if (r.status !== 'ok') throw new Error(r.status);
+    expect(r.result.rows.find((x) => x.label === 'Slab bars')!.note).toContain(`#4 at 18" both ways · sized for a 40' 0" long, 4" slab`);
+    // 2 × (39.5 + 29.5) = 138 ft around, 4 corner L-bars
+    expect(r.result.rows.find((x) => x.label === 'Edge bar')!.note).toMatch(/^1 #4 around the edge, 3" in · 4 corner L-bars/);
+  });
+
+  test('a 4" stoop 6 x 4: edge bar only', () => {
+    const r = runTool(tool('slab'), { areas: [[6, 4]] as [number, number][], slabRebar: true });
+    expect(rowValue(r, 'Slab bars')).toBe('Edge bar only');
+    expect(rowValue(r, 'Edge bar')).toBeDefined();
+  });
+
+  test('footing bars all the way around are the edge bar', () => {
+    const r = runTool(tool('slab'), { areas: [[40, 30]] as [number, number][], footing: true, slabRebar: true, footBars: true });
+    expect(rowValue(r, 'Edge bar')).toBeUndefined();
+  });
+});
