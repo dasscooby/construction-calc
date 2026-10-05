@@ -3,8 +3,9 @@
 // and angled lines (braces, cut corners) just take their length and run point to point.
 // Lines you didn't measure are figured from the ones you did.
 
-import { solvePad } from '../lib/padSolve';
-import { deg as degText, ftIn } from './format';
+import { loopArea, padLoop, solvePad } from '../lib/padSolve';
+import { concreteRows, CUFT_PER_CUYD, ORDER_FIELDS } from './concreteShared';
+import { cuYd, deg as degText, ftIn, sqFt } from './format';
 import { ResultRow, Tool } from './types';
 
 export const pointName = (i: number) => (i < 26 ? String.fromCharCode(65 + i) : `P${i + 1}`);
@@ -21,6 +22,8 @@ export const layoutSketch: Tool = {
       kind: 'pad',
       help: 'Tap to put down points. Each tap draws a line from the last point. Tap a point to start from it, or to close the shape. Then type the lengths you know.',
     },
+    { key: 'thick', label: 'Slab thickness', kind: 'length', default: { in: '4' }, help: 'For the 3D view and the concrete, once the shape closes' },
+    ...ORDER_FIELDS,
   ],
   compute: (inp) => {
     const pad = inp.pad('sketch');
@@ -65,6 +68,18 @@ export const layoutSketch: Tool = {
     rows.sort((x, y) => Number(!!y.big) - Number(!!x.big));
     const total = s.edges.reduce((t, e) => t + e.length, 0);
     rows.push({ label: 'All lines together', value: ftIn(total) });
+
+    // A closed shape is a slab: its area and the concrete to order.
+    const loop = padLoop(P.length, pad.edges);
+    const thick = inp.len('thick');
+    if (loop && thick > 0) {
+      const area = loopArea(P, loop);
+      rows.push({ label: 'Slab area', value: sqFt(area), note: `${loop.length} sides` });
+      rows.push({ label: 'Slab', value: cuYd((area * thick) / CUFT_PER_CUYD), note: `${ftIn(thick).replace(/^0' /, '')} thick` });
+      rows.push(...concreteRows(area * thick, inp));
+    } else if (!loop) {
+      rows.push({ label: 'Concrete', value: 'Close the shape', note: 'Join the last point back to the first for area and yards' });
+    }
     return { rows, warnings };
   },
   notes: ['Lines drawn close to level or plumb come out exactly level or plumb. Corners drawn close to square come out square.'],

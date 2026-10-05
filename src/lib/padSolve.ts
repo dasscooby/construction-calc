@@ -193,3 +193,47 @@ export function solvePad(sketch: PadPoint[], edges: PadEdge[]): PadSolution {
     misfit: edges.flatMap((e, i) => (e.length && Math.abs(lenOf(weak, e) - e.length) > TOL_FT * 2 ? [{ edge: i, off: lenOf(weak, e) - e.length }] : [])),
   };
 }
+
+/**
+ * The outline of a closed shape: the points in order around a loop that uses every point
+ * (braces and other inside lines are left out). Null if the lines don't close into one shape.
+ */
+export function padLoop(n: number, edges: { a: number; b: number }[]): number[] | null {
+  if (n < 3) return null;
+  const nb: Set<number>[] = Array.from({ length: n }, () => new Set());
+  for (const e of edges) {
+    nb[e.a].add(e.b);
+    nb[e.b].add(e.a);
+  }
+  if (nb.some((s) => s.size < 2)) return null;
+  const path = [0];
+  const used = new Array(n).fill(false);
+  used[0] = true;
+  let steps = 0;
+  const go = (): boolean => {
+    if (++steps > 200000) return false; // give up on huge tangles
+    const last = path[path.length - 1];
+    if (path.length === n) return nb[last].has(0);
+    for (const q of [...nb[last]].sort((x, y) => x - y)) {
+      if (used[q]) continue;
+      used[q] = true;
+      path.push(q);
+      if (go()) return true;
+      path.pop();
+      used[q] = false;
+    }
+    return false;
+  };
+  return go() ? path : null;
+}
+
+/** Area inside a loop of points (shoelace). */
+export function loopArea(pts: PadPoint[], loop: number[]): number {
+  let a = 0;
+  loop.forEach((i, k) => {
+    const p = pts[i];
+    const q = pts[loop[(k + 1) % loop.length]];
+    a += p.x * q.y - q.x * p.y;
+  });
+  return Math.abs(a) / 2;
+}

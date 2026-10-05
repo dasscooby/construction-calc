@@ -6,8 +6,8 @@ import { companyLine, Settings } from '../lib/settings';
 import { ALL_TOOLS, migrateItem } from '../tools';
 import { commas, cuYd, dec, money } from '../tools/format';
 import { isShown, parseLength, parseNumber, RawArea, RawOutlineRow, RawPad, RawValues, RawWallRow, restoreRaw, runTool, RunResult } from '../tools/run';
-import { solvePad } from '../lib/padSolve';
-import { sketchSvg } from './sketchDraw';
+import { padLoop, solvePad } from '../lib/padSolve';
+import { sketchIsoSvg, sketchSvg } from './sketchDraw';
 import { fieldText } from '../tools/share';
 import type { ResultRow, Tool } from '../tools/types';
 import { houseSectionSvg, isoSlabSvg, isoSvg, planSvg, roundedLabels, roundedRect, sectionSvg, sideLabels, SlabSide, slabPlanSvg } from './drawings';
@@ -329,18 +329,27 @@ export function layoutDrawings(raw: RawValues, title: string, date: string): Dra
   };
 }
 
+/** Plan and (once it closes) 3D view of a Layout Sketch. */
+export function sketchDrawings(raw: RawValues, title: string, date: string): Drawings | null {
+  const pad = raw.sketch as RawPad | undefined;
+  const edges = (pad?.edges ?? []).map((e) => {
+    const l = parseLength(e.length);
+    return { a: e.a, b: e.b, length: l !== null && l > 0 ? l : null };
+  });
+  if (!pad || !edges.some((e) => e.length)) return null;
+  const s = solvePad(pad.points, edges);
+  const loop = padLoop(s.points.length, edges);
+  const thick = parseLength(raw.thick as never) ?? 4 / 12;
+  return { plan: sketchSvg(s, `${title} · ${date}`), iso: loop && thick > 0 ? sketchIsoSvg(s, loop, thick) : undefined };
+}
+
 /** Drawings for one tool's numbers (the tool screen shows these under the answers). */
 export function toolDrawings(toolId: string, raw: RawValues, title: string): Drawings | null {
   const date = new Date().toLocaleDateString();
   if (toolId === 'slab') return slabDrawings(raw, title, date);
   if (toolId === 'wall-forms') return wallFormsDrawings(raw, title, date);
   if (toolId === 'slab-layout') return layoutDrawings(raw, title, date);
-  if (toolId === 'layout-sketch') {
-    const pad = raw.sketch as RawPad | undefined;
-    const edges = (pad?.edges ?? []).map((e) => ({ a: e.a, b: e.b, length: parseLength(e.length) }));
-    if (!pad || !edges.some((e) => e.length && e.length > 0)) return null;
-    return { plan: sketchSvg(solvePad(pad.points, edges.map((e) => ({ ...e, length: e.length && e.length > 0 ? e.length : null }))), `${title} · ${date}`) };
-  }
+  if (toolId === 'layout-sketch') return sketchDrawings(raw, title, date);
   return null;
 }
 
@@ -354,6 +363,8 @@ export function jobDrawings(job: Job, items: FiguredItem[]): Drawings | null {
     return wallFormsDrawings(restoreRaw(walls.tool, walls.item.raw), job.name, date, slabThick);
   }
   const layout = items.find((f) => f.tool.id === 'slab-layout' && f.result.status === 'ok');
+  const sketch = items.find((f) => f.tool.id === 'layout-sketch' && f.result.status === 'ok');
+  if (!layout && sketch) return sketchDrawings(restoreRaw(sketch.tool, sketch.item.raw), job.name, date);
   if (layout) return layoutDrawings(restoreRaw(layout.tool, layout.item.raw), job.name, date);
   if (slab) return slabDrawings(restoreRaw(slab.tool, slab.item.raw), job.name, date);
   return null;

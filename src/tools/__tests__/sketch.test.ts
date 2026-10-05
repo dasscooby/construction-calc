@@ -55,3 +55,30 @@ test('nothing measured yet, or nothing drawn', () => {
   expect(runTool(layoutSketch, { sketch: { points: [[0, 0], [100, 0]], edges: [[0, 1, null]] } })).toEqual({ status: 'invalid', message: 'Type the length of at least one line.' });
   expect(runTool(layoutSketch, {}).status).toBe('missing');
 });
+
+test('a closed sketch is a slab: area and concrete (12 × 9 at 4" = 108 sq ft, 1.33 yd + 10% → order 1.5)', () => {
+  const r = runTool(layoutSketch, {
+    sketch: {
+      points: [
+        [100, 100],
+        [404, 108],
+        [398, 330],
+        [96, 322],
+      ],
+      edges: [
+        [0, 1, 12],
+        [1, 2, 9],
+        [2, 3, null],
+        [3, 0, null],
+      ],
+    },
+  });
+  expect(rowValue(r, 'Slab area')).toBe('108 sq ft');
+  expect(rowValue(r, 'Slab')).toBe('1.33 cu yd');
+  expect(rowValue(r, 'Order')).toBe('1.50 yd');
+});
+
+test('an open sketch asks to close it for the concrete', () => {
+  const r = runTool(layoutSketch, { sketch: { points: [[0, 0], [200, 0], [200, 100]], edges: [[0, 1, 20], [1, 2, 10]] } });
+  expect(rowValue(r, 'Concrete')).toBe('Close the shape');
+});

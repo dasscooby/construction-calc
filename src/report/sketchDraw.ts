@@ -65,3 +65,65 @@ export function sketchSvg(s: PadSolution, title: string): string {
   out.push(`<text x="16" y="${H - 14}" ${font} font-size="18" fill="#cfe0f5">${esc(title)} · white = measured, orange = figured</text>`);
   return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${W} ${H}" width="100%" role="img" aria-label="Plan view">${out.join('')}</svg>`;
 }
+
+type P3 = [number, number, number];
+const C30 = Math.cos(Math.PI / 6);
+
+/**
+ * The sketch in 3D as a slab: the outline raised to the slab thickness (stretched so it shows),
+ * with the sides you can see shaded and any braces or inside lines drawn on top.
+ */
+export function sketchIsoSvg(s: PadSolution, loop: number[], thickFt: number): string {
+  const pts = loop.map((i) => s.points[i]);
+  // Walk the outline clockwise on screen (y down) so "facing the viewer" is the same test every time.
+  let area2 = 0;
+  pts.forEach((p, k) => {
+    const q = pts[(k + 1) % pts.length];
+    area2 += p.x * q.y - q.x * p.y;
+  });
+  if (area2 < 0) pts.reverse();
+  const xs = pts.map((p) => p.x);
+  const ys = pts.map((p) => p.y);
+  const span = Math.max(Math.max(...xs) - Math.min(...xs), Math.max(...ys) - Math.min(...ys), 1);
+  const z = Math.max(1, span / 10 / Math.max(thickFt, 1 / 12));
+  const t = thickFt * z;
+  const proj = ([x, y, h]: P3) => ({ x: (x - y) * C30, y: (x + y) * 0.5 - h });
+  const all = pts.flatMap((p): P3[] => [
+    [p.x, p.y, 0],
+    [p.x, p.y, t],
+  ]);
+  const pb = bounds(all.map(proj));
+  const W = 760;
+  const padPx = 30;
+  const k = Math.min((W - 2 * padPx) / Math.max(pb.maxX - pb.minX, 1), 380 / Math.max(pb.maxY - pb.minY, 1));
+  const H = Math.round((pb.maxY - pb.minY) * k + 2 * padPx + 20);
+  const left = (W - (pb.maxX - pb.minX) * k) / 2;
+  const pt = (x: number, y: number, h: number) => {
+    const q = proj([x, y, h]);
+    return `${n(left + (q.x - pb.minX) * k)},${n(padPx + (q.y - pb.minY) * k)}`;
+  };
+  const out: string[] = [`<rect width="${W}" height="${H}" fill="#f4f6f8"/>`];
+  // Sides facing the viewer (outward normal pointing toward +x+y), back to front.
+  const sides = pts
+    .map((p, i) => ({ p, q: pts[(i + 1) % pts.length] }))
+    // Outward normal of a clockwise outline is (dy, −dx); the viewer looks from +x+y.
+    .filter(({ p, q }) => q.y - p.y - (q.x - p.x) > 1e-9)
+    .sort((u, v) => u.p.x + u.p.y + u.q.x + u.q.y - (v.p.x + v.p.y + v.q.x + v.q.y));
+  for (const { p, q } of sides) {
+    const nx = q.y - p.y; // outward normal for a clockwise outline (y down)
+    const ny = -(q.x - p.x);
+    const shade = nx >= ny ? '#b9b5ad' : '#8f8b84';
+    out.push(`<polygon points="${pt(p.x, p.y, 0)} ${pt(q.x, q.y, 0)} ${pt(q.x, q.y, t)} ${pt(p.x, p.y, t)}" fill="${shade}" stroke="#5f5b55" stroke-width="0.8" stroke-linejoin="round"/>`);
+  }
+  out.push(`<polygon points="${pts.map((p) => pt(p.x, p.y, t)).join(' ')}" fill="#d9d6cf" stroke="#5f5b55" stroke-width="1.2" stroke-linejoin="round"/>`);
+  // Braces and inside lines, on top of the slab.
+  const onLoop = (a: number, b: number) => loop.some((v, i) => (v === a && loop[(i + 1) % loop.length] === b) || (v === b && loop[(i + 1) % loop.length] === a));
+  for (const e of s.edges) {
+    if (onLoop(e.a, e.b)) continue;
+    const p = s.points[e.a];
+    const q = s.points[e.b];
+    out.push(`<polyline points="${pt(p.x, p.y, t)} ${pt(q.x, q.y, t)}" fill="none" stroke="#e05a00" stroke-width="2.5" stroke-dasharray="8 6"/>`);
+  }
+  if (z > 1.5) out.push(`<text x="${W - 14}" y="${H - 10}" text-anchor="end" font-family="Helvetica, Arial, sans-serif" font-size="12" fill="#666">Height exaggerated to show the slab</text>`);
+  return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${W} ${H}" width="100%" role="img" aria-label="3D view">${out.join('')}</svg>`;
+}
