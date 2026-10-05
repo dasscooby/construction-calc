@@ -177,3 +177,42 @@ describe('daylight basement: walls that change height', () => {
     expect(findFoundation(figureItems(day(tooLong)), day(tooLong))!.runsOver).toBe(10);
   });
 });
+
+describe('bid lines picked from what the job has', () => {
+  const { bidOptions, lineFor, refreshLines } = require('../bidOptions') as typeof import('../bidOptions');
+  const s = { ...DEFAULT_SETTINGS, prices: { ...DEFAULT_SETTINGS.prices, wallFt: '35', slabSqFt: '7' } };
+
+  test('walls can be measured around the outside, along the middle, or by face; slab at the house size or inside', () => {
+    const src = bidOptions(figureItems(basement), s, basement);
+    const walls = src.find((x) => x.group === 'Walls')!;
+    expect(walls.what).toBe('Basement walls: form and pour');
+    expect(walls.measures.map((m) => m.id)).toEqual(['around', 'middle', 'face', 'concrete']);
+    expect(walls.measures[0].qty).toBe(140);
+    expect(Math.round(walls.measures[1].qty * 100) / 100).toBe(137.33);
+    const slab = src.find((x) => x.group === 'Slabs')!;
+    expect(slab.measures.map((m) => m.id)).toEqual(['house', 'inside', 'concrete']);
+    expect(src.some((x) => x.src === 'concrete' && x.measures[0].id === 'ordered')).toBe(true);
+    expect(src.filter((x) => x.what.endsWith('rebar, cut, bent and tied')).length).toBe(0); // no rebar on any piece in this job
+    expect(src[src.length - 1].src).toBe('other');
+  });
+
+  test('picking fills the line from the job and the price book; picking inside uses the inside', () => {
+    const src = bidOptions(figureItems(basement), s, basement);
+    expect(lineFor(src.find((x) => x.group === 'Walls')!)).toMatchObject({ desc: 'Basement walls: form and pour', qty: '140', unit: 'ft', price: '35', measure: 'around' });
+    expect(lineFor(src.find((x) => x.group === 'Slabs')!, 'inside')).toMatchObject({ qty: '1108.44', unit: 'sq ft', price: '7', measure: 'inside' });
+  });
+
+  test('lines tied to the job keep today’s number; your own numbers are left alone', () => {
+    const src = bidOptions(figureItems(basement), s, basement);
+    const walls = src.find((x) => x.group === 'Walls')!;
+    const lines = [
+      { id: '1', ...lineFor(walls), qty: '999' },
+      { id: '2', desc: 'Haul off', qty: '1', unit: 'job', price: '300' },
+      { id: '3', ...lineFor(walls), qty: '500', measure: undefined },
+    ];
+    const out = refreshLines(lines, src);
+    expect(out[0].qty).toBe('140');
+    expect(out[1]).toBe(lines[1]);
+    expect(out[2].qty).toBe('500');
+  });
+});

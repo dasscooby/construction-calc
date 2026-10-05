@@ -12,7 +12,9 @@ import type { DocMedia } from '../report/docStyle';
 import { dec } from '../tools/format';
 import { liveActivitiesSupported } from '../widgets/bridge';
 import { openReport } from '../report/open';
-import { buildBid, buildBill, buildChange, lineAmount, priceTotals, suggestLines, syncLines } from '../report/billing';
+import { buildBid, buildBill, buildChange, lineAmount, priceTotals } from '../report/billing';
+import { bidOptions, lineFor, refreshLines, UNITS } from '../report/bidOptions';
+import PickSheet from './PickSheet';
 import SignaturePad from './SignaturePad';
 import { orderText, PLACE_TEXT, sendOrder } from '../lib/order';
 import { dayName, fetchForecast, pourWarnings } from '../lib/weather';
@@ -805,18 +807,13 @@ function Prices({ job, figured }: { job: Job; figured: FiguredItem[] }) {
   const [signing, setSigning] = useState<{ change?: string } | null>(null);
   const firstName = (job.customer ?? '').split('\n')[0].trim();
 
-  // Lines that came from the job stay in step with it: change a tool, finish a pour, order a pump.
-  const key = (ls: Omit<PriceLine, 'id'>[]) => JSON.stringify(ls.map((l) => [l.desc, l.qty, l.unit, l.price, l.src ?? '']));
+  // What each line can be, found in the job. Lines you tied to the job keep today's numbers.
+  const sources = useMemo(() => bidOptions(figured, prefs, job), [figured, prefs, job]);
   useEffect(() => {
-    if (!lines.some((l) => l.src)) return;
-    const next = syncLines(lines, suggestLines(figured, prefs, job));
-    if (key(next) !== key(lines)) jobStore.setLines(job.id, next);
-  }, [figured, job.pour?.done, job.pour?.trucksIn, job.order?.place]);
-  const fill = () => {
-    feel.tap();
-    jobStore.setLines(job.id, syncLines(lines, suggestLines(figured, prefs, job)));
-    if (!job.taxPct && prefs.prices.taxPct) jobStore.edit(job.id, { taxPct: prefs.prices.taxPct });
-  };
+    const next = refreshLines(lines, sources);
+    if (next.some((l, i) => l !== lines[i])) jobStore.setLines(job.id, next);
+  }, [sources]);
+  const [picking, setPicking] = useState<{ kind: 'what' | 'measure' | 'unit'; line: number | 'new' } | null>(null);
   const depositPct = Number(prefs.prices.depositPct.replace(/[%\s]/g, '')) || 0;
   const deposit = Math.round(m.total * depositPct) / 100;
   const setLine = (i: number, patch: Partial<PriceLine>) => jobStore.setLines(job.id, lines.map((l, j) => (j === i ? { ...l, ...patch } : l)));
@@ -844,48 +841,103 @@ function Prices({ job, figured }: { job: Job; figured: FiguredItem[] }) {
         accessibilityLabel="Customer"
       />
       <View style={styles.card}>
-        {lines.length === 0 ? (
-          <Text style={styles.help}>Add what you’re charging for. “Fill in from job” starts the list from your numbers and your price book, and keeps it up to date.</Text>
-        ) : null}
-        {lines.map((l, i) => (
-          <View key={l.id} style={styles.line}>
-            <View style={styles.lineTop}>
-              {box(l.desc, (desc) => setLine(i, { desc }), 'What', `Line ${i + 1} description`, styles.lineDesc, false)}
-              <Pressable
-                onPress={() => jobStore.setLines(job.id, lines.filter((_, j) => j !== i))}
-                style={styles.lineX}
-                accessibilityRole="button"
-                accessibilityLabel={`Remove line ${i + 1}`}
-              >
-                <Text style={[styles.smallBtnText, styles.danger]}>✕</Text>
-              </Pressable>
+        {lines.length === 0 ? <Text style={styles.help}>Tap + Add a line, then pick what it is. The list comes from this job.</Text> : null}
+        {lines.map((l, i) => {
+          const src = sources.find((x) => x.src === l.src);
+          const meas = src?.measures.find((x) => x.id === l.measure);
+          return (
+            <View key={l.id} style={styles.line}>
+              <View style={styles.lineTop}>
+                <Pressable onPress={() => setPicking({ kind: 'what', line: i })} style={[styles.dropdown, styles.lineDesc]} accessibilityRole="button" accessibilityLabel={`Line ${i + 1} what it is`}>
+                  <Text style={styles.dropText} numberOfLines={1}>
+                    {src && src.src !== 'other' ? src.what : 'Something else'}
+                  </Text>
+                  <Text style={styles.dropArrow}>▾</Text>
+                </Pressable>
+                <Pressable onPress={() => jobStore.setLines(job.id, lines.filter((_, j) => j !== i))} style={styles.lineX} accessibilityRole="button" accessibilityLabel={`Remove line ${i + 1}`}>
+                  <Text style={[styles.smallBtnText, styles.danger]}>✕</Text>
+                </Pressable>
+              </View>
+              <View style={styles.lineTop}>{box(l.desc, (desc) => setLine(i, { desc }), 'Wording on the bid', `Line ${i + 1} wording`, styles.lineDesc, false)}</View>
+              {src && src.measures.length ? (
+                <View style={styles.lineTop}>
+                  <Pressable onPress={() => setPicking({ kind: 'measure', line: i })} style={[styles.dropdown, styles.lineDesc]} accessibilityRole="button" accessibilityLabel={`Line ${i + 1} measured by`}>
+                    <Text style={styles.dropText} numberOfLines={1}>
+                      {meas ? meas.label : 'My own number'}
+                    </Text>
+                    <Text style={styles.dropArrow}>▾</Text>
+                  </Pressable>
+                </View>
+              ) : null}
+              <View style={styles.lineTop}>
+                {box(l.qty, (qty) => setLine(i, { qty, measure: undefined }), 'Qty', `Line ${i + 1} quantity`, styles.lineQty)}
+                <Pressable onPress={() => setPicking({ kind: 'unit', line: i })} style={[styles.dropdown, styles.lineUnit]} accessibilityRole="button" accessibilityLabel={`Line ${i + 1} unit`}>
+                  <Text style={styles.dropText} numberOfLines={1}>
+                    {l.unit || 'unit'}
+                  </Text>
+                  <Text style={styles.dropArrow}>▾</Text>
+                </Pressable>
+                {box(l.price, (price) => setLine(i, { price }), '$ each', `Line ${i + 1} price`, styles.linePrice)}
+                <Text style={styles.lineAmt} numberOfLines={1}>
+                  {money(lineAmount(l))}
+                </Text>
+              </View>
+              {meas ? <Text style={styles.linked}>From the job: updates when the job changes</Text> : null}
             </View>
-            <View style={styles.lineTop}>
-              {box(l.qty, (qty) => setLine(i, { qty }), 'Qty', `Line ${i + 1} quantity`, styles.lineQty)}
-              {box(l.unit, (unit) => setLine(i, { unit }), 'unit', `Line ${i + 1} unit`, styles.lineUnit, false)}
-              {box(l.price, (price) => setLine(i, { price }), '$ each', `Line ${i + 1} price`, styles.linePrice)}
-              <Text style={styles.lineAmt} numberOfLines={1}>
-                {money(lineAmount(l))}
-              </Text>
-            </View>
-          </View>
-        ))}
-        <View style={styles.itemBtns}>
-          <Pressable
-            onPress={() => jobStore.setLines(job.id, [...lines, { id: '', desc: '', qty: '1', unit: '', price: '' }])}
-            style={styles.smallBtn}
-            accessibilityRole="button"
-          >
-            <Text style={styles.smallBtnText}>+ Add line</Text>
-          </Pressable>
-          <Pressable
-            onPress={fill}
-            style={styles.smallBtn}
-            accessibilityRole="button"
-          >
-            <Text style={styles.smallBtnText}>Fill in from job</Text>
-          </Pressable>
-        </View>
+          );
+        })}
+        <Pressable onPress={() => setPicking({ kind: 'what', line: 'new' })} style={styles.addLine} accessibilityRole="button">
+          <Text style={styles.addLineText}>+ Add a line</Text>
+        </Pressable>
+        <PickSheet
+          visible={!!picking}
+          title={picking?.kind === 'what' ? 'What is it?' : picking?.kind === 'measure' ? 'Measured by' : 'Unit'}
+          options={
+            picking?.kind === 'what'
+              ? sources.map((x) => ({ key: x.src, label: x.src === 'other' ? 'Something else (type it in)' : x.what, sub: x.measures[0]?.label, group: x.group }))
+              : picking?.kind === 'measure'
+                ? [
+                    ...(sources.find((x) => typeof picking.line === 'number' && x.src === lines[picking.line]?.src)?.measures ?? []).map((x) => ({ key: x.id, label: x.label })),
+                    { key: '__own', label: 'My own number' },
+                  ]
+                : UNITS.map((u) => ({ key: u, label: u }))
+          }
+          selected={
+            picking && typeof picking.line === 'number'
+              ? picking.kind === 'what'
+                ? lines[picking.line]?.src ?? 'other'
+                : picking.kind === 'measure'
+                  ? lines[picking.line]?.measure ?? '__own'
+                  : lines[picking.line]?.unit
+              : undefined
+          }
+          onClose={() => setPicking(null)}
+          onPick={(key) => {
+            if (!picking) return;
+            const i = picking.line;
+            if (picking.kind === 'what') {
+              const src = sources.find((x) => x.src === key)!;
+              const fresh = lineFor(src);
+              if (i === 'new') jobStore.setLines(job.id, [...lines, { id: '', ...fresh }]);
+              else setLine(i, { ...fresh, price: fresh.price || lines[i].price });
+              if (!job.taxPct && prefs.prices.taxPct) jobStore.edit(job.id, { taxPct: prefs.prices.taxPct });
+            } else if (typeof i === 'number') {
+              const l = lines[i];
+              const src = sources.find((x) => x.src === l.src);
+              if (picking.kind === 'measure') {
+                const m = src?.measures.find((x) => x.id === key);
+                if (!m) setLine(i, { measure: undefined });
+                else {
+                  const fresh = lineFor(src!, m.id);
+                  setLine(i, { measure: m.id, qty: fresh.qty, unit: m.unit, price: l.unit === m.unit ? l.price : fresh.price || l.price });
+                }
+              } else {
+                setLine(i, { unit: key, price: l.price || src?.prices[key] || '' });
+              }
+            }
+            setPicking(null);
+          }}
+        />
         <View style={[styles.sumRow, styles.lineGap]}>
           <Text style={styles.sumLabel}>Tax %</Text>
           {box(job.taxPct ?? '', (taxPct) => jobStore.edit(job.id, { taxPct }), '0', 'Tax percent', styles.lineQty)}
@@ -1003,6 +1055,12 @@ function Prices({ job, figured }: { job: Job; figured: FiguredItem[] }) {
 const getStyles = themed(() => ({
   primarySub: { fontSize: 13, color: colors.accentText, opacity: 0.8, marginTop: 2 },
   sendRow: { flexDirection: 'row', gap: 10 },
+  dropdown: { flexDirection: 'row', alignItems: 'center', backgroundColor: colors.panel2, borderRadius: 10, paddingHorizontal: 10, paddingVertical: 9 },
+  dropText: { flex: 1, fontSize: 15, fontWeight: '600', color: colors.text },
+  dropArrow: { fontSize: 15, color: colors.accent, marginLeft: 4 },
+  linked: { fontSize: 12, color: colors.subtext, marginTop: 4 },
+  addLine: { borderWidth: 1, borderColor: colors.faint, borderStyle: 'dashed', borderRadius: 12, padding: 12, alignItems: 'center', marginTop: 10 },
+  addLineText: { fontSize: 16, fontWeight: '700', color: colors.accent },
   checkRow: { flexDirection: 'row', alignItems: 'center', gap: 10 },
   checkBox: { width: 28, height: 28, borderRadius: 8, borderWidth: 2, borderColor: colors.accent, alignItems: 'center', justifyContent: 'center' },
   checkOn: { backgroundColor: colors.accent },

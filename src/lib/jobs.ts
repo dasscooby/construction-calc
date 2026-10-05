@@ -46,6 +46,8 @@ export interface PriceLine {
   price: string;
   /** Where the line came from in the job ("concrete", "item:<id>" ...), so it can stay in sync. Blank = typed by you. */
   src?: string;
+  /** How it's measured from the job ("around", "inside", "ordered" ...); blank = a number you typed */
+  measure?: string;
 }
 
 /** A finger signature: the strokes as an SVG path, in a box w × h. */
