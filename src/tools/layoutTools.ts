@@ -3,6 +3,7 @@
 import { piecesToCover } from '../lib/rebar';
 import { fixed } from '../lib/units';
 import { commas, ftIn, inches, sqFt } from './format';
+import { layoutSketch } from './sketchTool';
 import { ResultRow, Tool } from './types';
 
 /** True if showing these inches to the nearest 1/16" had to round them. */
@@ -138,4 +139,4 @@ const vaporBarrier: Tool = {
   notes: ['Nothing added for running it up the sides or over footings.'],
 };
 
-export const LAYOUT_TOOLS: Tool[] = [squaring, feetConverter, vaporBarrier];
+export const LAYOUT_TOOLS: Tool[] = [squaring, layoutSketch, feetConverter, vaporBarrier];

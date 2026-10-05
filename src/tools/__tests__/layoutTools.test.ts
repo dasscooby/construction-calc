@@ -17,7 +17,7 @@ const note = (r: ReturnType<typeof runTool>, label: string) => ok(r).rows.find((
 
 describe('the layout tool list', () => {
   test('ids and order', () => {
-    expect(LAYOUT_TOOLS.map((t) => t.id)).toEqual(['squaring', 'feet-converter', 'vapor-barrier']);
+    expect(LAYOUT_TOOLS.map((t) => t.id)).toEqual(['squaring', 'layout-sketch', 'feet-converter', 'vapor-barrier']);
   });
 
   test.each(LAYOUT_TOOLS.map((t) => [t.id, t] as const))('%s is well formed', (_id, t) => {

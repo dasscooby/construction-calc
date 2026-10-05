@@ -1,7 +1,7 @@
 // Reads the text in a tool's boxes, checks it, and runs compute().
 // The screen and the tests both use runTool().
 
-import { BarRow, ComputeOutput, EdgeKind, Field, Inputs, OutlineRow, Rect, StockRow, Tool, ToolResult, WallEnds, WallRow } from './types';
+import { BarRow, ComputeOutput, EdgeKind, Field, Inputs, OutlineRow, Rect, SketchRow, StockRow, Tool, ToolResult, WallEnds, WallRow } from './types';
 
 export type RawLength = { ft: string; in: string };
 export type RawArea = { length: RawLength; width: RawLength };
@@ -10,7 +10,8 @@ export type RawWallRow = { length: RawLength; ends: WallEnds };
 export type RawStockRow = { size: string; qty: string };
 export type RawOutlineRow = { length: RawLength; turn: 'R' | 'L'; radius: RawLength; edge: EdgeKind };
 export const EDGE_KINDS: EdgeKind[] = ['form', 'house', 'dowels', 'slab', 'slabDowels'];
-export type RawValue = string | RawLength | RawArea[] | RawBarRow[] | RawWallRow[] | RawStockRow[] | RawOutlineRow[];
+export type RawSketchRow = { length: RawLength; turn: 'R' | 'L' | 'S'; deg: string };
+export type RawValue = string | RawLength | RawArea[] | RawBarRow[] | RawWallRow[] | RawStockRow[] | RawOutlineRow[] | RawSketchRow[];
 
 export const WALL_ENDS: WallEnds[] = ['oo', 'oi', 'ii'];
 export type RawValues = Record<string, RawValue>;
@@ -72,6 +73,12 @@ export function defaultRaw(tool: Tool, overrides: RawValues = {}): RawValues {
       case 'outline':
         raw[f.key] = [{ length: emptyLength(), turn: 'R', radius: emptyLength(), edge: 'form' }];
         break;
+      case 'sketch':
+        raw[f.key] = [
+          { length: emptyLength(), turn: 'R', deg: '' },
+          { length: emptyLength(), turn: 'R', deg: '' },
+        ];
+        break;
       case 'choice':
         raw[f.key] = f.default;
         break;
@@ -119,6 +126,13 @@ export function restoreRaw(tool: Tool, saved: unknown): RawValues {
       v.every((r) => isRawLength(r?.length) && isRawLength(r?.radius) && (r?.turn === 'R' || r?.turn === 'L') && EDGE_KINDS.includes(r?.edge))
     ) {
       raw[f.key] = v as RawOutlineRow[];
+    } else if (
+      f.kind === 'sketch' &&
+      Array.isArray(v) &&
+      v.length &&
+      v.every((r) => isRawLength(r?.length) && ['R', 'L', 'S'].includes(r?.turn) && typeof r?.deg === 'string')
+    ) {
+      raw[f.key] = v as RawSketchRow[];
     }
     else if (f.kind === 'multi' && typeof v === 'string' && v.split(',').every((x) => x === '' || f.options.some((o) => o.value === x))) {
       raw[f.key] = v;
@@ -133,7 +147,7 @@ export type RunResult =
   | { status: 'missing'; message: string }
   | { status: 'invalid'; message: string };
 
-type Parsed = number | string | string[] | Rect[] | BarRow[] | WallRow[] | StockRow[] | OutlineRow[] | null;
+type Parsed = number | string | string[] | Rect[] | BarRow[] | WallRow[] | StockRow[] | OutlineRow[] | SketchRow[] | null;
 
 /**
  * Test-friendly inputs are allowed too: a number for a length field means feet,
@@ -148,7 +162,8 @@ export type LooseValue =
   | [string, number, number][]
   | [number, WallEnds][]
   | [number, number | null][]
-  | [number, 'R' | 'L', number, EdgeKind][];
+  | [number, 'R' | 'L', number, EdgeKind][]
+  | [number, 'R' | 'L' | 'S', number][];
 
 function normalize(f: Field, v: LooseValue | boolean | undefined): RawValue | undefined {
   if (v === undefined) return undefined;
@@ -159,6 +174,10 @@ function normalize(f: Field, v: LooseValue | boolean | undefined): RawValue | un
       length: { ft: String(l), in: '' },
       width: { ft: String(w), in: '' },
     }));
+  }
+  if (f.kind === 'sketch' && Array.isArray(v) && v.length && Array.isArray(v[0])) {
+    // Tests: [[ft, 'R' | 'L' | 'S', degrees or 0 for square], ...]
+    return (v as unknown as [number, 'R' | 'L' | 'S', number][]).map(([ft, turn, d]) => ({ length: { ft: String(ft), in: '' }, turn, deg: d ? String(d) : '' }));
   }
   if (f.kind === 'outline' && Array.isArray(v) && v.length && Array.isArray(v[0])) {
     return (v as unknown as [number, 'R' | 'L', number, EdgeKind][]).map(([ft, turn, r, edge]) => ({
@@ -269,6 +288,22 @@ export function runTool(tool: Tool, values: Record<string, LooseValue | boolean>
         else blank = true;
         break;
       }
+      case 'sketch': {
+        const rows: SketchRow[] = [];
+        for (const [i, r] of (v as RawSketchRow[]).entries()) {
+          const len = parseLength(r.length);
+          if (len === null) continue; // empty line
+          if (Number.isNaN(len) || len <= 0) return { status: 'invalid', message: `Check the length of line ${i + 1}` };
+          const d = r.deg.trim() ? parseNumber(r.deg) : 90;
+          if (r.turn !== 'S' && (d === null || Number.isNaN(d) || d <= 0 || d >= 180)) {
+            return { status: 'invalid', message: `The turn before line ${i + 1} must be between 0 and 180 degrees` };
+          }
+          rows.push({ length: len, turn: r.turn, deg: r.turn === 'S' ? 0 : (d as number) });
+        }
+        if (rows.length) value = rows;
+        else blank = true;
+        break;
+      }
       case 'outline': {
         const rows: OutlineRow[] = [];
         for (const [i, r] of (v as RawOutlineRow[]).entries()) {
@@ -330,6 +365,7 @@ export function runTool(tool: Tool, values: Record<string, LooseValue | boolean>
     walls: (k) => (get(k) as WallRow[] | null) ?? [],
     stock: (k) => (get(k) as StockRow[] | null) ?? [],
     outline: (k) => (get(k) as OutlineRow[] | null) ?? [],
+    sketch: (k) => (get(k) as SketchRow[] | null) ?? [],
     has: (k) => get(k) !== null,
     on: (k) => get(k) === 'on',
   };

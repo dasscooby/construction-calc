@@ -5,7 +5,9 @@ import type { Job, JobItem } from '../lib/jobs';
 import { companyLine, Settings } from '../lib/settings';
 import { ALL_TOOLS, migrateItem } from '../tools';
 import { commas, cuYd, dec, money } from '../tools/format';
-import { isShown, parseLength, parseNumber, RawArea, RawOutlineRow, RawValues, RawWallRow, restoreRaw, runTool, RunResult } from '../tools/run';
+import { isShown, parseLength, parseNumber, RawArea, RawOutlineRow, RawSketchRow, RawValues, RawWallRow, restoreRaw, runTool, RunResult } from '../tools/run';
+import { POINT_NAMES, sketchPoints } from '../tools/sketchTool';
+import { sketchSvg } from './sketchDraw';
 import { fieldText } from '../tools/share';
 import type { ResultRow, Tool } from '../tools/types';
 import { houseSectionSvg, isoSlabSvg, isoSvg, planSvg, roundedLabels, roundedRect, sectionSvg, sideLabels, SlabSide, slabPlanSvg } from './drawings';
@@ -123,7 +125,7 @@ export function jobTotals(items: FiguredItem[]): Totals {
 
 export interface Drawings {
   plan: string;
-  iso: string;
+  iso?: string;
   section?: string;
   /** Where the slab meets the house */
   house?: string;
@@ -333,6 +335,14 @@ export function toolDrawings(toolId: string, raw: RawValues, title: string): Dra
   if (toolId === 'slab') return slabDrawings(raw, title, date);
   if (toolId === 'wall-forms') return wallFormsDrawings(raw, title, date);
   if (toolId === 'slab-layout') return layoutDrawings(raw, title, date);
+  if (toolId === 'layout-sketch') {
+    const rows = ((raw.lines as RawSketchRow[]) ?? [])
+      .map((r) => ({ length: parseLength(r.length) ?? 0, turn: r.turn, deg: r.turn === 'S' ? 0 : r.deg.trim() ? Number(r.deg) || 90 : 90 }))
+      .filter((r) => r.length > 0);
+    if (!rows.length) return null;
+    const pts = sketchPoints(rows);
+    return { plan: sketchSvg(pts, rows.map((r) => r.length), POINT_NAMES.indexOf(String(raw.from)), POINT_NAMES.indexOf(String(raw.to)), `${title} · ${date}`) };
+  }
   return null;
 }
 
@@ -454,7 +464,7 @@ ${docCss(s.docs)}
 ${company || opts.logo ? `<div class="co">${logoHtml(opts.logo)}${esc(company).replace(/ · /g, '<br>')}</div>` : ''}</div>
 ${crew ? notesHtml : ''}
 ${sum.length ? `<h2>${crew ? 'Load list' : 'Order summary'}</h2><table class="sum">${sum.map((r) => `<tr><td>${esc(r.label)}</td><td class="v">${esc(r.value)}</td></tr>`).join('')}</table>` : ''}
-${drawings ? `<h2>Plan</h2><div class="draw">${drawings.plan}</div><h2>3D view</h2><div class="draw">${drawings.iso}</div>` : ''}
+${drawings ? `<h2>Plan</h2><div class="draw">${drawings.plan}</div>${drawings.iso ? `<h2>3D view</h2><div class="draw">${drawings.iso}</div>` : ''}` : ''}
 ${drawings?.section ? `<h2>Edge detail</h2><div class="draw">${drawings.section}</div>` : ''}
 ${drawings?.house ? `<h2>At the house</h2><div class="draw">${drawings.house}</div>` : ''}
 ${opts.photos?.length ? `<h2>Photos</h2><div class="photos">${opts.photos.map((src, i) => `<img src="${src}" alt="Photo ${i + 1}">`).join('')}</div>` : ''}

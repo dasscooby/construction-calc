@@ -72,6 +72,19 @@ export interface OutlineRow {
   edge: EdgeKind;
 }
 
+/** Lines walked point to point (A → B → C ...): length, and the turn before each line. */
+export interface SketchField extends FieldBase {
+  kind: 'sketch';
+}
+
+export interface SketchRow {
+  length: number; // feet
+  /** Turn before this line (ignored on the first one): right, left, or straight on */
+  turn: 'R' | 'L' | 'S';
+  /** How far it turns, degrees (90 = square) */
+  deg: number;
+}
+
 /** An on/off switch, like "Exterior footing". Other fields can hang off it with showIf. */
 export interface ToggleField extends FieldBase {
   kind: 'toggle';
@@ -114,7 +127,8 @@ export type Field =
   | WallsField
   | StockField
   | ToggleField
-  | OutlineField;
+  | OutlineField
+  | SketchField;
 
 export interface Rect {
   length: number; // feet
@@ -163,6 +177,8 @@ export interface Inputs {
   stock(key: string): StockRow[];
   /** Outline field: the filled-in sides. */
   outline(key: string): OutlineRow[];
+  /** Sketch field: the filled-in lines. */
+  sketch(key: string): SketchRow[];
   /** True if the field was filled in (a switch: true if it's on). */
   has(key: string): boolean;
   /** Switch field: on or off. */

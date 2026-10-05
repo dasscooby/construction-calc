@@ -22,6 +22,7 @@ import {
   RawBarRow,
   RawLength,
   RawOutlineRow,
+  RawSketchRow,
   RawStockRow,
   RawValue,
   RawValues,
@@ -100,7 +101,7 @@ export default function ToolScreen({ tool, raw, onChange, onBack, active, jobLin
     });
     return () => sub.remove();
   }, [active]);
-  const hasInches = tool.fields.some((f) => ['length', 'areas', 'barlist', 'walls', 'outline'].includes(f.kind));
+  const hasInches = tool.fields.some((f) => ['length', 'areas', 'barlist', 'walls', 'outline', 'sketch'].includes(f.kind));
   const titleSize = tool.title.length > 22 ? 16 : tool.title.length > 16 ? 18 : 22;
 
   return (
@@ -433,6 +434,7 @@ function FieldInput({ field, value, onChange }: { field: Field; value: RawValue;
       {field.kind === 'barlist' && <BarListInput field={field} value={value as RawBarRow[]} onChange={onChange} />}
       {field.kind === 'walls' && <WallsInput value={value as RawWallRow[]} onChange={onChange} />}
       {field.kind === 'outline' && <OutlineInput value={value as RawOutlineRow[]} onChange={onChange} />}
+      {field.kind === 'sketch' && <SketchInput value={value as RawSketchRow[]} onChange={onChange} />}
       {field.kind === 'stock' && <StockInput value={value as RawStockRow[]} onChange={onChange} label={field.label} />}
     </View>
   );
@@ -690,6 +692,77 @@ function OutlineInput({ value, onChange }: { value: RawOutlineRow[]; onChange: (
   );
 }
 
+/** Lines point to point: A → B, B → C ... Each after the first turns right, left or goes straight. */
+function SketchInput({ value, onChange }: { value: RawSketchRow[]; onChange: (v: RawSketchRow[]) => void }) {
+  const update = (i: number, patch: Partial<RawSketchRow>) => onChange(value.map((r, j) => (j === i ? { ...r, ...patch } : r)));
+  const letter = (i: number) => String.fromCharCode(65 + i);
+  const chip = (on: boolean, label: string, a11y: string, onPress: () => void) => (
+    <Pressable
+      key={label}
+      onPress={() => {
+        if (!on) feel.tap();
+        onPress();
+      }}
+      accessibilityRole="button"
+      accessibilityLabel={a11y}
+      accessibilityState={{ selected: on }}
+      style={[styles.chip, styles.chipSmall, on && styles.chipOn]}
+    >
+      <Text style={[styles.chipText, on && styles.chipTextOn]}>{label}</Text>
+    </Pressable>
+  );
+  return (
+    <View>
+      {value.map((r, i) => (
+        <View key={i} style={styles.area}>
+          <View style={styles.areaHead}>
+            <Text style={styles.areaTitle}>
+              {letter(i)} → {letter(i + 1)}
+            </Text>
+            {value.length > 1 && (
+              <Pressable onPress={() => onChange(value.filter((_, j) => j !== i))} style={styles.removeBtn} accessibilityRole="button" accessibilityLabel={`Remove line ${i + 1}`}>
+                <Text style={styles.removeText}>Remove</Text>
+              </Pressable>
+            )}
+          </View>
+          {i > 0 ? (
+            <>
+              <Text style={styles.areaSub}>Turn off the last line</Text>
+              <View style={styles.chips}>
+                {chip(r.turn === 'R', 'Right', `Line ${i + 1} turn right`, () => update(i, { turn: 'R' }))}
+                {chip(r.turn === 'L', 'Left', `Line ${i + 1} turn left`, () => update(i, { turn: 'L' }))}
+                {chip(r.turn === 'S', 'Straight', `Line ${i + 1} straight on`, () => update(i, { turn: 'S' }))}
+              </View>
+              {r.turn !== 'S' ? (
+                <View style={styles.degRow}>
+                  <Text style={styles.areaSub}>Angle</Text>
+                  <TextInput
+                    style={[styles.input, styles.degInput]}
+                    value={r.deg}
+                    onChangeText={(deg) => update(i, { deg })}
+                    placeholder="90 (square)"
+                    placeholderTextColor={colors.faint}
+                    keyboardType={NUM_KEYBOARD}
+                    returnKeyType="done"
+                    accessibilityLabel={`Line ${i + 1} angle degrees`}
+                  />
+                  <Text style={styles.areaSub}>°</Text>
+                </View>
+              ) : null}
+            </>
+          ) : (
+            <Text style={styles.areaSub}>First line, from A</Text>
+          )}
+          <LengthInput value={r.length} onChange={(length) => update(i, { length })} label={`Line ${i + 1} length`} />
+        </View>
+      ))}
+      <Pressable onPress={() => onChange([...value, { length: emptyLength(), turn: 'R', deg: '' }])} style={styles.addBtn} accessibilityRole="button">
+        <Text style={styles.addText}>+ Add another line</Text>
+      </Pressable>
+    </View>
+  );
+}
+
 /** The shape so far, redrawn as each side is typed in. */
 function ShapeSketch({ value }: { value: RawOutlineRow[] }) {
   const [width, setWidth] = useState(0);
@@ -836,6 +909,8 @@ const getStyles = themed(() => ({
   stockRemove: { width: 36, alignItems: 'center', justifyContent: 'center', paddingVertical: 10 },
   sendBtn: { backgroundColor: colors.panel2, borderRadius: 14, padding: 14, alignItems: 'center', marginBottom: 12 },
   sendText: { fontSize: 17, fontWeight: '700', color: colors.accent },
+  degRow: { flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 8 },
+  degInput: { width: 150, minWidth: 150, flexGrow: 0, flexShrink: 0 },
   sketch: { borderRadius: 14, overflow: 'hidden', marginBottom: 12 },
   addBtn: { borderWidth: 1, borderColor: colors.faint, borderStyle: 'dashed', borderRadius: 14, padding: 12, alignItems: 'center' },
   addText: { fontSize: 17, fontWeight: '700', color: colors.accent },
