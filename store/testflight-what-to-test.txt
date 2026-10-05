@@ -1,0 +1,17 @@
+NEW IN THIS BUILD
+- Jobs: Read a plan. Tap Scan a plan, PDF or file, or Photo. It finds the slabs, rebar and notes. Tap Add to job, then Open to check the shape.
+- No signal? Pick the plan anyway. It reads it when you're back in service.
+- If a scan fails, a red message says why. Check iPhone Settings > Construction Calc > Camera and Photos.
+
+PLEASE TRY
+1. Slab Layout (Concrete tab): enter an L-shaped slab side by side. Watch the sketch say "Shape closes". Turn on rebar, check the Plan and 3D drawings, then tap Send to Rebar Cut List.
+2. Slab: a big slab gets bars sized for it; a small stoop gets "Edge bar only". There's always a bar around the edge. Pick my own bars lets you set your own.
+3. Jobs: add a few tools to a job, then make a Crew sheet, a Bid and a Final bill. Try Fill in from job, tax and a deposit.
+4. Settings > Documents: change the color, font and header, edit the notices, and tap Bid / Bill / Crew sheet to preview.
+5. Wall Forms: a wall-by-wall job with your fillers and the load list.
+6. Home screen widget: long-press the home screen, add Construction Calc.
+7. Pour tracker in a job: start a pour and count trucks. Check the lock screen.
+
+TELL US
+- Anything that closes the app or shows "Something broke".
+- Numbers that don't match what you'd order on the job.
