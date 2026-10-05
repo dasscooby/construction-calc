@@ -17,6 +17,7 @@ import { layoutIsoSvg, layoutPlanSvg } from './layoutDraw';
 import { DocMedia, docCss, logoHtml, noticeHtml } from './docStyle';
 import { buildLayout, matBars } from './layoutGeom';
 import { confirmedFoundation, foundationLines } from './foundation';
+import { FoundationDraw, foundationIsoSvg, foundationPlanSvg, foundationSectionSvg } from './foundationDraw';
 import { slabBarPlan } from '../tools/slabLayoutTool';
 import { slabBarsAdvice } from '../lib/rebar';
 
@@ -422,8 +423,72 @@ export function toolDrawings(toolId: string, raw: RawValues, title: string): Dra
   return null;
 }
 
+/**
+ * Walls, footings and slab you put together, drawn the way an engineer does: foundation plan,
+ * 3D, and a typical section through the wall.
+ */
+export function foundationDrawings(job: Job, items: FiguredItem[], company = ''): Drawings | null {
+  const f = confirmedFoundation(items, job);
+  if (!f?.outline) return null;
+  const wall = f.walls[0];
+  const wr = wall.item.raw;
+  const len = (v: unknown) => parseLength(v as never) ?? 0;
+  const num = (v: unknown, d: number) => parseNumber(String(v ?? '')) ?? d;
+  let wallVert: FoundationDraw['wallVert'] = null;
+  let wallHoriz: FoundationDraw['wallHoriz'] = null;
+  if (wall.tool.id === 'wall-forms' && wr.wallRebar === '1') {
+    wallVert = { size: num(wr.vBarSize, 4), spacingIn: num(wr.vSpacing, 24) };
+    wallHoriz = { size: num(wr.hBarSize, 4), spacingIn: num(wr.hSpacing, 24) };
+  } else if (wall.tool.id === 'footings' && wr.bars === '1') {
+    if (String(wr.vSpacing ?? '').trim()) wallVert = { size: num(wr.barSize, 4), spacingIn: num(wr.vSpacing, 24) };
+    const lines = num(wr.lines, 2);
+    if (lines > 1) wallHoriz = { size: num(wr.barSize, 4), spacingIn: Math.max(6, (f.heightFt * 12 - 6) / (lines - 1)) };
+  }
+  const wallSteel = [wallVert ? `#${wallVert.size} VERT. @ ${n2(wallVert.spacingIn)}" O.C.` : '', wallHoriz ? `#${wallHoriz.size} HORIZ. @ ${n2(wallHoriz.spacingIn)}" O.C.` : '']
+    .filter(Boolean)
+    .join(', ');
+  const ft = f.footings[0];
+  const footing = ft
+    ? {
+        widthIn: len(ft.item.raw.width) * 12,
+        depthIn: len(ft.item.raw.depth) * 12,
+        lines: ft.item.raw.bars === '1' ? num(ft.item.raw.lines, 2) : 0,
+        barSize: num(ft.item.raw.barSize, 4),
+      }
+    : null;
+  let slab: FoundationDraw['slab'] = null;
+  if (f.slab) {
+    const note = f.slab.result.status === 'ok' ? f.slab.result.result.rows.find((r) => r.label === 'Slab bars') : undefined;
+    const m = note?.note?.match(/#(\d+) at ([\d.]+)"/);
+    const bar = m ? { size: Number(m[1]), spacingIn: Number(m[2]) } : null;
+    const steel = bar ? `#${bar.size} @ ${n2(bar.spacingIn)}" O.C. EACH WAY` : note?.value === 'Edge bar only' ? 'BAR AROUND THE EDGE' : '';
+    slab = { thickIn: len(f.slab.item.raw.thick) * 12 || 4, dropIn: f.slabDropIn, steel, bar };
+  }
+  const d: FoundationDraw = {
+    outline: f.outline,
+    wallIn: f.thickFt * 12,
+    wallFt: f.heightFt,
+    wallSteel,
+    wallVert,
+    wallHoriz,
+    footing,
+    slab,
+    vaporBarrier: items.some((x) => x.tool.id === 'vapor-barrier'),
+    title: job.name,
+    job: job.name,
+    company,
+    date: new Date(job.createdAt).toLocaleDateString(),
+    kind: f.kind,
+  };
+  return { plan: foundationPlanSvg(d), iso: foundationIsoSvg(d), section: foundationSectionSvg(d) };
+}
+
+const n2 = (v: number) => String(Math.round(v * 10) / 10);
+
 /** The plan and 3D view: from Wall Forms walls if the job has them, else from a one-piece slab. */
-export function jobDrawings(job: Job, items: FiguredItem[]): Drawings | null {
+export function jobDrawings(job: Job, items: FiguredItem[], company = ''): Drawings | null {
+  const together = foundationDrawings(job, items, company);
+  if (together) return together;
   const walls = items.find((f) => f.tool.id === 'wall-forms' && f.result.status === 'ok');
   const slab = items.find((f) => f.tool.id === 'slab' && f.result.status === 'ok');
   const date = new Date(job.createdAt).toLocaleDateString();
@@ -489,8 +554,8 @@ export function buildReport(job: Job, s: Settings, opts: { now?: Date; crew?: bo
   );
   const totals = jobTotals(items, job);
   const foundation = confirmedFoundation(items, job);
-  const drawings = jobDrawings(job, items);
   const company = companyLine(s);
+  const drawings = jobDrawings(job, items, s.company.name);
   const sum = totalsRows(totals).filter(priced);
   const notesHtml = job.notes ? `<h2>Notes</h2><div class="notes">${esc(job.notes)}</div>` : '';
   const date = now.toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' });
@@ -544,8 +609,8 @@ ${docCss(s.docs)}
 ${company || opts.logo ? `<div class="co">${logoHtml(opts.logo)}${esc(company).replace(/ · /g, '<br>')}</div>` : ''}</div>
 ${crew ? notesHtml : ''}
 ${sum.length ? `<h2>${crew ? 'Load list' : 'Order summary'}</h2><table class="sum">${sum.map((r) => `<tr><td>${esc(r.label)}</td><td class="v">${esc(r.value)}</td></tr>`).join('')}</table>` : ''}
-${drawings?.plan ? `<h2>Plan</h2><div class="draw">${drawings.plan}</div>` : ''}${drawings?.iso ? `<h2>3D view</h2><div class="draw">${drawings.iso}</div>` : ''}
-${drawings?.section ? `<h2>Edge detail</h2><div class="draw">${drawings.section}</div>` : ''}
+${drawings?.plan ? `<h2>${foundation ? 'Foundation plan' : 'Plan'}</h2><div class="draw">${drawings.plan}</div>` : ''}${drawings?.iso ? `<h2>3D view</h2><div class="draw">${drawings.iso}</div>` : ''}
+${drawings?.section ? `<h2>${foundation ? 'Typical section' : 'Edge detail'}</h2><div class="draw">${drawings.section}</div>` : ''}
 ${drawings?.house ? `<h2>At the house</h2><div class="draw">${drawings.house}</div>` : ''}
 ${opts.photos?.length ? `<h2>Photos</h2><div class="photos">${opts.photos.map((src, i) => `<img src="${src}" alt="Photo ${i + 1}">`).join('')}</div>` : ''}
 ${foundation ? `<h2>Foundation: ${esc(foundation.kind)}</h2><div class="item"><ul class="fnd">${foundationLines(foundation, job).map((l) => `<li>${esc(l)}</li>`).join('')}</ul></div>` : ''}

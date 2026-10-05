@@ -46,6 +46,8 @@ export interface Foundation {
   insideArea: number;
   /** House length and width when it's a plain rectangle */
   rect: { L: number; W: number } | null;
+  /** The house outline (outside of the walls), walked clockwise, ft; null if the walls don't close */
+  outline: { x: number; y: number }[] | null;
   /** The slab was measured to the house size (outside of the walls) */
   slabAtOutside: boolean;
   /** Top of slab below the top of the wall, inches */
@@ -167,7 +169,11 @@ export function findFoundation(items: FiguredItem[], job?: Job): Foundation | nu
   const stepped = walls.length > 1 && Math.max(...heights) - Math.min(...heights) >= 1;
   const anySlab = !!slab || items.some((f) => ok(f) && !!row(f, 'Slab area'));
   const kind: FoundationKind = tall ? (stepped ? 'Daylight basement' : 'Basement') : anySlab ? 'Stem wall and slab' : 'Crawlspace';
-  const slabDropIn = parseNumber(job?.together?.slabDropIn ?? '') ?? 0;
+  // How far the top of the slab sits below the top of the wall. Blank: a basement slab sits down on the
+  // footings (wall height − slab thickness); a stem wall slab at the top.
+  const typed = (job?.together?.slabDropIn ?? '').trim();
+  const slabThickIn = slab ? (parseLength(slab.item.raw.thick as RawLength) ?? 4 / 12) * 12 : 0;
+  const slabDropIn = typed ? parseNumber(typed) ?? 0 : slab && tall ? Math.max(0, Math.round(heightFt * 12 - slabThickIn)) : 0;
   return {
     kind,
     walls,
@@ -183,6 +189,7 @@ export function findFoundation(items: FiguredItem[], job?: Job): Foundation | nu
     outsideArea,
     insideArea,
     rect,
+    outline: main?.pts ?? null,
     slabAtOutside,
     slabDropIn,
     slabOrder,

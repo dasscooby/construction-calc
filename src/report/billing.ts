@@ -198,7 +198,7 @@ function moneyDoc(kind: 'bid' | 'bill', job: Job, s: Settings, items: FiguredIte
   const no = docNumber(job);
   const coLines = [c.phone, c.email, c.license && `Lic #${c.license.replace(/^#/, '')}`].filter((x) => x && x.trim());
   const qtyText = (l: PriceLine) => (l.qty ? `${commas(num(l.qty), num(l.qty) % 1 ? 2 : 0)}${l.unit ? ` ${l.unit}` : ''}` : '');
-  const plan = kind === 'bid' ? jobDrawings(job, items)?.plan : undefined;
+  const plan = kind === 'bid' ? jobDrawings(job, items, s.company.name)?.plan : undefined;
 
   const sumRows: [string, string, string?][] = [['Subtotal', money(m.subtotal)]];
   if (m.tax) sumRows.push([`Tax (${dec(num(job.taxPct), 2)}%)`, money(m.tax)]);

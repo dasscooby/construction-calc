@@ -17,7 +17,8 @@ import SignaturePad from './SignaturePad';
 import { orderText, PLACE_TEXT, sendOrder } from '../lib/order';
 import { dayName, fetchForecast, pourWarnings } from '../lib/weather';
 import type { ConcreteOrder } from '../lib/jobs';
-import { buildReport, figureItems, FiguredItem, jobTotals } from '../report/report';
+import { buildReport, figureItems, FiguredItem, foundationDrawings, jobTotals } from '../report/report';
+import DrawingView from './DrawingView';
 import { findFoundation, foundationLines, foundationParts } from '../report/foundation';
 import { money } from '../tools/format';
 import { colors, onThemeChange, themed } from '../theme';
@@ -610,7 +611,9 @@ export function sendDoc(job: Job | null, s: Settings, make: (m: DocMedia) => { h
 
 /** Walls, footings and slab that make one foundation, and how the slab is bid. */
 function FoundationCard({ job, figured }: { job: Job; figured: FiguredItem[] }) {
+  const prefs = useSettings();
   const f = useMemo(() => findFoundation(figured, job), [figured, job]);
+  const drawings = useMemo(() => (f?.confirmed ? foundationDrawings(job, figured, prefs.company.name) : null), [f, job, figured, prefs.company.name]);
   if (!f) return null;
   const lines = foundationLines(f).filter((l) => !l.startsWith('Bid the slab'));
   const toggle = () => {
@@ -661,13 +664,18 @@ function FoundationCard({ job, figured }: { job: Job; figured: FiguredItem[] }) 
               style={[styles.lineInput, styles.dropInput]}
               value={job.together?.slabDropIn ?? ''}
               onChangeText={(slabDropIn) => jobStore.edit(job.id, { together: { ids: f.ids, slabDropIn } })}
-              placeholder="0"
+              placeholder={String(f.slabDropIn)}
               placeholderTextColor={colors.faint}
               keyboardType="decimal-pad"
               accessibilityLabel="Top of slab below top of wall, inches"
             />
             <Text style={styles.sumLabel}>in</Text>
           </View>
+        </View>
+      ) : null}
+      {drawings ? (
+        <View style={styles.lineGap}>
+          <DrawingView drawings={drawings} />
         </View>
       ) : null}
       {f.slab && f.slabAtOutside ? (
