@@ -383,3 +383,40 @@ export function piecesToCover(areaSqFt: number, eachSqFt: number): number {
   if (!(eachSqFt > 0)) throw new Error('Each piece must cover some area');
   return Math.max(0, Math.ceil(areaSqFt / eachSqFt - EPS));
 }
+
+// ---------------------------------------------------------------------------------------------
+// Sizing slab bars for a slab on the ground (no joints cut).
+//
+// A slab shrinks as it cures and the ground drags on it; the longer the slab, the harder it pulls
+// apart in the middle, so a longer slab needs more steel (the "subgrade drag" method, ACI 360 / WRI):
+//   steel per foot of width (sq in) = F × L × w ÷ (2 × fs)
+//   F = 1.5 (friction on the ground), L = slab length (ft), w = slab weight (psf, 150 pcf concrete),
+//   fs = 45,000 psi (¾ of Grade 60).
+// Bars no farther apart than 5 × the thickness or 18", whichever is less (ACI 318 24.4.3.3).
+// A small slab — no longer than about 30 × its thickness (10' for a 4" slab) — moves as one piece
+// and doesn't crack from shrinking, so a bar around the edge is enough (ACI 360 panel sizes).
+
+export interface SlabBarsAdvice {
+  /** Small enough that a bar around the edge is all it needs */
+  edgeOnly: boolean;
+  size: number;
+  spacingIn: number;
+  /** Steel needed, sq in per foot of width */
+  needSqInPerFt: number;
+}
+
+const SPACINGS_IN = [18, 16, 15, 14, 12, 10, 9, 8, 6];
+
+export function slabBarsAdvice(thickIn: number, lengthFt: number): SlabBarsAdvice {
+  const w = (thickIn / 12) * 150;
+  const need = (1.5 * lengthFt * w) / (2 * 45000);
+  const maxSpacing = Math.min(18, 5 * thickIn);
+  const edgeOnly = lengthFt <= (30 * thickIn) / 12 + 1e-9;
+  // #4 is what most crews carry; go to #5 only if #4 would be closer than 12".
+  for (const size of [4, 5]) {
+    const area = getBar(size).areaSqIn;
+    const s = SPACINGS_IN.find((sp) => sp <= maxSpacing + 1e-9 && (area * 12) / sp >= need - 1e-9);
+    if (s && (s >= 12 || size === 5)) return { edgeOnly, size, spacingIn: s, needSqInPerFt: need };
+  }
+  return { edgeOnly, size: 5, spacingIn: 6, needSqInPerFt: need };
+}

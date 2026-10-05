@@ -18,6 +18,7 @@ import {
   tieCutLengthIn,
   tieHookExtIn,
   weightLb,
+  slabBarsAdvice,
 } from '../rebar';
 
 describe('bar table (ASTM A615 Table 1)', () => {
@@ -318,5 +319,22 @@ describe('piecesToCover', () => {
     expect(piecesToCover(1950, 1950)).toBe(1);
     expect(piecesToCover(0, 10)).toBe(0);
     expect(() => piecesToCover(100, 0)).toThrow();
+  });
+});
+
+describe('slab bars sized for length and thickness', () => {
+  test('a 4" stoop 8\' long: bar around the edge is enough', () => {
+    expect(slabBarsAdvice(4, 8).edgeOnly).toBe(true);
+  });
+  test('4" slab 60\' long: 1.5 × 60 × 50 ÷ 90,000 = 0.05 sq in/ft → #4 at 18"', () => {
+    const a = slabBarsAdvice(4, 60);
+    expect(a.needSqInPerFt).toBeCloseTo(0.05, 4);
+    expect(a).toMatchObject({ edgeOnly: false, size: 4, spacingIn: 18 });
+  });
+  test('3" slab: never farther apart than 5 × 3 = 15"', () => {
+    expect(slabBarsAdvice(3, 40).spacingIn).toBe(15);
+  });
+  test('6" slab 200\' long needs 0.25 sq in/ft: #4 would be under 12", so #5 at 14"', () => {
+    expect(slabBarsAdvice(6, 200)).toMatchObject({ size: 5, spacingIn: 14 });
   });
 });

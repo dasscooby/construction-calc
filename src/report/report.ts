@@ -12,6 +12,7 @@ import { houseSectionSvg, isoSlabSvg, isoSvg, planSvg, roundedLabels, roundedRec
 import { insetOutline, Pt, wallOutline } from './geometry';
 import { layoutIsoSvg, layoutPlanSvg } from './layoutDraw';
 import { buildLayout, matBars } from './layoutGeom';
+import { slabBarPlan } from '../tools/slabLayoutTool';
 
 export interface FiguredItem {
   item: JobItem;
@@ -70,9 +71,12 @@ export function jobTotals(items: FiguredItem[]): Totals {
     insideCorners: 0,
     ties: 0,
   };
+  // A cut list sent from Slab Layout is that slab's steel, cut up: count it once, from the cut list.
+  const cutFromLayout = items.some((f) => f.tool.id === 'cut-list' && f.item.raw.from === 'slab-layout' && f.result.status === 'ok');
   for (const { item, tool, result } of items) {
     if (result.status !== 'ok') continue;
     const rows = result.result.rows;
+    const steel = !(cutFromLayout && tool.id === 'slab-layout');
     const row = (label: string) => rows.find((r) => r.label === label);
     if (row('Order')) t.concreteOrderYd += numberIn(row('Order')!.value);
     if (row('Concrete cost')) t.concreteCost += numberIn(row('Concrete cost')!.value);
@@ -91,14 +95,20 @@ export function jobTotals(items: FiguredItem[]): Totals {
       t.insideCorners += numberIn(row('Inside corners (4×4)')?.value ?? '0');
       t.ties += numberIn(row('Ties')?.value ?? '0');
     }
+    if (!steel) continue;
     if (row('Weight') && / lb$/.test(row('Weight')!.value)) t.rebarLb += numberIn(row('Weight')!.value);
     if (row('Rebar weight')) t.rebarLb += numberIn(row('Rebar weight')!.value);
+    let bySize = false;
     for (const r of rows) {
       const size = r.label.match(/^#(\d+) sticks$/);
       const m = r.value.match(/^([\d,]+) × (\d+)'$/);
-      if (size && m) add(t.sticks, `#${size[1]} ${m[2]}' sticks`, numberIn(m[1]));
+      if (size && m) {
+        add(t.sticks, `#${size[1]} ${m[2]}' sticks`, numberIn(m[1]));
+        bySize = true;
+      }
     }
-    const sticks = row('Sticks to order');
+    // The cut list gives both a total and each size: count the sizes only.
+    const sticks = bySize ? undefined : row('Sticks to order');
     if (sticks) {
       const m = sticks.value.match(/^([\d,]+) × (\d+)'$/);
       const size = typeof item.raw.barSize === 'string' ? `#${item.raw.barSize} ` : '';
@@ -251,10 +261,13 @@ export function layoutDrawings(raw: RawValues, title: string, date: string): Dra
   const fD = footing ? Math.max(parseLength(raw.fDepth as never) ?? 16 / 12, thick) : 0;
   const footOn = (k: number) => footing && sides[k].edge === 'form';
   const slabRebar = on('slabRebar');
-  const spacingFt = slabRebar ? (parseNumber(String(raw.spacing)) ?? 18) / 12 : 0;
+  const plan = slabBarPlan(L, thick, on('pickBars') ? { size: Number(raw.barSize) || 4, spacingIn: parseNumber(String(raw.spacing)) ?? 18 } : null);
+  const spacingFt = slabRebar ? plan.spacingIn / 12 : 0;
   const tie = (footing && slabRebar ? raw.edgeTie : 'none') as 'bend' | 'lbars' | 'none';
-  const bars = slabRebar && spacingFt > 0 ? matBars(L, 3 / 12, spacingFt, footOn) : undefined;
+  const bars = slabRebar && plan.mat && spacingFt > 0 ? matBars(L, 3 / 12, spacingFt, footOn) : undefined;
   const footBars = footing && on('footBars') ? Number(raw.fBars) || 0 : 0;
+  // The bar around the edge (footing bars take its place on the formed sides).
+  const edgeBar = slabRebar ? { inset: 3 / 12, on: (k: number) => !(footBars > 0 && footOn(k)) } : undefined;
   const dowels = sides.some((s) => s.edge === 'dowels' || s.edge === 'slabDowels');
   const dowelFt = dowels ? (parseNumber(String(raw.dowelSpacing)) ?? 24) / 12 : undefined;
   const dowelLenIn = (parseLength(raw.dowelLength as never) ?? 1.5) * 12;
@@ -275,10 +288,10 @@ export function layoutDrawings(raw: RawValues, title: string, date: string): Dra
   }
   const parts = [`${dec(thick * 12)}" slab`];
   if (footing) parts.push(`${dec(fW * 12)}" × ${dec(fD * 12)}" edge`);
-  if (slabRebar) parts.push(`#${String(raw.barSize)} at ${dec(spacingFt * 12)}"`);
+  if (slabRebar) parts.push(plan.mat ? `#${plan.size} at ${dec(plan.spacingIn)}"` : 'edge bar');
   const joint = sides.find((s) => s.edge !== 'form');
   return {
-    plan: layoutPlanSvg({ L, title, subtitle: `${parts.join(' · ')} · ${date}`, footingFt: footing ? fW : undefined, footingBars: footBars, bars, dowelFt }),
+    plan: layoutPlanSvg({ L, title, subtitle: `${parts.join(' · ')} · ${date}`, footingFt: footing ? fW : undefined, footingBars: footBars, bars, dowelFt, edgeBar }),
     iso: layoutIsoSvg({
       L,
       thick: thick * z,
@@ -286,11 +299,12 @@ export function layoutDrawings(raw: RawValues, title: string, date: string): Dra
       bars,
       footingBars: fBars,
       bentLegsTo: tie === 'bend' ? 4 * inch * z : undefined,
+      edgeBar,
       dowelFt,
       note: z > 1.5 ? 'Height exaggerated to show the edge and rebar' : undefined,
     }),
     section: footing
-      ? sectionSvg({ slabIn: thick * 12, footWIn: fW * 12, footDIn: fD * 12, bars: footBars, barSize: Number(raw.fBarSize) || 4, tie, slabBars: slabRebar, slabBarSize: Number(raw.barSize) || 4 })
+      ? sectionSvg({ slabIn: thick * 12, footWIn: fW * 12, footDIn: fD * 12, bars: footBars, barSize: Number(raw.fBarSize) || 4, tie, slabBars: slabRebar && plan.mat, slabBarSize: plan.size })
       : undefined,
     house: joint
       ? houseSectionSvg({

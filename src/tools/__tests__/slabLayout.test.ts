@@ -90,3 +90,31 @@ test('no rebar or dowels, nothing to send', () => {
   expect(r.status).toBe('ok');
   if (r.status === 'ok') expect(r.result.send).toBeUndefined();
 });
+
+test('a bar around the edge is always there with slab rebar', () => {
+  const r = runTool(slabLayout, { sides: walk, slabRebar: true });
+  expect(rowValue(r, 'Edge bar')).toBeDefined();
+  if (r.status === 'ok') expect(r.result.rows.find((x) => x.label === 'Edge bar')!.note).toMatch(/^1 #4 around the edge/);
+});
+
+test('footing bars take the place of the edge bar on the formed sides', () => {
+  const r = runTool(slabLayout, { sides: walk, slabRebar: true, footing: true, footBars: true });
+  if (r.status === 'ok') expect(r.result.rows.find((x) => x.label === 'Edge bar')!.note).toContain('footing bars are the edge bar');
+});
+
+test('a small pad gets the edge bar only, no mat', () => {
+  const pad: [number, 'R' | 'L', number, EdgeKind][] = [
+    [6, 'R', 0, 'form'],
+    [4, 'R', 0, 'form'],
+    [6, 'R', 0, 'form'],
+    [4, 'R', 0, 'form'],
+  ];
+  const r = runTool(slabLayout, { sides: pad, slabRebar: true });
+  expect(rowValue(r, 'Slab bars')).toBe('Edge bar only');
+  expect(rowValue(r, 'Edge bar')).toBeDefined();
+});
+
+test('pick my own bars: what you type is used', () => {
+  const r = runTool(slabLayout, { sides: walk, slabRebar: true, pickBars: true, barSize: '3', spacing: '12' });
+  if (r.status === 'ok') expect(r.result.rows.find((x) => x.label === 'Slab bars')!.note).toContain('#3 at 12" both ways');
+});

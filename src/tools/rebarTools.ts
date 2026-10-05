@@ -287,6 +287,18 @@ const cutList: Tool = {
       help: 'Size, how many, and cut length (hooks included)',
     },
     STICK_FIELD,
+    // Never shown: marks a list sent from Slab Layout, so a job doesn't count that steel twice.
+    {
+      key: 'from',
+      label: 'From',
+      kind: 'choice',
+      options: [
+        { value: '', label: '' },
+        { value: 'slab-layout', label: 'Slab Layout' },
+      ],
+      default: '',
+      showIf: ['never'],
+    },
   ],
   compute: (inp) => {
     const stockFt = Number(inp.choice('stockLength'));

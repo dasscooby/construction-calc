@@ -32,6 +32,8 @@ export interface LayoutDrawInput {
   /** Slab mat as cut to the shape */
   bars?: BarSegment[];
   dowelFt?: number;
+  /** The bar around the edge: inset (ft) and which sides */
+  edgeBar?: { inset: number; on: (k: number) => boolean };
 }
 
 /** Straight-edge labels: each side's length on its straight part; curves left blank. */
@@ -61,6 +63,8 @@ export function layoutPlanSvg(p: LayoutDrawInput): string {
   const footOn = (k: number) => !!p.footingFt && L.sides[k].edge === 'form';
 
   if (p.bars?.length) out.push(`<g stroke="#ffb347" stroke-width="1" opacity="0.85">${p.bars.map((sg) => pl([sg.a, sg.b], '')).join('')}</g>`);
+
+  if (p.edgeBar) for (const run of insetRuns(L, p.edgeBar.inset, p.edgeBar.on)) out.push(pl(run, 'stroke="#ff7a00" stroke-width="2.5" stroke-linejoin="round"'));
 
   if (p.footingFt) {
     for (const run of insetRuns(L, p.footingFt, footOn)) out.push(pl(run, 'stroke="#ffffff" stroke-width="1.5" stroke-dasharray="8 6"'));
@@ -128,6 +132,8 @@ export interface LayoutIsoInput {
   bentLegsTo?: number;
   dowelFt?: number;
   note?: string;
+  /** The bar around the edge, at mid-slab */
+  edgeBar?: { inset: number; on: (k: number) => boolean };
 }
 
 export function layoutIsoSvg(p: LayoutIsoInput): string {
@@ -223,6 +229,10 @@ export function layoutIsoSvg(p: LayoutIsoInput): string {
       }
     }
     out.push(`<g fill="none" stroke="#b5501c" stroke-width="1.1" opacity="0.85">${g.join('')}</g>`);
+  }
+  if (p.edgeBar) {
+    const g = insetRuns(L, p.edgeBar.inset, p.edgeBar.on).map((run) => `<polyline points="${run.map((q) => pt(q.x, q.y, zBar)).join(' ')}"/>`);
+    out.push(`<g fill="none" stroke="#8a2e00" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">${g.join('')}</g>`);
   }
   for (const bar of p.footingBars ?? []) {
     const g = insetRuns(L, bar.inset, footOn).map((run) => `<polyline points="${run.map((q) => pt(q.x, q.y, bar.z)).join(' ')}"/>`);

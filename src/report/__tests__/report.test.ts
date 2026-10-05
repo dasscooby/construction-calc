@@ -3,7 +3,7 @@ jest.mock('@react-native-async-storage/async-storage', () => require('@react-nat
 import type { Job } from '../../lib/jobs';
 import { DEFAULT_SETTINGS } from '../../lib/settings';
 import { ALL_TOOLS } from '../../tools';
-import { defaultRaw, RawValues } from '../../tools/run';
+import { defaultRaw, RawValues, runTool } from '../../tools/run';
 import { buildBid, buildBill, priceTotals, suggestLines } from '../billing';
 import { buildReport, figureItems, jobTotals, numberIn, parseHeight } from '../report';
 
@@ -126,4 +126,32 @@ test('fill in from job: slab area, concrete at the job price, rebar, forms, labo
   const lines = suggestLines(figureItems(job));
   expect(lines.map((l) => l.desc)).toEqual(['Slab: form, pour and finish', 'Concrete', 'Rebar, cut, bent and tied', 'Wall forms, set and strip', 'Labor']);
   expect(lines[1]).toMatchObject({ qty: '28.25', unit: 'yd', price: '150' });
+});
+
+test('a Slab Layout and the cut list sent from it: the steel is counted once', () => {
+  const layoutTool = ALL_TOOLS.find((t) => t.id === 'slab-layout')!;
+  const sides = [
+    { length: len('20'), turn: 'R', radius: len(''), edge: 'form' },
+    { length: len('30'), turn: 'R', radius: len(''), edge: 'form' },
+    { length: len('20'), turn: 'R', radius: len(''), edge: 'form' },
+    { length: len('30'), turn: 'R', radius: len(''), edge: 'form' },
+  ];
+  const lay = raw('slab-layout', { sides: sides as never, slabRebar: '1' });
+  const res = runTool(layoutTool, lay);
+  expect(res.status).toBe('ok');
+  const send = res.status === 'ok' ? res.result.send! : null;
+  const cut = { ...defaultRaw(ALL_TOOLS.find((t) => t.id === 'cut-list')!), ...(send!.raw as RawValues) };
+  const both: Job = {
+    ...job,
+    items: [
+      { id: 'l', toolId: 'slab-layout', title: 'Slab Layout', label: '', at: 0, raw: lay },
+      { id: 'c', toolId: 'cut-list', title: 'Rebar Cut List', label: '', at: 0, raw: cut },
+    ],
+  };
+  const onlyCut: Job = { ...job, items: [both.items[1]] };
+  const t2 = jobTotals(figureItems(both));
+  const t1 = jobTotals(figureItems(onlyCut));
+  expect(t2.rebarLb).toBe(t1.rebarLb);
+  expect([...t2.sticks]).toEqual([...t1.sticks]);
+  expect([...t1.sticks].length).toBe(1); // one line per size, not a second "20' sticks" line
 });

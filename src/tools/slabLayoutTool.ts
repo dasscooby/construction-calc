@@ -2,8 +2,8 @@
 // drawn by walking its edge one side at a time. Figures concrete, forms, the thickened edge on
 // formed sides, the slab mat cut to the real shape, footing bars and dowels.
 
-import { arcLen, buildLayout, layoutArea, matBars, straight } from '../report/layoutGeom';
-import { Bar, BARS, beamBars, countAlong, getBar, lapIn, LB_PER_TON, planRun, sticksToCut, weightLb } from '../lib/rebar';
+import { arcLen, buildLayout, insetRuns, Layout, layoutArea, matBars, straight } from '../report/layoutGeom';
+import { Bar, BARS, beamBars, countAlong, getBar, lapIn, LB_PER_TON, planRun, slabBarsAdvice, sticksToCut, weightLb } from '../lib/rebar';
 import { concreteRows, CUFT_PER_CUYD, ORDER_FIELDS } from './concreteShared';
 import { commas, commasTrim, cuYd, dec, ftIn, inches, lb, sqFt, tons } from './format';
 import { dowelCount } from './slabTool';
@@ -28,6 +28,27 @@ const barChoice = (key: string, from: number, to: number, def: string, label: st
   showIf,
 });
 
+/** Longest stretch of the slab, end to end (ft). */
+export const slabLength = (L: Layout) => {
+  const xs = [0, ...L.V.map((p) => p.x)];
+  const ys = [0, ...L.V.map((p) => p.y)];
+  return Math.max(Math.max(...xs) - Math.min(...xs), Math.max(...ys) - Math.min(...ys));
+};
+
+/**
+ * The slab bars: your own size and spacing, or sized for the slab's length and thickness.
+ * A small slab gets no mat, just the bar around the edge.
+ */
+export function slabBarPlan(L: Layout, thickFt: number, own: { size: number; spacingIn: number } | null) {
+  if (own) return { mat: true, size: own.size, spacingIn: own.spacingIn, picked: true };
+  const a = slabBarsAdvice(thickFt * 12, slabLength(L));
+  return { mat: !a.edgeOnly, size: a.size, spacingIn: a.spacingIn, picked: false };
+}
+
+/** Length of the bar around the edge (3" in), on the sides `on` says. */
+export const edgeBarFt = (L: Layout, on: (k: number) => boolean) =>
+  insetRuns(L, COVER_IN / 12, on).reduce((a, run) => a + run.slice(1).reduce((b, q, i) => b + Math.hypot(q.x - run[i].x, q.y - run[i].y), 0), 0);
+
 export const slabLayout: Tool = {
   id: 'slab-layout',
   title: 'Slab Layout',
@@ -48,8 +69,9 @@ export const slabLayout: Tool = {
     { key: 'dugD', label: 'Dug deeper by', kind: 'number', unit: 'in', optional: true, showIf: ['footing'] },
 
     { key: 'slabRebar', label: 'Rebar in the slab', kind: 'toggle' },
-    barChoice('barSize', 3, 5, '4', 'Slab bar size', ['slabRebar']),
-    { key: 'spacing', label: 'On center', kind: 'number', unit: 'in', default: '18', showIf: ['slabRebar'] },
+    { key: 'pickBars', label: 'Pick my own bars', kind: 'toggle', help: 'Off: sized for how long and thick the slab is', showIf: ['slabRebar'] },
+    barChoice('barSize', 3, 5, '4', 'Slab bar size', ['slabRebar', 'pickBars']),
+    { key: 'spacing', label: 'On center', kind: 'number', unit: 'in', default: '18', showIf: ['slabRebar', 'pickBars'] },
     {
       key: 'edgeTie',
       label: 'Tie the slab to the footing',
@@ -194,13 +216,14 @@ export const slabLayout: Tool = {
       const legFt = Math.max(0, d - t / 2 - COVER_IN / 12);
 
       if (slabRebar) {
-        const bar = getBar(inp.choice('barSize'));
-        const spacing = inp.num('spacing');
+        if (inp.on('pickBars') && inp.num('spacing') <= 0) return { error: 'On center must be more than 0.' };
+        const plan = slabBarPlan(L, t, inp.on('pickBars') ? { size: Number(inp.choice('barSize')), spacingIn: inp.num('spacing') } : null);
+        const bar = getBar(plan.size);
+        const spacing = plan.spacingIn;
         const lapFt = lapFor(bar);
-        if (spacing <= 0) return { error: 'On center must be more than 0.' };
         if (lapFt >= stockFt) return { error: `The lap must be shorter than a ${stockFt}' stick.` };
         const tie = hasFooting ? inp.choice('edgeTie') : 'none';
-        const segs = matBars(L, COVER_IN / 12, spacing / 12, footOn);
+        const segs = plan.mat ? matBars(L, COVER_IN / 12, spacing / 12, footOn) : [];
         let ft = 0;
         let laps = 0;
         let bent = 0;
@@ -217,13 +240,40 @@ export const slabLayout: Tool = {
         }
         if (pieces.some((p) => p.lengthFt > stockFt + 1e-9)) return { error: `A bar piece is longer than a ${stockFt}' stick. Try a longer stick.` };
         let slabSticks = laps + sticksToCut(pieces, stockFt);
-        rows.push({
-          label: 'Slab bars',
-          value: feet(ft),
-          note: `${commas(segs.length)} bars cut to the shape, #${bar.size} at ${dec(spacing)}" both ways · ${commas(laps)} laps${
-            bent ? ` · ${commas(bent)} ends bent down ${inches(legFt * 12)} into the edge` : ''
-          }`,
-        });
+        const why = plan.picked ? '' : ` · sized for a ${ftIn(slabLength(L))} long, ${inches(t * 12)} slab`;
+        if (plan.mat) {
+          rows.push({
+            label: 'Slab bars',
+            value: feet(ft),
+            note: `${commas(segs.length)} bars cut to the shape, #${bar.size} at ${dec(spacing)}" both ways${why} · ${commas(laps)} laps${
+              bent ? ` · ${commas(bent)} ends bent down ${inches(legFt * 12)} into the edge` : ''
+            }`,
+          });
+        } else {
+          rows.push({ label: 'Slab bars', value: 'Edge bar only', note: `Small enough (${ftIn(slabLength(L))} long, ${inches(t * 12)} thick) that a bar around the edge is enough` });
+        }
+
+        // A bar around the whole edge, 3" in, lapped at the corners. Where footing bars run, they're the edge bar.
+        const edgeOn = (k: number) => !(footBars && footOn(k));
+        const edgeFt = edgeBarFt(L, edgeOn);
+        if (edgeFt > 0) {
+          const eBar = getBar(Math.max(4, bar.size));
+          const eLap = lapFor(eBar);
+          const eCorners = sides.filter((s, k) => s.radius === 0 && edgeOn(k) && edgeOn((k + 1) % N)).length;
+          const e = beamBars(edgeFt, 1, eBar, stockFt, eLap, eCorners);
+          rows.push({
+            label: 'Edge bar',
+            value: feet(e.totalFt),
+            note: `1 #${eBar.size} around the edge, 3" in · ${commas(e.cornerBars)} corner L-bars ${ftIn(e.cornerBarFt)} · ${commas(e.laps)} laps${
+              footBars ? ' · footing bars are the edge bar on the formed sides' : ''
+            }`,
+          });
+          addSticks(eBar, e.sticks);
+          totalLb += e.lb;
+          cut(eBar, stockFt, e.run.laps);
+          cut(eBar, e.run.tailFt, 1);
+          cut(eBar, e.cornerBarFt, e.cornerBars);
+        }
         if (tie === 'lbars') {
           const k = countAlong(centerline * 12, spacing);
           const len = lapFt + legFt;
@@ -289,7 +339,7 @@ export const slabLayout: Tool = {
           qty: String(qty),
           length: { ft: String(Math.floor(halfIn / 24)), in: String((halfIn % 24) / 2) },
         }));
-      return { rows, warnings, send: { toolId: 'cut-list', label: 'Send to Rebar Cut List', raw: { marks, stockLength: String(stockFt) } } };
+      return { rows, warnings, send: { toolId: 'cut-list', label: 'Send to Rebar Cut List', raw: { marks, stockLength: String(stockFt), from: 'slab-layout' } } };
     }
     return { rows, warnings };
   },
