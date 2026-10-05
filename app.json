@@ -77,7 +77,8 @@
           "cameraPermission": "Construction Calc uses the camera to scan plans and paperwork into your jobs.",
           "microphonePermission": false
         }
-      ]
+      ],
+      "expo-quick-actions"
     ]
   }
 }

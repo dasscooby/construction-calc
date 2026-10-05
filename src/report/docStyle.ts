@@ -19,7 +19,7 @@ export const DOC_FONTS = {
 export type DocFont = keyof typeof DOC_FONTS;
 
 export type DocHeader = 'side' | 'center';
-export type DocKind = 'crew' | 'bid' | 'bill';
+export type DocKind = 'crew' | 'bid' | 'bill' | 'change';
 
 export interface DocSettings {
   color: DocColor;
@@ -29,11 +29,12 @@ export interface DocSettings {
   crewNotice: string;
   bidNotice: string;
   billNotice: string;
+  changeNotice: string;
   /** Company logo: a picture file on the phone, or a data URI on the web. '' = none */
   logo: string;
 }
 
-export const DEFAULT_DOCS: DocSettings = { color: 'black', font: 'clean', header: 'side', crewNotice: '', bidNotice: '', billNotice: '', logo: '' };
+export const DEFAULT_DOCS: DocSettings = { color: 'black', font: 'clean', header: 'side', crewNotice: '', bidNotice: '', billNotice: '', changeNotice: '', logo: '' };
 
 /** Pictures that go in a document, as data URIs (loaded before the document is made). */
 export interface DocMedia {
@@ -52,6 +53,8 @@ export const DEFAULT_NOTICE: Record<DocKind, string> = {
   bid:
     'This proposal is valid for 30 days from the date above. Pricing covers only the work described. Changes, additional work, or unforeseen site conditions will be billed separately upon written approval. Acceptance of this proposal authorizes the work as described.',
   bill: 'Payment is due upon receipt unless otherwise agreed in writing. Please reference the invoice number with your payment. Thank you for your business.',
+  change:
+    'This change order modifies the original agreement only as described above. All other terms and conditions remain in effect. Work described here will proceed upon signed approval.',
 };
 
 const key = (kind: DocKind) => `${kind}Notice` as const;

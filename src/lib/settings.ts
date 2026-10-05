@@ -32,6 +32,10 @@ export interface Settings {
   company: { name: string; phone: string; email: string; license: string };
   /** How bids, bills and crew sheets look */
   docs: DocSettings;
+  /** Your usual prices, as typed; "Fill in from job" uses them. Blank = leave it for you. */
+  prices: { slabSqFt: string; wallFt: string; footingFt: string; pierEa: string; stepsSet: string; rebarLb: string; laborJob: string };
+  /** Who you order concrete from */
+  supplier: { name: string; phone: string; psi: string };
   favorites: string[];
   hidden: string[];
   tabOrder: TabId[];
@@ -45,6 +49,8 @@ export const DEFAULT_SETTINGS: Settings = {
   defaults: { waste: '', truck: '', price: '', slabThick: '', wallThick: '', spacing: '', lap: '', stockLength: '' },
   company: { name: '', phone: '', email: '', license: '' },
   docs: DEFAULT_DOCS,
+  prices: { slabSqFt: '', wallFt: '', footingFt: '', pierEa: '', stepsSet: '', rebarLb: '', laborJob: '' },
+  supplier: { name: '', phone: '', psi: '3000' },
   favorites: [],
   hidden: [],
   tabOrder: [...TAB_IDS],
@@ -81,6 +87,8 @@ export function cleanSettings(saved: unknown): Settings {
         header: d.header === 'center' ? 'center' : 'side',
       };
     })(),
+    prices: strings(DEFAULT_SETTINGS.prices, s.prices),
+    supplier: strings(DEFAULT_SETTINGS.supplier, s.supplier),
     favorites: ids(s.favorites),
     hidden: ids(s.hidden),
     // Keep their order, and add any tab they don't have saved (new tabs in an update).

@@ -46,6 +46,41 @@ export interface PriceLine {
   price: string;
 }
 
+/** A finger signature: the strokes as an SVG path, in a box w × h. */
+export interface Signature {
+  d: string;
+  w: number;
+  h: number;
+  name: string;
+  at: number;
+}
+
+/** Extra work after the bid, priced and signed on its own, added to the final bill. */
+export interface ChangeOrder {
+  id: string;
+  no: number;
+  desc: string;
+  qty: string;
+  unit: string;
+  price: string;
+  at: number;
+  signature?: Signature;
+}
+
+/** The concrete order to text the supplier. */
+export interface ConcreteOrder {
+  psi: string;
+  place: 'chute' | 'pump' | 'buggy';
+  when: string;
+}
+
+/** Last forecast for the job's address. */
+export interface Forecast {
+  at: number;
+  place: string;
+  days: { date: string; hi: number; lo: number; rain: number; wind: number }[];
+}
+
 export interface Job {
   id: string;
   name: string;
@@ -68,6 +103,11 @@ export interface Job {
   taxPct?: string;
   /** Already paid (deposit), dollars, as typed */
   paid?: string;
+  /** The customer's signature accepting the bid */
+  signature?: Signature;
+  changes?: ChangeOrder[];
+  order?: ConcreteOrder;
+  weather?: Forecast;
   /** Plans waiting for signal to be read */
   planQueue?: PendingPlan[];
   /** What the plans said (cleared when you're done with it) */
@@ -148,6 +188,29 @@ export const jobStore = {
   },
   addScans(jobId: string, uris: string[]) {
     update(jobId, (j) => ({ ...j, scans: [...(j.scans ?? []), ...uris] }));
+  },
+  sign(jobId: string, signature: Signature | undefined) {
+    update(jobId, (j) => ({ ...j, signature }));
+  },
+  addChange(jobId: string) {
+    update(jobId, (j) => {
+      const changes = j.changes ?? [];
+      const no = changes.reduce((a, c) => Math.max(a, c.no), 0) + 1;
+      return { ...j, changes: [...changes, { id: newId(), no, desc: '', qty: '1', unit: '', price: '', at: Date.now() }] };
+    });
+  },
+  editChange(jobId: string, id: string, patch: Partial<Omit<ChangeOrder, 'id' | 'no'>>) {
+    update(jobId, (j) => ({ ...j, changes: (j.changes ?? []).map((c) => (c.id === id ? { ...c, ...patch } : c)) }));
+  },
+  removeChange(jobId: string, id: string) {
+    update(jobId, (j) => ({ ...j, changes: (j.changes ?? []).filter((c) => c.id !== id) }));
+  },
+  setOrder(jobId: string, order: ConcreteOrder) {
+    update(jobId, (j) => ({ ...j, order }));
+  },
+  setWeather(jobId: string, weather: Forecast) {
+    // Not a change you made: don't bump the job to the top of the widget.
+    set(jobs.map((j) => (j.id === jobId ? { ...j, weather } : j)));
   },
   setLines(jobId: string, lines: Omit<PriceLine, 'id'>[] | PriceLine[]) {
     update(jobId, (j) => ({ ...j, lines: lines.map((l) => ({ ...l, id: 'id' in l && l.id ? l.id : newId() })) }));

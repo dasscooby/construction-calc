@@ -75,6 +75,39 @@ export default function App() {
   };
   const openEntry = (e: HistoryEntry) => openTool(e.toolId, e.raw);
 
+  // Home screen shortcuts (long-press the app icon): Calculator, Slab Layout, Slab, Jobs.
+  useEffect(() => {
+    if (Platform.OS === 'web') return;
+    let QA: typeof import('expo-quick-actions');
+    try {
+      QA = require('expo-quick-actions');
+    } catch {
+      return; // an app build without shortcuts
+    }
+    const go = (a: { id: string } | null) => {
+      if (!a) return;
+      picked.current = true;
+      setOverlay(null);
+      if (a.id === 'calc' || a.id === 'jobs') {
+        setTab(a.id);
+        return;
+      }
+      const id = (Object.keys(TABS) as TabId[]).find((k) => TABS[k].groups?.some((g) => g.tools.some((t) => t.id === a.id)));
+      if (!id) return;
+      setRequest({ tab: id, req: { toolId: a.id, raw: {}, n: Date.now(), keep: true } });
+      setTab(id);
+    };
+    QA.setItems([
+      { id: 'calc', title: 'Calculator', icon: 'symbol:plus.forwardslash.minus' },
+      { id: 'slab-layout', title: 'Slab Layout', subtitle: 'Any shape, with 3D', icon: 'symbol:square.on.square.dashed' },
+      { id: 'slab', title: 'Slab', subtitle: 'Yards, edge, rebar', icon: 'symbol:square.fill' },
+      { id: 'jobs', title: 'Jobs', subtitle: 'Bids, bills, crew sheets', icon: 'symbol:folder.fill' },
+    ]).catch(() => {});
+    go(QA.initial ?? null);
+    const sub = QA.addListener(go);
+    return () => sub.remove();
+  }, []);
+
   // All tabs stay mounted so numbers aren't lost when switching tabs.
   const screen = (id: TabId) => {
     const t = TABS[id];

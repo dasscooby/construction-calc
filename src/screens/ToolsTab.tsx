@@ -25,6 +25,8 @@ export interface OpenRequest {
   raw: RawValues;
   n: number;
   jobLink?: JobLink;
+  /** Just open the tool with whatever is already filled in (home screen shortcut) */
+  keep?: boolean;
 }
 
 interface Props {
@@ -70,8 +72,10 @@ export default function ToolsTab({ title, groups, active, onOpenHistory, onOpenS
     if (!request) return;
     const t = all.find((x) => x.id === request.toolId);
     if (!t) return;
-    setRaws((prev) => ({ ...prev, [t.id]: restoreRaw(t, request.raw) }));
-    setLinks((prev) => ({ ...prev, [t.id]: request.jobLink }));
+    if (!request.keep) {
+      setRaws((prev) => ({ ...prev, [t.id]: restoreRaw(t, request.raw) }));
+      setLinks((prev) => ({ ...prev, [t.id]: request.jobLink }));
+    }
     setOpenId(t.id);
   }, [request?.n]); // each new request
 

@@ -12,7 +12,11 @@ import type { DocMedia } from '../report/docStyle';
 import { dec } from '../tools/format';
 import { liveActivitiesSupported } from '../widgets/bridge';
 import { openReport } from '../report/open';
-import { buildBid, buildBill, lineAmount, priceTotals, suggestLines } from '../report/billing';
+import { buildBid, buildBill, buildChange, lineAmount, priceTotals, suggestLines } from '../report/billing';
+import SignaturePad from './SignaturePad';
+import { orderText, PLACE_TEXT, sendOrder } from '../lib/order';
+import { dayName, fetchForecast, pourWarnings } from '../lib/weather';
+import type { ConcreteOrder } from '../lib/jobs';
 import { buildReport, figureItems, FiguredItem, jobTotals } from '../report/report';
 import { money } from '../tools/format';
 import { colors, onThemeChange, themed } from '../theme';
@@ -189,6 +193,8 @@ function JobDetail({ job, onBack, onOpenItem }: { job: Job; onBack: () => void; 
 
         <Prices job={job} figured={figured} />
 
+        <OrderCard job={job} yd={totals.concreteOrderYd} />
+        <WeatherCard job={job} />
         <PourCard job={job} orderYd={totals.concreteOrderYd} truckYd={Number(prefs.defaults.truck) || 10} />
 
         <Text style={styles.section}>In this job</Text>
@@ -599,10 +605,117 @@ export function sendDoc(job: Job | null, s: Settings, make: (m: DocMedia) => { h
   })();
 }
 
+/** The concrete order: PSI, how it goes in, when; one tap texts it to the supplier. */
+function OrderCard({ job, yd }: { job: Job; yd: number }) {
+  const prefs = useSettings();
+  const [open, setOpen] = useState(false);
+  if (!yd) return null;
+  const o: ConcreteOrder = job.order ?? { psi: prefs.supplier.psi || '3000', place: 'chute', when: '' };
+  const set = (patch: Partial<ConcreteOrder>) => jobStore.setOrder(job.id, { ...o, ...patch });
+  const chip = (on: boolean, label: string, onPress: () => void) => (
+    <Pressable key={label} onPress={onPress} style={[styles.chip, on && styles.chipOn]} accessibilityRole="button" accessibilityState={{ selected: on }}>
+      <Text style={[styles.chipText, on && styles.chipTextOn]}>{label}</Text>
+    </Pressable>
+  );
+  if (!open) {
+    return (
+      <Pressable onPress={() => setOpen(true)} style={styles.secondary} accessibilityRole="button">
+        <Text style={styles.secondaryText}>Order concrete ({yd.toFixed(2)} yd)</Text>
+      </Pressable>
+    );
+  }
+  return (
+    <View style={styles.card}>
+      <Text style={styles.label}>Order concrete: {yd.toFixed(2)} yd</Text>
+      <Text style={styles.cardSub}>PSI</Text>
+      <View style={styles.chipRow}>{['2500', '3000', '3500', '4000', '4500'].map((p) => chip(o.psi === p, p, () => set({ psi: p })))}</View>
+      <Text style={styles.cardSub}>How it goes in</Text>
+      <View style={styles.chipRow}>{(Object.keys(PLACE_TEXT) as ConcreteOrder['place'][]).map((k) => chip(o.place === k, PLACE_TEXT[k], () => set({ place: k })))}</View>
+      <TextInput
+        style={[styles.field, styles.lineGap]}
+        value={o.when}
+        onChangeText={(when) => set({ when })}
+        placeholder="When (Tue 7 am)"
+        placeholderTextColor={colors.faint}
+        accessibilityLabel="When"
+      />
+      <Pressable
+        onPress={() => {
+          feel.tap();
+          void sendOrder(prefs.supplier.phone, orderText(job, prefs, yd, o));
+        }}
+        style={styles.primary}
+        accessibilityRole="button"
+      >
+        <Text style={styles.primaryText}>{prefs.supplier.phone ? `Text ${prefs.supplier.name || 'the supplier'}` : 'Send the order'}</Text>
+      </Pressable>
+      {!prefs.supplier.phone ? <Text style={[styles.help, styles.lineGap]}>Add your supplier’s number in Settings to text it straight to them.</Text> : null}
+    </View>
+  );
+}
+
+/** 7-day forecast for the job address, with what to watch for on a pour day. */
+function WeatherCard({ job }: { job: Job }) {
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState('');
+  const f = job.weather;
+  const check = async () => {
+    setBusy(true);
+    setError('');
+    try {
+      jobStore.setWeather(job.id, await fetchForecast(job.address));
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Weather isn’t available right now.');
+    }
+    setBusy(false);
+  };
+  if (!job.address.trim()) return null;
+  return (
+    <View style={styles.card}>
+      <View style={styles.cardHead}>
+        <Text style={styles.label}>Pour-day weather</Text>
+        <Pressable onPress={() => void check()} disabled={busy} accessibilityRole="button" accessibilityLabel="Check the weather">
+          <Text style={styles.smallBtnText}>{busy ? 'Checking…' : f ? 'Refresh' : 'Check'}</Text>
+        </Pressable>
+      </View>
+      {f ? (
+        <>
+          <Text style={styles.cardSub}>
+            {f.place} · {new Date(f.at).toLocaleString(undefined, { weekday: 'short', hour: 'numeric', minute: '2-digit' })}
+          </Text>
+          {f.days.map((d) => {
+            const warn = pourWarnings(d);
+            return (
+              <View key={d.date} style={styles.line}>
+                <View style={styles.sumRow}>
+                  <Text style={styles.dayName}>{dayName(d.date)}</Text>
+                  <Text style={styles.dayNums}>
+                    {d.hi}° / {d.lo}° · rain {d.rain}% · wind {d.wind}
+                  </Text>
+                </View>
+                {warn.length ? warn.map((w) => <Text key={w} style={styles.warn}>{w}</Text>) : <Text style={styles.goodDay}>Good for pouring</Text>}
+              </View>
+            );
+          })}
+        </>
+      ) : (
+        <Text style={styles.help}>Tap Check for the 7-day forecast at the job.</Text>
+      )}
+      {error ? <Text style={styles.warn}>{error}</Text> : null}
+    </View>
+  );
+}
+
 /** Customer and price lines for the bid and the final bill. */
 function Prices({ job, figured }: { job: Job; figured: FiguredItem[] }) {
+  const prefs = useSettings();
   const lines = job.lines ?? [];
   const m = priceTotals(job);
+  const withChanges = priceTotals(job, true);
+  const changes = job.changes ?? [];
+  // Who's signing: the bid, or one change order.
+  const [signing, setSigning] = useState<{ change?: string } | null>(null);
+  const firstName = (job.customer ?? '').split('\n')[0].trim();
   const setLine = (i: number, patch: Partial<PriceLine>) => jobStore.setLines(job.id, lines.map((l, j) => (j === i ? { ...l, ...patch } : l)));
   const box = (value: string, onChange: (v: string) => void, placeholder: string, a11y: string, style: object, numeric = true) => (
     <TextInput
@@ -663,7 +776,7 @@ function Prices({ job, figured }: { job: Job; figured: FiguredItem[] }) {
           <Pressable
             onPress={() => {
               feel.tap();
-              jobStore.setLines(job.id, [...lines, ...suggestLines(figured)]);
+              jobStore.setLines(job.id, [...lines, ...suggestLines(figured, prefs)]);
             }}
             style={styles.smallBtn}
             accessibilityRole="button"
@@ -680,16 +793,93 @@ function Prices({ job, figured }: { job: Job; figured: FiguredItem[] }) {
           {box(job.paid ?? '', (paid) => jobStore.edit(job.id, { paid }), '$0', 'Paid so far', styles.linePrice)}
         </View>
         <View style={[styles.sumRow, styles.lineGap]}>
-          <Text style={styles.sumLabel}>Total</Text>
+          <Text style={styles.sumLabel}>Bid total</Text>
           <Text style={styles.sumValue}>{money(m.total)}</Text>
         </View>
-        {m.paid ? (
+        {withChanges.total !== m.total ? (
           <View style={styles.sumRow}>
-            <Text style={styles.sumLabel}>Balance due</Text>
-            <Text style={styles.sumValue}>{money(m.balance)}</Text>
+            <Text style={styles.sumLabel}>With change orders</Text>
+            <Text style={styles.sumValue}>{money(withChanges.total)}</Text>
           </View>
         ) : null}
+        {withChanges.paid ? (
+          <View style={styles.sumRow}>
+            <Text style={styles.sumLabel}>Balance due</Text>
+            <Text style={styles.sumValue}>{money(withChanges.balance)}</Text>
+          </View>
+        ) : null}
+        {job.signature ? (
+          <View style={[styles.sumRow, styles.lineGap]}>
+            <Text style={styles.signedText}>
+              ✓ Bid signed by {job.signature.name}, {new Date(job.signature.at).toLocaleDateString()}
+            </Text>
+            <Pressable onPress={() => jobStore.sign(job.id, undefined)} accessibilityRole="button" accessibilityLabel="Remove the bid signature">
+              <Text style={[styles.smallBtnText, styles.danger]}>Remove</Text>
+            </Pressable>
+          </View>
+        ) : lines.length ? (
+          <Pressable onPress={() => setSigning({})} style={[styles.smallBtn, styles.lineGap]} accessibilityRole="button">
+            <Text style={styles.smallBtnText}>Customer signs the bid</Text>
+          </Pressable>
+        ) : null}
       </View>
+
+      <Text style={styles.section}>Change orders</Text>
+      <View style={styles.card}>
+        {changes.length === 0 ? <Text style={styles.help}>Extra work after the bid. Each one prints for the customer to sign and goes on the final bill.</Text> : null}
+        {changes.map((c) => (
+          <View key={c.id} style={styles.line}>
+            <Text style={styles.cardSub}>Change order #{c.no}</Text>
+            <View style={styles.lineTop}>
+              {box(c.desc, (desc) => jobStore.editChange(job.id, c.id, { desc }), 'What changed', `Change order ${c.no} description`, styles.lineDesc, false)}
+              <Pressable onPress={() => jobStore.removeChange(job.id, c.id)} style={styles.lineX} accessibilityRole="button" accessibilityLabel={`Remove change order ${c.no}`}>
+                <Text style={[styles.smallBtnText, styles.danger]}>✕</Text>
+              </Pressable>
+            </View>
+            <View style={styles.lineTop}>
+              {box(c.qty, (qty) => jobStore.editChange(job.id, c.id, { qty }), 'Qty', `Change order ${c.no} quantity`, styles.lineQty)}
+              {box(c.unit, (unit) => jobStore.editChange(job.id, c.id, { unit }), 'unit', `Change order ${c.no} unit`, styles.lineUnit, false)}
+              {box(c.price, (price) => jobStore.editChange(job.id, c.id, { price }), '$ each', `Change order ${c.no} price`, styles.linePrice)}
+              <Text style={styles.lineAmt} numberOfLines={1}>
+                {money(lineAmount(c))}
+              </Text>
+            </View>
+            <View style={styles.itemBtns}>
+              <Pressable
+                onPress={() => sendDoc(job, prefs, (md) => buildChange(job, prefs, c, undefined, md), `${job.name} change order ${c.no}`)}
+                style={styles.smallBtn}
+                accessibilityRole="button"
+              >
+                <Text style={styles.smallBtnText}>Print</Text>
+              </Pressable>
+              {c.signature ? (
+                <Pressable onPress={() => jobStore.editChange(job.id, c.id, { signature: undefined })} style={styles.smallBtn} accessibilityRole="button">
+                  <Text style={styles.signedText}>✓ {c.signature.name}</Text>
+                </Pressable>
+              ) : (
+                <Pressable onPress={() => setSigning({ change: c.id })} style={styles.smallBtn} accessibilityRole="button">
+                  <Text style={styles.smallBtnText}>Sign</Text>
+                </Pressable>
+              )}
+            </View>
+          </View>
+        ))}
+        <Pressable onPress={() => jobStore.addChange(job.id)} style={[styles.smallBtn, styles.lineGap]} accessibilityRole="button">
+          <Text style={styles.smallBtnText}>+ Add change order</Text>
+        </Pressable>
+      </View>
+
+      <SignaturePad
+        visible={!!signing}
+        title={signing?.change ? `Approve change order #${changes.find((c) => c.id === signing.change)?.no ?? ''}` : 'Accept the bid'}
+        defaultName={firstName}
+        onCancel={() => setSigning(null)}
+        onDone={(sig) => {
+          if (signing?.change) jobStore.editChange(job.id, signing.change, { signature: sig });
+          else jobStore.sign(job.id, sig);
+          setSigning(null);
+        }}
+      />
     </>
   );
 }
@@ -697,6 +887,15 @@ function Prices({ job, figured }: { job: Job; figured: FiguredItem[] }) {
 const getStyles = themed(() => ({
   primarySub: { fontSize: 13, color: colors.accentText, opacity: 0.8, marginTop: 2 },
   sendRow: { flexDirection: 'row', gap: 10 },
+  chipRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginTop: 6, marginBottom: 8 },
+  chip: { backgroundColor: colors.panel2, borderRadius: 999, paddingHorizontal: 14, paddingVertical: 9 },
+  chipOn: { backgroundColor: colors.accent },
+  chipText: { fontSize: 15, fontWeight: '600', color: colors.text },
+  chipTextOn: { color: colors.accentText, fontWeight: '800' },
+  dayName: { fontSize: 16, fontWeight: '700', color: colors.text },
+  dayNums: { fontSize: 15, color: colors.subtext },
+  goodDay: { fontSize: 14, color: colors.subtext, marginTop: 2 },
+  signedText: { flex: 1, fontSize: 15, fontWeight: '700', color: colors.accent },
   linkBtn: { alignItems: 'center', paddingVertical: 6, marginBottom: 6 },
   linkText: { fontSize: 15, color: colors.subtext, textDecorationLine: 'underline' },
   customer: { minHeight: 70, textAlignVertical: 'top' },

@@ -1,16 +1,18 @@
 NEW IN THIS BUILD
-- Jobs: Read a plan. Tap Scan a plan, PDF or file, or Photo. It finds the slabs, rebar and notes. Tap Add to job, then Open to check the shape.
-- No signal? Pick the plan anyway. It reads it when you're back in service.
-- If a scan fails, a red message says why. Check iPhone Settings > Construction Calc > Camera and Photos.
+- Price book (Settings): your usual prices. "Fill in from job" on a bid now prices it for you.
+- Customer signs the bid with a finger, in the job under Bid and bill. The signature prints on the bid.
+- Change orders: extra work after the bid. Print each one to sign (or sign it on the phone). They go on the final bill.
+- Order concrete: in a job, pick PSI, how it goes in, and when. One tap texts your supplier (add their number in Settings).
+- Pour-day weather: in a job with an address, tap Check for the 7-day forecast with hot, cold, rain and wind warnings.
+- Read a plan now finds walls, footings, piers and steps too. "Add everything to the job" puts it all in.
+- Home screen shortcuts: long-press the app icon for Calculator, Slab Layout, Slab, Jobs.
+- Liquid Glass tab bar.
 
 PLEASE TRY
-1. Slab Layout (Concrete tab): enter an L-shaped slab side by side. Watch the sketch say "Shape closes". Turn on rebar, check the Plan and 3D drawings, then tap Send to Rebar Cut List.
-2. Slab: a big slab gets bars sized for it; a small stoop gets "Edge bar only". There's always a bar around the edge. Pick my own bars lets you set your own.
-3. Jobs: add a few tools to a job, then make a Crew sheet, a Bid and a Final bill. Try Fill in from job, tax and a deposit.
-4. Settings > Documents: change the color, font and header, edit the notices, and tap Bid / Bill / Crew sheet to preview.
-5. Wall Forms: a wall-by-wall job with your fillers and the load list.
-6. Home screen widget: long-press the home screen, add Construction Calc.
-7. Pour tracker in a job: start a pour and count trucks. Check the lock screen.
+1. Scan or pick a plan in a job, Add everything, then Fill in from job and make a Bid.
+2. Have someone sign the bid, add a change order, then make the Final bill.
+3. Text a concrete order to yourself (put your own number as the supplier).
+4. Long-press the app icon and try each shortcut.
 
 TELL US
 - Anything that closes the app or shows "Something broke".

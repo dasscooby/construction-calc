@@ -28,6 +28,8 @@ export default function SettingsScreen({ onClose }: { onClose: () => void }) {
 
   const setDefault = (key: keyof Settings['defaults'], v: string) => settings.update({ defaults: { ...s.defaults, [key]: v } });
   const setCompany = (key: keyof Settings['company'], v: string) => settings.update({ company: { ...s.company, [key]: v } });
+  const setPrice = (key: keyof Settings['prices'], v: string) => settings.update({ prices: { ...s.prices, [key]: v } });
+  const setSupplier = (key: keyof Settings['supplier'], v: string) => settings.update({ supplier: { ...s.supplier, [key]: v } });
   const moveTab = (i: number, by: -1 | 1) => {
     const order = [...s.tabOrder];
     const j = i + by;
@@ -173,6 +175,29 @@ export default function SettingsScreen({ onClose }: { onClose: () => void }) {
           {footer ? <Text style={styles.preview}>Shows as: {footer}</Text> : null}
         </View>
 
+        {/* ---------------- Price book ---------------- */}
+        <Text style={styles.section}>Price book</Text>
+        <Text style={styles.sectionHelp}>Your usual prices. “Fill in from job” on a bid uses them. Blank = you type it each time.</Text>
+        <View style={styles.card}>
+          <Field label="Slab (form, pour, finish)" unit="$/sq ft" value={s.prices.slabSqFt} placeholder="none" onChange={(v) => setPrice('slabSqFt', v)} />
+          <Field label="Walls" unit="$/ft" value={s.prices.wallFt} placeholder="none" onChange={(v) => setPrice('wallFt', v)} />
+          <Field label="Footings" unit="$/ft" value={s.prices.footingFt} placeholder="none" onChange={(v) => setPrice('footingFt', v)} />
+          <Field label="Piers" unit="$ each" value={s.prices.pierEa} placeholder="none" onChange={(v) => setPrice('pierEa', v)} />
+          <Field label="Steps" unit="$/set" value={s.prices.stepsSet} placeholder="none" onChange={(v) => setPrice('stepsSet', v)} />
+          <Field label="Rebar" unit="$/lb" value={s.prices.rebarLb} placeholder="none" onChange={(v) => setPrice('rebarLb', v)} />
+          <Field label="Labor" unit="$/job" value={s.prices.laborJob} placeholder="none" onChange={(v) => setPrice('laborJob', v)} />
+          <Text style={styles.preview}>Concrete uses “Price per yard” from My defaults.</Text>
+        </View>
+
+        {/* ---------------- Supplier ---------------- */}
+        <Text style={styles.section}>Concrete supplier</Text>
+        <Text style={styles.sectionHelp}>For texting your concrete order from a job.</Text>
+        <View style={styles.card}>
+          <Field label="Supplier" value={s.supplier.name} placeholder="Ready-mix plant" onChange={(v) => setSupplier('name', v)} text />
+          <Field label="Order phone" value={s.supplier.phone} placeholder="(406) 555-0000" onChange={(v) => setSupplier('phone', v)} text keyboard="phone-pad" />
+          <Field label="Usual PSI" value={s.supplier.psi} placeholder="3000" onChange={(v) => setSupplier('psi', v)} />
+        </View>
+
         {/* ---------------- Documents ---------------- */}
         <Text style={styles.section}>Documents</Text>
         <Text style={styles.sectionHelp}>How your bids, bills and crew sheets look.</Text>
@@ -235,6 +260,7 @@ export default function SettingsScreen({ onClose }: { onClose: () => void }) {
               ['crew', 'Crew sheet notice'],
               ['bid', 'Bid notice'],
               ['bill', 'Bill notice'],
+              ['change', 'Change order notice'],
             ] as [DocKind, string][]
           ).map(([kind, label]) => {
             const k = `${kind}Notice` as const;
