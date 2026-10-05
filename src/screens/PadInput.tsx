@@ -1,9 +1,11 @@
-import { useRef, useState } from 'react';
+import { useMemo, useRef, useState } from 'react';
 import { LayoutChangeEvent, PanResponder, Pressable, Text, View } from 'react-native';
 import Svg, { Circle, Line, Text as SvgText } from 'react-native-svg';
 
 import { feel } from '../lib/feel';
-import type { RawLength, RawPad } from '../tools/run';
+import { solvePad } from '../lib/padSolve';
+import { ftIn } from '../tools/format';
+import { parseLength, RawLength, RawPad } from '../tools/run';
 import { colors, onThemeChange, themed } from '../theme';
 
 const name = (i: number) => (i < 26 ? String.fromCharCode(65 + i) : `P${i + 1}`);
@@ -103,6 +105,33 @@ export default function PadInput({
   ).current;
 
   const onLayout = (e: LayoutChangeEvent) => setWidth(e.nativeEvent.layout.width);
+
+  // The lengths you didn't type, figured from the ones you did (only once there's enough to go on).
+  const figured = useMemo(() => {
+    const edges = value.edges.map((e) => {
+      const l = parseLength(e.length);
+      return { a: e.a, b: e.b, length: l !== null && l > 0 ? l : null };
+    });
+    if (!edges.some((e) => e.length)) return null;
+    try {
+      return solvePad(value.points, edges);
+    } catch {
+      return null;
+    }
+  }, [value]);
+
+  // An open shape (like three sides of a slab against the house): its two loose ends.
+  const ends = useMemo(() => {
+    const deg = value.points.map((_, i) => value.edges.filter((e) => e.a === i || e.b === i).length);
+    const loose = deg.flatMap((d, i) => (d === 1 ? [i] : []));
+    return loose.length === 2 && deg.every((d) => d >= 1) ? loose : null;
+  }, [value]);
+  const closeUp = () => {
+    if (!ends) return;
+    save({ points: value.points, edges: [...value.edges, { a: ends[1], b: ends[0], length: { ft: '', in: '' } }] });
+    setCurrent(null);
+    feel.success();
+  };
   const setLength = (i: number, length: RawLength) => save({ points: value.points, edges: value.edges.map((e, j) => (j === i ? { ...e, length } : e)) }, false);
   const removeLine = (i: number) => {
     const edges = value.edges.filter((_, j) => j !== i);
@@ -175,20 +204,39 @@ export default function PadInput({
           <Text style={styles.btnText}>Start over</Text>
         </Pressable>
       </View>
-      {value.edges.length ? <Text style={styles.listHead}>Lengths you know (leave the rest blank)</Text> : null}
-      {value.edges.map((e, i) => (
-        <View key={`${e.a}-${e.b}-${i}`} style={styles.lineRow}>
-          <Text style={styles.lineName}>
-            {name(e.a)}–{name(e.b)}
+      {ends && value.edges.length >= 2 ? (
+        <Pressable onPress={closeUp} style={styles.close} accessibilityRole="button">
+          <Text style={styles.closeText}>
+            Close it up: {name(ends[1])} to {name(ends[0])}
           </Text>
-          <View style={styles.lineBox}>
-            <LengthBox value={e.length} onChange={(l) => setLength(i, l)} label={`${name(e.a)} to ${name(e.b)} length`} />
+          <Text style={styles.closeSub}>Adds the open side (like the house side) and figures its length</Text>
+        </Pressable>
+      ) : null}
+      {value.edges.length ? <Text style={styles.listHead}>Lengths you know (the rest fill in)</Text> : null}
+      {value.edges.map((e, i) => {
+        const typed = (parseLength(e.length) ?? 0) > 0;
+        const f = figured?.edges[i];
+        return (
+          <View key={`${e.a}-${e.b}-${i}`}>
+            <View style={styles.lineRow}>
+              <Text style={styles.lineName}>
+                {name(e.a)}–{name(e.b)}
+              </Text>
+              <View style={styles.lineBox}>
+                <LengthBox value={e.length} onChange={(l) => setLength(i, l)} label={`${name(e.a)} to ${name(e.b)} length`} />
+              </View>
+              <Pressable onPress={() => removeLine(i)} style={styles.x} accessibilityRole="button" accessibilityLabel={`Remove line ${name(e.a)} to ${name(e.b)}`}>
+                <Text style={styles.xText}>✕</Text>
+              </Pressable>
+            </View>
+            {!typed && f ? (
+              <Text style={f.sure ? styles.figured : styles.needMore} accessibilityLabel={`${name(e.a)} to ${name(e.b)} figured`}>
+                {f.sure ? `= ${ftIn(f.length)} (figured)` : 'Needs one more measurement somewhere'}
+              </Text>
+            ) : null}
           </View>
-          <Pressable onPress={() => removeLine(i)} style={styles.x} accessibilityRole="button" accessibilityLabel={`Remove line ${name(e.a)} to ${name(e.b)}`}>
-            <Text style={styles.xText}>✕</Text>
-          </Pressable>
-        </View>
-      ))}
+        );
+      })}
     </View>
   );
 }
@@ -200,6 +248,11 @@ const getStyles = themed(() => ({
   btn: { flex: 1, backgroundColor: colors.panel2, borderRadius: 12, paddingVertical: 11, alignItems: 'center' },
   btnText: { fontSize: 16, fontWeight: '700', color: colors.accent },
   off: { opacity: 0.4 },
+  close: { backgroundColor: colors.accent, borderRadius: 12, paddingVertical: 12, paddingHorizontal: 14, alignItems: 'center', marginTop: 4 },
+  closeText: { fontSize: 17, fontWeight: '800', color: colors.accentText },
+  closeSub: { fontSize: 13, color: colors.accentText, opacity: 0.8, marginTop: 2 },
+  figured: { fontSize: 16, fontWeight: '800', color: colors.accent, marginLeft: 56, marginTop: -2, marginBottom: 8 },
+  needMore: { fontSize: 14, color: colors.subtext, marginLeft: 56, marginTop: -2, marginBottom: 8 },
   listHead: { fontSize: 15, fontWeight: '700', color: colors.subtext, marginTop: 10, marginBottom: 6 },
   lineRow: { flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 6 },
   lineName: { width: 48, fontSize: 18, fontWeight: '800', color: colors.text },

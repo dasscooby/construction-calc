@@ -78,3 +78,28 @@ test('a line nothing pins down is marked as a guess from the sketch', () => {
   expect(s.edges[0].sure).toBe(true);
   expect(s.edges[1].sure).toBe(false);
 });
+
+test('slab against the house: an L drawn as 5 sides measured, the 6th (house side) figured', () => {
+  // L slab: A top-left, walk clockwise. Top 20, right side down 8, in 8, down 12, bottom 12 back left;
+  // the house side D... is the open left side F–A (20 tall) left for the app.
+  const pts = [
+    { x: 100, y: 100 }, // A
+    { x: 300, y: 104 }, // B
+    { x: 302, y: 180 }, // C
+    { x: 220, y: 178 }, // D
+    { x: 222, y: 300 }, // E
+    { x: 98, y: 302 }, // F
+  ];
+  const edges = [
+    { a: 0, b: 1, length: 20 },
+    { a: 1, b: 2, length: 8 },
+    { a: 2, b: 3, length: 8 },
+    { a: 3, b: 4, length: 12 },
+    { a: 4, b: 5, length: 12 },
+    { a: 5, b: 0, length: null }, // the house
+  ];
+  const s = solvePad(pts, edges);
+  expect(s.misfit).toEqual([]);
+  expect(s.edges[5].sure).toBe(true);
+  expect(ft(s.edges[5].length)).toBe(20);
+});
