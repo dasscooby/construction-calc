@@ -1,151 +1,71 @@
-// Layout Sketch: lines walked point to point (A → B → C ...), square turns unless you say otherwise.
-// Pick any two points for the board or string line between them: its length, how far over and across,
-// and the angle it meets the lines at. Shows where the shape would close back to A.
+// Layout Sketch: draw the layout with your finger, type the lengths you know, and the app squares it
+// up: lines drawn close to level or plumb become level or plumb, corners close to square become square,
+// and angled lines (braces, cut corners) just take their length and run point to point.
+// Lines you didn't measure are figured from the ones you did.
 
+import { solvePad } from '../lib/padSolve';
 import { deg as degText, ftIn } from './format';
-import { ChoiceField, ResultRow, SketchRow, Tool } from './types';
+import { ResultRow, Tool } from './types';
 
-export interface Pt {
-  x: number;
-  y: number;
-}
-
-export const POINT_NAMES = 'ABCDEFGHIJKLMNOP'.split('');
-export const pointName = (i: number) => POINT_NAMES[i] ?? `P${i + 1}`;
-
-/** Heading of each line, degrees, measured clockwise from "right" (y points down, like the drawing). */
-export function headings(rows: SketchRow[]): number[] {
-  let h = 0;
-  return rows.map((r, i) => {
-    if (i > 0) h += r.turn === 'R' ? r.deg : r.turn === 'L' ? -r.deg : 0;
-    return h;
-  });
-}
-
-export function sketchPoints(rows: SketchRow[]): Pt[] {
-  const pts: Pt[] = [{ x: 0, y: 0 }];
-  headings(rows).forEach((h, i) => {
-    const a = (h * Math.PI) / 180;
-    const p = pts[pts.length - 1];
-    pts.push({ x: p.x + rows[i].length * Math.cos(a), y: p.y + rows[i].length * Math.sin(a) });
-  });
-  return pts;
-}
-
-/** Angle between two directions, 0–180°. */
-function between(ax: number, ay: number, bx: number, by: number): number {
-  const c = (ax * bx + ay * by) / (Math.hypot(ax, ay) * Math.hypot(bx, by));
-  return (Math.acos(Math.max(-1, Math.min(1, c))) * 180) / Math.PI;
-}
-
-/** Turn from one heading to another, −180..180 (+ = right). */
-const turnBetween = (from: number, to: number) => {
-  let t = to - from;
-  while (t > 180) t -= 360;
-  while (t <= -180) t += 360;
-  return t;
-};
-
-const pointChoice = (key: string, label: string, def: string): ChoiceField => ({
-  key,
-  label,
-  kind: 'choice',
-  options: POINT_NAMES.map((p) => ({ value: p, label: p })),
-  default: def,
-});
-
-const SIXTEENTH_FT = 1 / 192;
+export const pointName = (i: number) => (i < 26 ? String.fromCharCode(65 + i) : `P${i + 1}`);
+export const lineName = (a: number, b: number) => `${pointName(a)}–${pointName(b)}`;
 
 export const layoutSketch: Tool = {
   id: 'layout-sketch',
   title: 'Layout Sketch',
-  blurb: 'Lines point to point: diagonals, angles, close it up',
+  blurb: 'Draw it, add the lengths, it squares it up',
   fields: [
     {
-      key: 'lines',
-      label: 'Lines',
-      kind: 'sketch',
-      help: 'Start at A. Give each line its length and which way it turns off the last one. Turns are square (90°) unless you type an angle.',
+      key: 'sketch',
+      label: 'Draw it',
+      kind: 'pad',
+      help: 'Tap to put down points. Each tap draws a line from the last point. Tap a point to start from it, or to close the shape. Then type the lengths you know.',
     },
-    pointChoice('from', 'Measure from', 'A'),
-    pointChoice('to', 'To', 'C'),
   ],
   compute: (inp) => {
-    const rows = inp.sketch('lines');
-    const pts = sketchPoints(rows);
-    const last = pts.length - 1;
-    const fi = POINT_NAMES.indexOf(inp.choice('from'));
-    const ti = POINT_NAMES.indexOf(inp.choice('to'));
-    if (fi > last || ti > last) return { error: `Point ${fi > last ? inp.choice('from') : inp.choice('to')} isn’t on the sketch yet. You have A to ${pointName(last)}.` };
-    if (fi === ti) return { error: 'Pick two different points.' };
+    const pad = inp.pad('sketch');
+    if (!pad || !pad.edges.length) return { error: 'Draw your lines on the pad.' };
+    if (!pad.edges.some((e) => e.length)) return { error: 'Type the length of at least one line.' };
+    const s = solvePad(pad.points, pad.edges);
+    const P = s.points;
+    const rows: ResultRow[] = [];
+    const warnings: string[] = [];
 
-    const a = pts[fi];
-    const b = pts[ti];
-    const dx = b.x - a.x;
-    const dy = b.y - a.y;
-    const dist = Math.hypot(dx, dy);
-    const name = `${pointName(fi)} to ${pointName(ti)}`;
-    const rowsOut: ResultRow[] = [{ label: name, value: ftIn(dist), big: true, note: 'Point to point' }];
-
-    // How far over and across, measured along the first line (A–B) and square off it.
-    const h0 = (headings(rows)[0] * Math.PI) / 180;
-    const along = dx * Math.cos(h0) + dy * Math.sin(h0);
-    const across = -dx * Math.sin(h0) + dy * Math.cos(h0);
-    if (Math.abs(along) > SIXTEENTH_FT && Math.abs(across) > SIXTEENTH_FT) {
-      rowsOut.push({ label: 'Over and across', value: `${ftIn(Math.abs(along))} × ${ftIn(Math.abs(across))}`, note: 'Along A–B, and square off it' });
-    }
-
-    // The angle the board meets a line at each end, and the saw setting to cut it to sit flat.
-    const atEnd = (i: number, toward: Pt) => {
-      const line = i < last ? { j: i + 1 } : { j: i - 1 };
-      const p = pts[i];
-      const q = pts[line.j];
-      const ang = between(q.x - p.x, q.y - p.y, toward.x - p.x, toward.y - p.y);
-      const meets = Math.min(ang, 180 - ang);
-      return { text: `${pointName(i)}–${pointName(line.j)}`, ang: meets };
-    };
-    for (const [i, other] of [
-      [fi, b],
-      [ti, a],
-    ] as const) {
-      const e = atEnd(i, other);
-      if (e.ang > 0.05 && e.ang < 89.95) {
-        rowsOut.push({ label: `Angle at ${pointName(i)}`, value: degText(e.ang), note: `Off line ${e.text} · miter saw ${degText(90 - e.ang)}` });
-      } else if (Math.abs(e.ang - 90) <= 0.05) {
-        rowsOut.push({ label: `Angle at ${pointName(i)}`, value: '90°', note: `Square to line ${e.text}` });
+    s.edges.forEach((e, i) => {
+      const name = lineName(e.a, e.b);
+      let note = e.measured ? 'Measured' : e.sure ? 'Figured from your measurements' : 'From your sketch. Measure it to be exact.';
+      // Angled lines: the angle it meets the next line at, and the saw setting to cut it to sit flat.
+      const held = e.axis || s.square.some(([x, y]) => x === i || y === i);
+      if (!held) {
+        const other = s.edges.find((o, j) => j !== i && (o.a === e.a || o.b === e.a));
+        if (other) {
+          const far = other.a === e.a ? other.b : other.a;
+          const ux = P[e.b].x - P[e.a].x;
+          const uy = P[e.b].y - P[e.a].y;
+          const vx = P[far].x - P[e.a].x;
+          const vy = P[far].y - P[e.a].y;
+          const c = (ux * vx + uy * vy) / ((Math.hypot(ux, uy) || 1) * (Math.hypot(vx, vy) || 1));
+          const ang = (Math.acos(Math.max(-1, Math.min(1, c))) * 180) / Math.PI;
+          const meets = Math.min(ang, 180 - ang);
+          if (meets > 0.05 && meets < 89.95) note += ` · ${degText(meets)} off ${lineName(e.a, far)} · miter saw ${degText(90 - meets)}`;
+        }
       }
-    }
+      rows.push({ label: name, value: ftIn(e.length), note, big: !e.measured && e.sure });
+    });
 
-    // Back to the start: closed, or the line that would close it.
-    const measuringClose = (fi === 0 && ti === last) || (ti === 0 && fi === last);
-    if (rows.length >= 2 && !measuringClose) {
-      const end = pts[last];
-      const gap = Math.hypot(end.x, end.y);
-      if (gap < SIXTEENTH_FT) {
-        rowsOut.push({ label: 'Closes', value: `Yes, back at A`, note: `${rows.length} lines` });
-      } else {
-        const hs = headings(rows);
-        const closing = (Math.atan2(-end.y, -end.x) * 180) / Math.PI;
-        const t = turnBetween(hs[hs.length - 1], closing);
-        const turn = Math.abs(t) < 0.05 ? 'straight on' : `turn ${t > 0 ? 'right' : 'left'} ${degText(Math.abs(t))}`;
-        rowsOut.push({ label: `${pointName(last)} back to A`, value: ftIn(gap), note: `To close it: ${turn} after ${pointName(last - 1)}–${pointName(last)}` });
-      }
+    for (const m of s.misfit) {
+      const e = s.edges[m.edge];
+      warnings.push(
+        `The lengths don’t fit together: ${lineName(e.a, e.b)} works out to ${ftIn(e.length)}, not ${ftIn(e.length - m.off)}. Check that measurement, or whether a corner isn’t square.`,
+      );
     }
+    if (s.edges.some((e) => !e.measured && !e.sure)) warnings.push('Some lines are only from your sketch. Measure one more line and they’ll be exact.');
 
-    // Every diagonal, for checking a layout.
-    // Closed: the last point is A again, and the last point before it sits next to A.
-    const closed = rows.length >= 3 && Math.hypot(pts[last].x, pts[last].y) < SIXTEENTH_FT;
-    const m = closed ? last : pts.length;
-    const diags: string[] = [];
-    for (let i = 0; i < m && m <= 9; i++) {
-      for (let j = i + 2; j < m; j++) {
-        if (closed && i === 0 && j === m - 1) continue; // a side, not a diagonal
-        diags.push(`${pointName(i)}–${pointName(j)} ${ftIn(Math.hypot(pts[j].x - pts[i].x, pts[j].y - pts[i].y))}`);
-      }
-    }
-    if (diags.length > 1) rowsOut.push({ label: 'All diagonals', value: String(diags.length), note: diags.join(' · ') });
-    rowsOut.push({ label: 'Total of the lines', value: ftIn(rows.reduce((s, r) => s + r.length, 0)) });
-    return { rows: rowsOut };
+    // Lines with no answer yet go first, so the one you're after is on top.
+    rows.sort((x, y) => Number(!!y.big) - Number(!!x.big));
+    const total = s.edges.reduce((t, e) => t + e.length, 0);
+    rows.push({ label: 'All lines together', value: ftIn(total) });
+    return { rows, warnings };
   },
-  notes: ['Measure each line on the same face (all inside, or all outside).'],
+  notes: ['Lines drawn close to level or plumb come out exactly level or plumb. Corners drawn close to square come out square.'],
 };

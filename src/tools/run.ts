@@ -1,7 +1,7 @@
 // Reads the text in a tool's boxes, checks it, and runs compute().
 // The screen and the tests both use runTool().
 
-import { BarRow, ComputeOutput, EdgeKind, Field, Inputs, OutlineRow, Rect, SketchRow, StockRow, Tool, ToolResult, WallEnds, WallRow } from './types';
+import { BarRow, ComputeOutput, EdgeKind, Field, Inputs, OutlineRow, PadValue, Rect, StockRow, Tool, ToolResult, WallEnds, WallRow } from './types';
 
 export type RawLength = { ft: string; in: string };
 export type RawArea = { length: RawLength; width: RawLength };
@@ -10,8 +10,8 @@ export type RawWallRow = { length: RawLength; ends: WallEnds };
 export type RawStockRow = { size: string; qty: string };
 export type RawOutlineRow = { length: RawLength; turn: 'R' | 'L'; radius: RawLength; edge: EdgeKind };
 export const EDGE_KINDS: EdgeKind[] = ['form', 'house', 'dowels', 'slab', 'slabDowels'];
-export type RawSketchRow = { length: RawLength; turn: 'R' | 'L' | 'S'; deg: string };
-export type RawValue = string | RawLength | RawArea[] | RawBarRow[] | RawWallRow[] | RawStockRow[] | RawOutlineRow[] | RawSketchRow[];
+export type RawPad = { points: { x: number; y: number }[]; edges: { a: number; b: number; length: RawLength }[] };
+export type RawValue = string | RawLength | RawArea[] | RawBarRow[] | RawWallRow[] | RawStockRow[] | RawOutlineRow[] | RawPad;
 
 export const WALL_ENDS: WallEnds[] = ['oo', 'oi', 'ii'];
 export type RawValues = Record<string, RawValue>;
@@ -47,6 +47,18 @@ export function parseLength(r: RawLength): number | null {
 
 export const emptyLength = (): RawLength => ({ ft: '', in: '' });
 
+/** A saved sketch: numbers for points, lines between real points, lengths as typed. */
+export function isRawPad(v: unknown): v is RawPad {
+  if (!v || typeof v !== 'object') return false;
+  const p = v as RawPad;
+  if (!Array.isArray(p.points) || !Array.isArray(p.edges)) return false;
+  const n = p.points.length;
+  return (
+    p.points.every((q) => Number.isFinite(q?.x) && Number.isFinite(q?.y)) &&
+    p.edges.every((e) => Number.isInteger(e?.a) && Number.isInteger(e?.b) && e.a >= 0 && e.b >= 0 && e.a < n && e.b < n && e.a !== e.b && isRawLength(e.length))
+  );
+}
+
 /** The boxes a fresh tool starts with. `overrides` (from My defaults) replaces any of them. */
 export function defaultRaw(tool: Tool, overrides: RawValues = {}): RawValues {
   const raw: RawValues = {};
@@ -73,11 +85,8 @@ export function defaultRaw(tool: Tool, overrides: RawValues = {}): RawValues {
       case 'outline':
         raw[f.key] = [{ length: emptyLength(), turn: 'R', radius: emptyLength(), edge: 'form' }];
         break;
-      case 'sketch':
-        raw[f.key] = [
-          { length: emptyLength(), turn: 'R', deg: '' },
-          { length: emptyLength(), turn: 'R', deg: '' },
-        ];
+      case 'pad':
+        raw[f.key] = { points: [], edges: [] };
         break;
       case 'choice':
         raw[f.key] = f.default;
@@ -126,13 +135,8 @@ export function restoreRaw(tool: Tool, saved: unknown): RawValues {
       v.every((r) => isRawLength(r?.length) && isRawLength(r?.radius) && (r?.turn === 'R' || r?.turn === 'L') && EDGE_KINDS.includes(r?.edge))
     ) {
       raw[f.key] = v as RawOutlineRow[];
-    } else if (
-      f.kind === 'sketch' &&
-      Array.isArray(v) &&
-      v.length &&
-      v.every((r) => isRawLength(r?.length) && ['R', 'L', 'S'].includes(r?.turn) && typeof r?.deg === 'string')
-    ) {
-      raw[f.key] = v as RawSketchRow[];
+    } else if (f.kind === 'pad' && isRawPad(v)) {
+      raw[f.key] = v;
     }
     else if (f.kind === 'multi' && typeof v === 'string' && v.split(',').every((x) => x === '' || f.options.some((o) => o.value === x))) {
       raw[f.key] = v;
@@ -147,7 +151,7 @@ export type RunResult =
   | { status: 'missing'; message: string }
   | { status: 'invalid'; message: string };
 
-type Parsed = number | string | string[] | Rect[] | BarRow[] | WallRow[] | StockRow[] | OutlineRow[] | SketchRow[] | null;
+type Parsed = number | string | string[] | Rect[] | BarRow[] | WallRow[] | StockRow[] | OutlineRow[] | PadValue | null;
 
 /**
  * Test-friendly inputs are allowed too: a number for a length field means feet,
@@ -163,7 +167,7 @@ export type LooseValue =
   | [number, WallEnds][]
   | [number, number | null][]
   | [number, 'R' | 'L', number, EdgeKind][]
-  | [number, 'R' | 'L' | 'S', number][];
+  | { points: [number, number][]; edges: [number, number, number | null][] };
 
 function normalize(f: Field, v: LooseValue | boolean | undefined): RawValue | undefined {
   if (v === undefined) return undefined;
@@ -175,9 +179,13 @@ function normalize(f: Field, v: LooseValue | boolean | undefined): RawValue | un
       width: { ft: String(w), in: '' },
     }));
   }
-  if (f.kind === 'sketch' && Array.isArray(v) && v.length && Array.isArray(v[0])) {
-    // Tests: [[ft, 'R' | 'L' | 'S', degrees or 0 for square], ...]
-    return (v as unknown as [number, 'R' | 'L' | 'S', number][]).map(([ft, turn, d]) => ({ length: { ft: String(ft), in: '' }, turn, deg: d ? String(d) : '' }));
+  if (f.kind === 'pad' && v && typeof v === 'object' && !Array.isArray(v) && 'points' in v && Array.isArray((v as { points: unknown[] }).points[0])) {
+    // Tests: { points: [[x, y], ...], edges: [[a, b, ft or null], ...] }
+    const t = v as unknown as { points: [number, number][]; edges: [number, number, number | null][] };
+    return {
+      points: t.points.map(([x, y]) => ({ x, y })),
+      edges: t.edges.map(([a, b, ft]) => ({ a, b, length: { ft: ft === null ? '' : String(ft), in: '' } })),
+    };
   }
   if (f.kind === 'outline' && Array.isArray(v) && v.length && Array.isArray(v[0])) {
     return (v as unknown as [number, 'R' | 'L', number, EdgeKind][]).map(([ft, turn, r, edge]) => ({
@@ -288,19 +296,16 @@ export function runTool(tool: Tool, values: Record<string, LooseValue | boolean>
         else blank = true;
         break;
       }
-      case 'sketch': {
-        const rows: SketchRow[] = [];
-        for (const [i, r] of (v as RawSketchRow[]).entries()) {
-          const len = parseLength(r.length);
-          if (len === null) continue; // empty line
-          if (Number.isNaN(len) || len <= 0) return { status: 'invalid', message: `Check the length of line ${i + 1}` };
-          const d = r.deg.trim() ? parseNumber(r.deg) : 90;
-          if (r.turn !== 'S' && (d === null || Number.isNaN(d) || d <= 0 || d >= 180)) {
-            return { status: 'invalid', message: `The turn before line ${i + 1} must be between 0 and 180 degrees` };
-          }
-          rows.push({ length: len, turn: r.turn, deg: r.turn === 'S' ? 0 : (d as number) });
+      case 'pad': {
+        const pad = v as RawPad;
+        const edges: PadValue['edges'] = [];
+        for (const e of pad.edges) {
+          const len = parseLength(e.length);
+          const name = `${String.fromCharCode(65 + e.a)}–${String.fromCharCode(65 + e.b)}`;
+          if (len !== null && (Number.isNaN(len) || len <= 0)) return { status: 'invalid', message: `Check the length of ${name}` };
+          edges.push({ a: e.a, b: e.b, length: len });
         }
-        if (rows.length) value = rows;
+        if (edges.length) value = { points: pad.points, edges };
         else blank = true;
         break;
       }
@@ -365,7 +370,7 @@ export function runTool(tool: Tool, values: Record<string, LooseValue | boolean>
     walls: (k) => (get(k) as WallRow[] | null) ?? [],
     stock: (k) => (get(k) as StockRow[] | null) ?? [],
     outline: (k) => (get(k) as OutlineRow[] | null) ?? [],
-    sketch: (k) => (get(k) as SketchRow[] | null) ?? [],
+    pad: (k) => get(k) as PadValue | null,
     has: (k) => get(k) !== null,
     on: (k) => get(k) === 'on',
   };

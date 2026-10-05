@@ -8,7 +8,7 @@
 //   Order: 25.75 yd
 
 import { ftIn, inches } from './format';
-import { isShown, RawArea, RawBarRow, RawLength, RawOutlineRow, RawSketchRow, RawStockRow, RawValues, RawWallRow, parseLength, parseNumber, RunResult } from './run';
+import { isShown, RawArea, RawBarRow, RawLength, RawOutlineRow, RawPad, RawStockRow, RawValues, RawWallRow, parseLength, parseNumber, RunResult } from './run';
 import { Field, Tool } from './types';
 
 const lengthText = (r: RawLength): string | null => {
@@ -53,16 +53,11 @@ export function fieldText(f: Field, v: RawValues[string]): string | null {
         .map((r) => `${r.qty.trim()} – #${r.size} @ ${lengthText(r.length)}`);
       return parts.length ? parts.join(', ') : null;
     }
-    case 'sketch': {
-      const parts = (v as RawSketchRow[])
-        .filter((r) => lengthText(r.length))
-        .map((r, i) => {
-          const from = String.fromCharCode(65 + i);
-          const to = String.fromCharCode(66 + i);
-          const turn = i === 0 ? '' : r.turn === 'S' ? 'straight, ' : `${r.turn === 'R' ? 'right' : 'left'} ${r.deg.trim() || '90'}°, `;
-          return `${from}-${to}: ${turn}${lengthText(r.length)}`;
-        });
-      return parts.length ? parts.join('; ') : null;
+    case 'pad': {
+      const parts = (v as RawPad).edges
+        .filter((e) => lengthText(e.length))
+        .map((e) => `${String.fromCharCode(65 + e.a)}–${String.fromCharCode(65 + e.b)} ${lengthText(e.length)}`);
+      return parts.length ? parts.join(', ') : null;
     }
     case 'outline': {
       const parts = (v as RawOutlineRow[])

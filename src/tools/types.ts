@@ -72,17 +72,16 @@ export interface OutlineRow {
   edge: EdgeKind;
 }
 
-/** Lines walked point to point (A → B → C ...): length, and the turn before each line. */
-export interface SketchField extends FieldBase {
-  kind: 'sketch';
+/** A finger sketch: points tapped on a pad, lines between them, and a measurement on any line. */
+export interface PadField extends FieldBase {
+  kind: 'pad';
 }
 
-export interface SketchRow {
-  length: number; // feet
-  /** Turn before this line (ignored on the first one): right, left, or straight on */
-  turn: 'R' | 'L' | 'S';
-  /** How far it turns, degrees (90 = square) */
-  deg: number;
+export interface PadValue {
+  /** Where each point was tapped on the pad (pad units) */
+  points: { x: number; y: number }[];
+  /** Lines between points; length in feet, null = not measured */
+  edges: { a: number; b: number; length: number | null }[];
 }
 
 /** An on/off switch, like "Exterior footing". Other fields can hang off it with showIf. */
@@ -128,7 +127,7 @@ export type Field =
   | StockField
   | ToggleField
   | OutlineField
-  | SketchField;
+  | PadField;
 
 export interface Rect {
   length: number; // feet
@@ -177,8 +176,8 @@ export interface Inputs {
   stock(key: string): StockRow[];
   /** Outline field: the filled-in sides. */
   outline(key: string): OutlineRow[];
-  /** Sketch field: the filled-in lines. */
-  sketch(key: string): SketchRow[];
+  /** Pad field: the sketch and its measurements (null if nothing drawn). */
+  pad(key: string): PadValue | null;
   /** True if the field was filled in (a switch: true if it's on). */
   has(key: string): boolean;
   /** Switch field: on or off. */

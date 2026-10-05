@@ -3,41 +3,55 @@ import { layoutSketch } from '../sketchTool';
 
 const note = (r: ReturnType<typeof runTool>, label: string) => (r.status === 'ok' ? r.result.rows.find((x) => x.label === label)?.note : undefined);
 
-test('12 by 9, square corner: the diagonal board A to C is 15 ft (3-4-5)', () => {
-  const r = runTool(layoutSketch, { lines: [[12, 'R', 0], [9, 'R', 0]], from: 'A', to: 'C' });
-  expect(rowValue(r, 'A to C')).toBe(`15' 0"`);
-  expect(rowValue(r, 'Over and across')).toBe(`12' 0" × 9' 0"`);
-  // tan⁻¹(9/12) = 36.87° off A–B; the saw is set to 90 − 36.87 = 53.13°
-  expect(rowValue(r, 'Angle at A')).toBe('36.87°');
-  expect(note(r, 'Angle at A')).toBe('Off line A–B · miter saw 53.13°');
-  expect(rowValue(r, 'Angle at C')).toBe('53.13°');
+test('a rough box with a brace: two sides measured, the rest and the brace figured (3-4-5)', () => {
+  const r = runTool(layoutSketch, {
+    sketch: {
+      points: [
+        [100, 100],
+        [404, 108],
+        [398, 330],
+        [96, 322],
+      ],
+      edges: [
+        [0, 1, 12],
+        [1, 2, 9],
+        [2, 3, null],
+        [3, 0, null],
+        [0, 2, null],
+      ],
+    },
+  });
+  expect(rowValue(r, 'A–C')).toBe(`15' 0"`);
+  expect(note(r, 'A–C')).toBe('Figured from your measurements · 36.87° off A–B · miter saw 53.13°');
+  expect(rowValue(r, 'C–D')).toBe(`12' 0"`);
+  expect(rowValue(r, 'D–A')).toBe(`9' 0"`);
+  if (r.status === 'ok') expect(r.result.warnings).toEqual([]);
 });
 
-test('a 45° turn: 10 ft, then 10 ft at 45° → A to C = √(17.071² + 7.071²) = 18.478 ft = 18\' 5 3/4"', () => {
-  const r = runTool(layoutSketch, { lines: [[10, 'R', 0], [10, 'R', 45]], from: 'A', to: 'C' });
-  expect(rowValue(r, 'A to C')).toBe(`18' 5-3/4"`);
+test('the angled side only needs its length', () => {
+  // Top 10 level, right 8 plumb, bottom 16 level, left side angled at 10 → the top-left corner sits 6 over.
+  const r = runTool(layoutSketch, {
+    sketch: {
+      points: [
+        [160, 100],
+        [360, 100],
+        [360, 260],
+        [40, 262],
+      ],
+      edges: [
+        [0, 1, 10],
+        [1, 2, 8],
+        [2, 3, 16],
+        [3, 0, 10],
+      ],
+    },
+  });
+  expect(rowValue(r, 'D–A')).toBe(`10' 0"`);
+  // 6 over, 8 down: tan⁻¹(8/6) = 53.13° off D–C
+  expect(note(r, 'D–A')).toBe('Measured · 53.13° off D–C · miter saw 36.87°');
 });
 
-test('a closed rectangle says so, and lists both diagonals', () => {
-  const r = runTool(layoutSketch, { lines: [[20, 'R', 0], [10, 'R', 0], [20, 'R', 0], [10, 'R', 0]], from: 'B', to: 'D' });
-  expect(rowValue(r, 'Closes')).toBe('Yes, back at A');
-  expect(rowValue(r, 'B to D')).toBe(`22' 4-5/16"`); // √500 = 22.3607 ft
-  expect(note(r, 'All diagonals')).toBe(`A–C 22' 4-5/16" · B–D 22' 4-5/16"`);
-});
-
-test('three sides of a box: how to close it back to A', () => {
-  const r = runTool(layoutSketch, { lines: [[20, 'R', 0], [10, 'R', 0], [20, 'R', 0]], from: 'A', to: 'C' });
-  expect(rowValue(r, 'D back to A')).toBe(`10' 0"`);
-  expect(note(r, 'D back to A')).toBe('To close it: turn right 90° after C–D');
-});
-
-test('straight on and left turns', () => {
-  const r = runTool(layoutSketch, { lines: [[5, 'R', 0], [5, 'S', 0], [4, 'L', 0]], from: 'A', to: 'D' });
-  expect(rowValue(r, 'A to D')).toBe(`10' 9-1/4"`); // √(10² + 4²) = 10.7703 ft = 10' 9.24"
-});
-
-test('errors', () => {
-  expect(runTool(layoutSketch, { lines: [[12, 'R', 0]], from: 'A', to: 'C' })).toEqual({ status: 'invalid', message: 'Point C isn’t on the sketch yet. You have A to B.' });
-  expect(runTool(layoutSketch, { lines: [[12, 'R', 0], [9, 'R', 0]], from: 'B', to: 'B' })).toEqual({ status: 'invalid', message: 'Pick two different points.' });
-  expect(runTool(layoutSketch, { lines: [[12, 'R', 0], [9, 'R', 200]], from: 'A', to: 'C' }).status).toBe('invalid');
+test('nothing measured yet, or nothing drawn', () => {
+  expect(runTool(layoutSketch, { sketch: { points: [[0, 0], [100, 0]], edges: [[0, 1, null]] } })).toEqual({ status: 'invalid', message: 'Type the length of at least one line.' });
+  expect(runTool(layoutSketch, {}).status).toBe('missing');
 });

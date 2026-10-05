@@ -5,8 +5,8 @@ import type { Job, JobItem } from '../lib/jobs';
 import { companyLine, Settings } from '../lib/settings';
 import { ALL_TOOLS, migrateItem } from '../tools';
 import { commas, cuYd, dec, money } from '../tools/format';
-import { isShown, parseLength, parseNumber, RawArea, RawOutlineRow, RawSketchRow, RawValues, RawWallRow, restoreRaw, runTool, RunResult } from '../tools/run';
-import { POINT_NAMES, sketchPoints } from '../tools/sketchTool';
+import { isShown, parseLength, parseNumber, RawArea, RawOutlineRow, RawPad, RawValues, RawWallRow, restoreRaw, runTool, RunResult } from '../tools/run';
+import { solvePad } from '../lib/padSolve';
 import { sketchSvg } from './sketchDraw';
 import { fieldText } from '../tools/share';
 import type { ResultRow, Tool } from '../tools/types';
@@ -336,12 +336,10 @@ export function toolDrawings(toolId: string, raw: RawValues, title: string): Dra
   if (toolId === 'wall-forms') return wallFormsDrawings(raw, title, date);
   if (toolId === 'slab-layout') return layoutDrawings(raw, title, date);
   if (toolId === 'layout-sketch') {
-    const rows = ((raw.lines as RawSketchRow[]) ?? [])
-      .map((r) => ({ length: parseLength(r.length) ?? 0, turn: r.turn, deg: r.turn === 'S' ? 0 : r.deg.trim() ? Number(r.deg) || 90 : 90 }))
-      .filter((r) => r.length > 0);
-    if (!rows.length) return null;
-    const pts = sketchPoints(rows);
-    return { plan: sketchSvg(pts, rows.map((r) => r.length), POINT_NAMES.indexOf(String(raw.from)), POINT_NAMES.indexOf(String(raw.to)), `${title} · ${date}`) };
+    const pad = raw.sketch as RawPad | undefined;
+    const edges = (pad?.edges ?? []).map((e) => ({ a: e.a, b: e.b, length: parseLength(e.length) }));
+    if (!pad || !edges.some((e) => e.length && e.length > 0)) return null;
+    return { plan: sketchSvg(solvePad(pad.points, edges.map((e) => ({ ...e, length: e.length && e.length > 0 ? e.length : null }))), `${title} · ${date}`) };
   }
   return null;
 }
