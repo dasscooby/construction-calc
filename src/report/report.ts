@@ -4,7 +4,7 @@
 import type { Job, JobItem } from '../lib/jobs';
 import { companyLine, Settings } from '../lib/settings';
 import { ALL_TOOLS, migrateItem } from '../tools';
-import { commas, cuYd, dec, money } from '../tools/format';
+import { commas, cuYd, dec, ftIn, money } from '../tools/format';
 import { isShown, parseLength, parseNumber, RawArea, RawOutlineRow, RawPad, RawValues, RawWallRow, restoreRaw, runTool, RunResult } from '../tools/run';
 import { padLoop, solvePad } from '../lib/padSolve';
 import { sketchIsoSvg, sketchSvg } from './sketchDraw';
@@ -176,19 +176,43 @@ export function wallFormsDrawings(raw: RawValues, title: string, date: string, s
   };
 }
 
-/** Footings & Walls: a 3D look at the run and a cross-section with the bars. */
-export function footingDrawings(raw: RawValues): Drawings | null {
-  const L = parseLength(raw.length as never) ?? 0;
+/**
+ * Footings & Walls: around a building (square or odd shape), the plan and the ring in 3D;
+ * a straight run, a 3D look along it. Both with a cross-section showing the bars.
+ */
+export function footingDrawings(raw: RawValues, title = 'Footings & Walls', date = new Date().toLocaleDateString()): Drawings | null {
   const W = parseLength(raw.width as never) ?? 0;
   const D = parseLength(raw.depth as never) ?? 0;
-  if (!(L > 0 && W > 0 && D > 0)) return null;
   const bars = raw.bars === '1';
   const lines = bars ? Number(raw.lines) || 0 : 0;
   const barSize = Number(raw.barSize) || 4;
   const vSpacingIn = bars ? parseNumber(String(raw.vSpacing)) ?? 0 : 0;
+  if (!(W > 0 && D > 0)) return null;
+  const section = sectionWithBarsSvg({ widthIn: W * 12, depthIn: D * 12, lines, barSize, vSpacingIn, title: 'Section' });
+  if (raw.shape === 'rect' || raw.shape === 'odd') {
+    let rows: { length: number; ends: RawWallRow['ends'] }[];
+    if (raw.shape === 'rect') {
+      const BL = parseLength(raw.bLength as never) ?? 0;
+      const BW = parseLength(raw.bWidth as never) ?? 0;
+      if (!(BL > 0 && BW > 0)) return null;
+      rows = [BL, BW, BL, BW].map((length) => ({ length, ends: 'oo' as const }));
+    } else {
+      rows = ((raw.walls as RawWallRow[]) ?? []).map((r) => ({ length: parseLength(r.length) ?? 0, ends: r.ends })).filter((r) => r.length > 0);
+    }
+    const outline = wallOutline(rows);
+    if (!outline?.closed) return { section };
+    const inner = insetOutline(outline.points, W);
+    return {
+      plan: planSvg({ outer: outline.points, inner, labels: sideLabels(outline.points), title, subtitle: `${dec(W * 12)}" × ${ftIn(D)} · ${date}` }),
+      iso: isoSvg({ outer: outline.points, inner, height: Math.max(D, 0.5) }),
+      section,
+    };
+  }
+  const L = parseLength(raw.length as never) ?? 0;
+  if (!(L > 0)) return null;
   return {
     iso: footingIsoSvg({ lengthFt: L * (Number(raw.qty) || 1), widthFt: W, depthFt: D, lines, barSize, vSpacingIn }),
-    section: sectionWithBarsSvg({ widthIn: W * 12, depthIn: D * 12, lines, barSize, vSpacingIn, title: 'Section' }),
+    section,
   };
 }
 
@@ -393,7 +417,7 @@ export function toolDrawings(toolId: string, raw: RawValues, title: string): Dra
   if (toolId === 'wall-forms') return wallFormsDrawings(raw, title, date);
   if (toolId === 'slab-layout') return layoutDrawings(raw, title, date);
   if (toolId === 'layout-sketch') return sketchDrawings(raw, title, date);
-  if (toolId === 'footings') return footingDrawings(raw);
+  if (toolId === 'footings') return footingDrawings(raw, title, date);
   return null;
 }
 

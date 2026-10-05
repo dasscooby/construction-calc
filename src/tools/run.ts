@@ -208,8 +208,14 @@ function normalize(f: Field, v: LooseValue | boolean | undefined): RawValue | un
 }
 
 /** Fields hidden behind a switch that's off. */
+/** 'footing' = that switch is on; 'shape=rect' = that choice is picked. */
+const condition = (k: string, raw: RawValues) => {
+  const eq = k.indexOf('=');
+  return eq < 0 ? raw[k] === '1' : raw[k.slice(0, eq)] === k.slice(eq + 1);
+};
+
 export function isShown(f: Field, raw: RawValues): boolean {
-  return (!f.showIf || f.showIf.every((k) => raw[k] === '1')) && (!f.showIfAny || f.showIfAny.some((k) => raw[k] === '1'));
+  return (!f.showIf || f.showIf.every((k) => condition(k, raw))) && (!f.showIfAny || f.showIfAny.some((k) => condition(k, raw)));
 }
 
 export function runTool(tool: Tool, values: Record<string, LooseValue | boolean>): RunResult {

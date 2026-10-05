@@ -6,6 +6,7 @@ import { settings, userDefaults, useSettings } from '../lib/settings';
 import { RawValues, defaultRaw, restoreRaw } from '../tools/run';
 import { Tool } from '../tools/types';
 import { colors, onThemeChange, themed } from '../theme';
+import { migrateItem } from '../tools';
 import ToolScreen from './ToolScreen';
 
 export interface ToolGroup {
@@ -57,7 +58,7 @@ export default function ToolsTab({ title, groups, active, onOpenHistory, onOpenS
         if (!text) return;
         const saved = JSON.parse(text) as Record<string, unknown>;
         const restored: Record<string, RawValues> = {};
-        for (const t of all) if (saved[t.id]) restored[t.id] = restoreRaw(t, saved[t.id]);
+        for (const t of all) if (saved[t.id]) restored[t.id] = restoreRaw(t, migrateItem(t.id, saved[t.id] as Record<string, unknown>).raw);
         setRaws(restored);
       })
       .catch(() => {})

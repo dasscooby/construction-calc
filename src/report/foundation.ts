@@ -85,7 +85,10 @@ export function findFoundation(items: FiguredItem[]): Foundation | null {
     main && main.rows.length === 4 && main.rows.every((r) => r.ends === 'oo') ? { L: main.rows[0].length, W: main.rows[1].length } : null;
 
   const runOf = (f: FiguredItem) => {
-    if (f.tool.id === 'footings') return (parseLength(f.item.raw.length as RawLength) ?? 0) * (Number(f.item.raw.qty) || 1);
+    if (f.tool.id === 'footings') {
+      const mid = row(f, 'Along the middle');
+      return mid ? firstNumber(mid.value) : (parseLength(f.item.raw.length as RawLength) ?? 0) * (Number(f.item.raw.qty) || 1);
+    }
     if (f.tool.id === 'beam-bars') return parseLength(f.item.raw.run as RawLength) ?? 0;
     return 0;
   };

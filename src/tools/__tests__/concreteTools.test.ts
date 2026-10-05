@@ -198,11 +198,11 @@ describe('old Slab + Beams calculations', () => {
 
 describe('footings & walls', () => {
   test('20 ft × 16" × 8" = 17.78 cu ft = 0.66 cu yd; three of them = 1.98', () => {
-    expect(rowValue(runTool(tool('footings'), { length: 20, width: { ft: '', in: '16' }, depth: { ft: '', in: '8' } }), 'Before waste')).toBe(
+    expect(rowValue(runTool(tool('footings'), { shape: 'run', length: 20, width: { ft: '', in: '16' }, depth: { ft: '', in: '8' } }), 'Before waste')).toBe(
       '0.66 cu yd',
     );
     expect(
-      rowValue(runTool(tool('footings'), { length: 20, width: { ft: '', in: '16' }, depth: { ft: '', in: '8' }, qty: 3 }), 'Before waste'),
+      rowValue(runTool(tool('footings'), { shape: 'run', length: 20, width: { ft: '', in: '16' }, depth: { ft: '', in: '8' }, qty: 3 }), 'Before waste'),
     ).toBe('1.98 cu yd');
   });
 });
@@ -445,7 +445,7 @@ describe('rebar in footings and walls', () => {
   test('100 ft footing around a building, 2 #4, 4 corners: like Beam & Footing Bars', () => {
     // Per bar: (100 − 1.667) ÷ (20 − 1.667) = 5.36 → 6 sticks, 5 laps → 108.33 ft; × 2 = 216.67 ft.
     // Corner L-bars: 4 corners × 2 bars = 8 × 3' 4" = 26.67 ft. Total 243.33 ft × 0.668 = 163 lb.
-    const r = runTool(tool('footings'), { length: 100, width: { ft: '', in: '20' } as never, depth: { ft: '', in: '10' } as never, bars: true, corners: 4 });
+    const r = runTool(tool('footings'), { shape: 'run', length: 100, width: { ft: '', in: '20' } as never, depth: { ft: '', in: '10' } as never, bars: true, corners: 4 });
     expect(rowValue(r, 'Bars along it')).toBe('243.3 ft');
     expect(rowValue(r, 'Rebar weight')).toBe('163 lb');
     expect(rowValue(r, '#4 sticks')).toMatch(/^\d+ × 20'$/);
@@ -453,7 +453,7 @@ describe('rebar in footings and walls', () => {
 
   test('a stem wall with verticals every 24"', () => {
     // 20 ft straight run: verticals over 240 − 6 = 234" at 24" → 10 spaces → 11 bars, each 4' − 3" = 3' 9"
-    const r = runTool(tool('footings'), { length: 20, width: { ft: '', in: '8' } as never, depth: 4, bars: true, vSpacing: 24 });
+    const r = runTool(tool('footings'), { shape: 'run', length: 20, width: { ft: '', in: '8' } as never, depth: 4, bars: true, vSpacing: 24 });
     expect(rowValue(r, 'Verticals')).toBe(`11 × 3' 9"`);
   });
 
@@ -463,5 +463,34 @@ describe('rebar in footings and walls', () => {
     expect(note(r, 'Horizontal bars')).toMatch(/^3 rows of #4, 24" apart/);
     expect(rowValue(r, 'Vertical bars')).toBe(`54 × 3' 9"`);
     expect(rowValue(r, 'Rebar weight')).toMatch(/ lb$/);
+  });
+});
+
+describe('Footings & Walls around a building', () => {
+  test('square / rectangle: 30 × 40 outside, 8" × 8 ft wall → 140 ft around, 137.33 ft along the middle', () => {
+    // 137.33 × 8/12 × 8 = 732.4 cu ft = 27.13 yd before waste
+    const r = runTool(tool('footings'), { shape: 'rect', bLength: 40, bWidth: 30, depth: 8, width: { ft: '', in: '8' } as never });
+    expect(rowValue(r, 'Around the outside')).toBe('140 ft');
+    expect(rowValue(r, 'Along the middle')).toBe('137.3 ft');
+    expect(rowValue(r, 'Before waste')).toBe('27.13 cu yd');
+  });
+
+  test('odd shape, wall by wall: an L with one inside corner', () => {
+    // 30 + 20 + 15 + 10 + 15 + 30... walls: outside 5 corners, inside 1 → middle = outside − 4 × t
+    const r = runTool(tool('footings'), {
+      shape: 'odd',
+      walls: [[30, 'oo'], [20, 'oo'], [15, 'oi'], [10, 'oi'], [15, 'oo'], [30, 'oo']],
+      depth: { ft: '', in: '10' } as never,
+      width: { ft: '', in: '20' } as never,
+    });
+    expect(rowValue(r, 'Around the outside')).toBe('120 ft');
+    // 120 − 4 × 20" = 113.33
+    expect(rowValue(r, 'Along the middle')).toBe('113.3 ft');
+  });
+
+  test('rebar around a rectangle gets its 4 corners on its own', () => {
+    const r = runTool(tool('footings'), { shape: 'rect', bLength: 40, bWidth: 30, depth: { ft: '', in: '10' } as never, width: { ft: '', in: '20' } as never, bars: true });
+    expect(rowValue(r, 'Bars along it')).toBeDefined();
+    if (r.status === 'ok') expect(r.result.rows.find((x) => x.label === 'Bars along it')!.note).toContain('8 corner L-bars');
   });
 });

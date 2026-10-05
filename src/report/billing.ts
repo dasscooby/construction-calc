@@ -85,7 +85,7 @@ export function suggestLines(items: FiguredItem[], s?: Settings, job?: Job): Omi
     } else if (tool.id === 'footings') {
       lines.push({
         desc: `${name}: ${inFnd(item.id) ? 'footings under the walls, ' : ''}dig, form and pour`,
-        qty: dec(ft(raw.length) * (Number(raw.qty) || 1), 1),
+        qty: dec(rows.some((r) => r.label === 'Along the middle') ? rowNum(rows, 'Along the middle') : ft(raw.length) * (Number(raw.qty) || 1), 1),
         unit: 'ft',
         price: price(p?.footingFt),
         src,

@@ -16,6 +16,7 @@ interface FieldBase {
   /** Clear leaves this box alone (things like what you own, not the job) */
   sticky?: boolean;
   /** Only shown (and only used) when these switches are on */
+  /** Show only when these switches are on ('footing'), or a choice is picked ('shape=rect') */
   showIf?: string[];
   /** Only shown when at least one of these switches is on */
   showIfAny?: string[];

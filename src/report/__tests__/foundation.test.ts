@@ -21,7 +21,7 @@ const basement: Job = {
   createdAt: 0,
   items: [
     item('w', 'wall-forms', raw('wall-forms', { walls: [30, 40, 30, 40].map((l) => ({ length: len(String(l)), ends: 'oo' })) as never, height1: len('4'), height2: len('4') })),
-    item('f', 'footings', raw('footings', { length: len('137', '4'), width: len('', '20'), depth: len('', '10') })),
+    item('f', 'footings', raw('footings', { shape: 'run', length: len('137', '4'), width: len('', '20'), depth: len('', '10') })),
     item('s', 'slab', raw('slab', { areas: [{ length: len('40'), width: len('30') }] as never })),
   ],
 };

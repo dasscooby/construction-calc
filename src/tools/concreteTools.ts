@@ -45,55 +45,103 @@ function steelRows(sticks: Map<number, number>, totalLb: number, stockFt: number
   ];
 }
 
+/** Footings & Walls measured around a building: outside length, the middle-of-the-wall run, and corners. */
+export function footingRun(inp: Inputs): { error?: string; outsideFt: number; centerFt: number; corners: number; ends: boolean } {
+  const t = inp.len('width');
+  const shape = inp.choice('shape');
+  if (shape === 'rect') {
+    const L = inp.len('bLength');
+    const W = inp.len('bWidth');
+    if (L <= 0 || W <= 0) return { error: 'Building length and width must be more than 0.', outsideFt: 0, centerFt: 0, corners: 0, ends: false };
+    if (2 * t >= Math.min(L, W)) return { error: 'The thickness is too much for that building.', outsideFt: 0, centerFt: 0, corners: 0, ends: false };
+    // Measured on the outside; the middle of the wall is a thickness shorter at each of the 4 corners.
+    return { outsideFt: 2 * (L + W), centerFt: 2 * (L + W) - 4 * t, corners: 4, ends: false };
+  }
+  if (shape === 'odd') {
+    const walls = inp.walls('walls');
+    if (!walls.length) return { error: 'Add the walls.', outsideFt: 0, centerFt: 0, corners: 0, ends: false };
+    const outsideFt = walls.reduce((s, w) => s + w.length, 0);
+    const oc = Math.ceil(walls.reduce((s, w) => s + (w.ends === 'oo' ? 2 : w.ends === 'oi' ? 1 : 0), 0) / 2);
+    const ic = Math.ceil(walls.reduce((s, w) => s + (w.ends === 'ii' ? 2 : w.ends === 'oi' ? 1 : 0), 0) / 2);
+    // Each outside corner takes a thickness off the middle-of-the-wall run, each inside corner adds one.
+    return { outsideFt, centerFt: outsideFt - (oc - ic) * t, corners: oc + ic, ends: false };
+  }
+  const run = inp.len('length') * inp.count('qty');
+  return { outsideFt: run, centerFt: run, corners: inp.has('corners') ? inp.count('corners') : 0, ends: true };
+}
+
 const footings: Tool = {
   id: 'footings',
   title: 'Footings & Walls',
-  blurb: 'Footings, pads, stem walls, with the rebar',
+  blurb: 'Around a building or a straight run, with the rebar',
   fields: [
-    { key: 'length', label: 'Length', kind: 'length' },
-    { key: 'width', label: 'Width (wall thickness)', kind: 'length' },
-    { key: 'depth', label: 'Depth (wall height)', kind: 'length' },
-    { key: 'qty', label: 'How many', kind: 'count', default: '1' },
+    {
+      key: 'shape',
+      label: 'Shape',
+      kind: 'choice',
+      options: [
+        { value: 'rect', label: 'Square / rectangle' },
+        { value: 'odd', label: 'Odd shape' },
+        { value: 'run', label: 'Straight run / pads' },
+      ],
+      default: 'rect',
+    },
+    { key: 'bLength', label: 'Building length', kind: 'length', help: 'Outside of the wall or footing', showIf: ['shape=rect'] },
+    { key: 'bWidth', label: 'Building width', kind: 'length', help: 'Outside of the wall or footing', showIf: ['shape=rect'] },
+    { key: 'walls', label: 'Walls', kind: 'walls', help: 'Measure on the outside. Go around one wall at a time.', showIf: ['shape=odd'] },
+    { key: 'length', label: 'Length', kind: 'length', showIf: ['shape=run'] },
+    { key: 'qty', label: 'How many', kind: 'count', default: '1', showIf: ['shape=run'] },
+    { key: 'depth', label: 'Height (depth)', kind: 'length', help: 'Wall height, or footing thickness' },
+    { key: 'width', label: 'Thickness (width)', kind: 'length', help: 'Wall thickness, or footing width' },
     { key: 'bars', label: 'Rebar', kind: 'toggle' },
     { key: 'lines', label: 'Bars along it', kind: 'count', default: '2', help: '2 #4 continuous = 2. More than 3 go half bottom, half top.', showIf: ['bars'] },
     barSizeChoice('barSize', 'Bar size', '4', ['bars']),
-    { key: 'corners', label: 'Corners', kind: 'count', optional: true, help: 'If it goes around a building: an L-bar at each corner for every bar', showIf: ['bars'] },
-    { key: 'vSpacing', label: 'Verticals every', kind: 'number', unit: 'in', optional: true, help: 'Stem walls: bars standing up. Blank = none.', showIf: ['bars'] },
+    { key: 'corners', label: 'Corners', kind: 'count', optional: true, help: 'An L-bar at each corner for every bar', showIf: ['bars', 'shape=run'] },
+    { key: 'vSpacing', label: 'Verticals every', kind: 'number', unit: 'in', optional: true, help: 'Walls: bars standing up. Blank = none.', showIf: ['bars'] },
     stickField(['bars']),
     lapField(['bars']),
     ...ORDER_FIELDS,
   ],
   compute: (inp) => {
-    const rows = concreteRows(boxCuFt(inp.len('length'), inp.len('width'), inp.len('depth')) * inp.count('qty'), inp);
+    const t = inp.len('width');
+    const h = inp.len('depth');
+    if (t <= 0 || h <= 0) return { error: 'Height and thickness must be more than 0.' };
+    const run = footingRun(inp);
+    if (run.error) return { error: run.error };
+    const rows: ResultRow[] = [];
+    if (!run.ends) {
+      rows.push({ label: 'Around the outside', value: `${commasTrim(run.outsideFt, 1)} ft` });
+      rows.push({ label: 'Along the middle', value: `${commasTrim(run.centerFt, 1)} ft`, note: `What the concrete and bars follow · ${run.corners} corners` });
+    }
+    rows.push(...concreteRows(run.centerFt * t * h, inp));
     if (!inp.on('bars')) return { rows };
+
     const bar = getBar(inp.choice('barSize'));
     const stockFt = Number(inp.choice('stockLength')) || 20;
     const lapFt = (inp.has('lap') ? inp.num('lap') : lapIn(bar)) / 12;
     const lines = inp.count('lines');
-    const runFt = inp.len('length') * inp.count('qty');
-    const depthFt = inp.len('depth');
     if (lines < 1) return { error: 'Enter at least 1 bar.' };
     if (2 * lapFt > stockFt) return { error: `A corner bar won’t fit in a ${stockFt}' stick.` };
-    const corners = inp.has('corners') ? inp.count('corners') : 0;
     // Around a building the bars run all the way round; a straight run stops 3" short of each end.
-    const r = beamBars(corners ? runFt : Math.max(0, runFt - 2 * COVER_FT), lines, bar, stockFt, lapFt, corners);
+    const barRun = run.ends && !run.corners ? Math.max(0, run.centerFt - 2 * COVER_FT) : run.centerFt;
+    const r = beamBars(barRun, lines, bar, stockFt, lapFt, run.corners);
     rows.push({
       label: 'Bars along it',
       value: `${commasTrim(r.totalFt, 1)} ft`,
-      note: `${lines} #${bar.size} · ${commas(r.laps)} laps${corners ? ` · ${commas(r.cornerBars)} corner L-bars ${ftIn(r.cornerBarFt)}` : ''}`,
+      note: `${lines} #${bar.size} · ${commas(r.laps)} laps${run.corners ? ` · ${commas(r.cornerBars)} corner L-bars ${ftIn(r.cornerBarFt)}` : ''}`,
     });
     let sticks = r.sticks;
     let totalLb = r.lb;
     if (inp.has('vSpacing')) {
       const s = inp.num('vSpacing');
       if (s <= 0) return { error: 'Verticals spacing must be more than 0.' };
-      const len = depthFt - COVER_FT;
-      if (len <= 0) return { error: 'The wall is too short for verticals.' };
+      const len = h - COVER_FT;
+      if (len <= 0) return { error: 'It’s too short for verticals.' };
       if (len > stockFt) return { error: `A vertical won’t fit in a ${stockFt}' stick.` };
-      const count = countAlong(Math.max(0, runFt * 12 - 6), s);
+      const count = countAlong(Math.max(0, run.centerFt * 12 - (run.ends ? 6 : 0)), s) + (run.ends ? 0 : run.corners);
       sticks += sticksToCut([{ lengthFt: len, count }], stockFt);
       totalLb += weightLb(bar, count * len);
-      rows.push({ label: 'Verticals', value: `${commas(count)} × ${ftIn(len)}`, note: `#${bar.size} every ${dec(s)}", 3" from the top` });
+      rows.push({ label: 'Verticals', value: `${commas(count)} × ${ftIn(len)}`, note: `#${bar.size} every ${dec(s)}", 3" from the top${run.ends ? '' : ', one at each corner'}` });
     }
     rows.push(...steelRows(new Map([[bar.size, sticks]]), totalLb, stockFt));
     return { rows };

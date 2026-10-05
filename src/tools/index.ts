@@ -23,6 +23,7 @@ export const ALL_TOOLS = [...CONCRETE_TOOLS, ...REBAR_TOOLS, ...SITE_TOOLS, ...L
  * "Exterior footing" (and "Interior footings") switches on.
  */
 export function migrateItem(toolId: string, raw: Record<string, unknown>): { toolId: string; raw: Record<string, unknown> } {
+  if (toolId === 'footings' && raw && typeof raw === 'object' && raw.shape === undefined) return { toolId, raw: { ...raw, shape: 'run' } };
   if (toolId !== 'slab-beams') return { toolId, raw };
   const str = (v: unknown) => (typeof v === 'string' ? v : '');
   const interior = str(raw.interior).trim();

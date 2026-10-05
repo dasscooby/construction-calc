@@ -359,7 +359,7 @@ export function planItems(r: PlanRead): PlanItem[] {
     items.push({ key: `wall${i}`, label: w.name || 'Foundation walls', summary, toolId: 'wall-forms', title: 'Wall Forms', raw });
   });
   (r.footings ?? []).forEach((f, i) => {
-    const raw: RawValues = { ...toolRaw('footings'), length: len(f.length_ft), width: inches(f.width_in), depth: inches(f.depth_in), qty: '1' };
+    const raw: RawValues = { ...toolRaw('footings'), shape: 'run', length: len(f.length_ft), width: inches(f.width_in), depth: inches(f.depth_in), qty: '1' };
     items.push({
       key: `foot${i}`,
       label: f.name || 'Footings',
