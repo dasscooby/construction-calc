@@ -65,9 +65,34 @@ export function figureItems(job: Job): FiguredItem[] {
   return out;
 }
 
+/**
+ * The job's items as they're really built. Once you've said the walls, footings and slab go together,
+ * a one-piece Slab measured to the house size is refigured at the inside of the walls (L − 2 × wall,
+ * W − 2 × wall), so its concrete AND its rebar are what goes inside. Other slab shapes keep their
+ * numbers and only the concrete order is brought down to the inside.
+ */
+export function builtItems(items: FiguredItem[], job?: Job): { items: FiguredItem[]; slabInside: boolean } {
+  const f = confirmedFoundation(items, job);
+  if (!f?.slab || !f.slabAtOutside || f.slab.tool.id !== 'slab') return { items, slabInside: false };
+  const raw = f.slab.item.raw;
+  const areas = (raw.areas as RawArea[]) ?? [];
+  const filled = areas.filter((a) => parseLength(a.length) !== null);
+  if (filled.length !== 1) return { items, slabInside: false };
+  const L = (parseLength(filled[0].length) ?? 0) - 2 * f.thickFt;
+  const W = (parseLength(filled[0].width) ?? 0) - 2 * f.thickFt;
+  if (!(L > 0 && W > 0)) return { items, slabInside: false };
+  const toRaw = (ft: number) => ({ ft: String(Math.floor(ft + 1e-9)), in: String(Math.round((ft - Math.floor(ft + 1e-9)) * 12 * 16) / 16) });
+  const insideRaw = { ...raw, areas: [{ length: toRaw(L), width: toRaw(W) }] };
+  const slab = f.slab;
+  const refigured: FiguredItem = { ...slab, result: runTool(slab.tool, insideRaw) };
+  return { items: items.map((x) => (x.item.id === slab.item.id ? refigured : x)), slabInside: true };
+}
+
 /** Adds up the order across everything in the job. */
 export function jobTotals(items: FiguredItem[], job?: Job): Totals {
-  const t = rawTotals(items);
+  const built = builtItems(items, job);
+  const t = rawTotals(built.items);
+  if (built.slabInside) return t;
   // A slab measured to the outside of basement or stem walls is poured inside them: order for the inside
   // (once you've said they go together).
   const f = confirmedFoundation(items, job);
@@ -485,6 +510,74 @@ export function foundationDrawings(job: Job, items: FiguredItem[], company = '')
 
 const n2 = (v: number) => String(Math.round(v * 10) / 10);
 
+/** A piece's name on the bill and crew sheet: "Basement walls", "Basement footings", or its own name. */
+export function pieceName(f: FiguredItem, items: FiguredItem[], job?: Job): string {
+  const fnd = confirmedFoundation(items, job);
+  if (fnd) {
+    if (fnd.walls.some((x) => x.item.id === f.item.id)) return `${fnd.kind} walls`;
+    if (fnd.footings.some((x) => x.item.id === f.item.id)) return `${fnd.kind} footings`;
+    if (fnd.footingBars.some((x) => x.item.id === f.item.id)) return `${fnd.kind} footing bars`;
+    if (fnd.slab?.item.id === f.item.id) return `${fnd.kind} slab`;
+  }
+  return f.item.label || f.tool.title;
+}
+
+/** Rows that are rebar, by what tools call them. */
+const REBAR_ROWS = new Set([
+  'Slab bars',
+  'Edge bar',
+  'Edge L-bars',
+  'Footing bars',
+  'Bars along it',
+  'Verticals',
+  'Horizontal bars',
+  'Vertical bars',
+  'Dowels',
+  'Bars long way',
+  'Bars short way',
+  'Bars both ways',
+  'Number of laps',
+  'Stirrups',
+  'Ties',
+  'Corner bars',
+]);
+const REBAR_TOOLS = ['slab-rebar', 'beam-bars', 'stirrups', 'cut-list', 'dowels'];
+
+/** Steel this job counts for an item (a Slab Layout sent to a cut list is counted on the cut list). */
+export function steelItems(items: FiguredItem[]): FiguredItem[] {
+  const cutFromLayout = items.some((f) => f.tool.id === 'cut-list' && f.item.raw.from === 'slab-layout' && f.result.status === 'ok');
+  return items.filter((f) => f.result.status === 'ok' && !(cutFromLayout && f.tool.id === 'slab-layout'));
+}
+
+/** Pounds of rebar in one item, the way the job totals count it. */
+export function itemRebarLb(f: FiguredItem): number {
+  if (f.result.status !== 'ok') return 0;
+  const rows = f.result.result.rows;
+  const w = rows.find((r) => r.label === 'Rebar weight') ?? rows.find((r) => r.label === 'Weight' && / lb$/.test(r.value));
+  return w ? numberIn(w.value) : 0;
+}
+
+export interface RebarLine {
+  where: string;
+  what: string;
+  amount: string;
+  note?: string;
+}
+
+/** Every bar in the job, piece by piece, for the crew. */
+export function rebarSchedule(items: FiguredItem[], job?: Job): RebarLine[] {
+  const out: RebarLine[] = [];
+  for (const f of steelItems(builtItems(items, job).items)) {
+    if (f.result.status !== 'ok' || (!itemRebarLb(f) && !f.result.result.rows.some((r) => r.label === 'Dowels'))) continue;
+    const where = pieceName(f, items, job);
+    for (const r of f.result.result.rows) {
+      const isRebar = REBAR_ROWS.has(r.label) || (REBAR_TOOLS.includes(f.tool.id) && !/sticks|Weight|Sticks to order|Lap$|Total footage|Chairs/.test(r.label));
+      if (isRebar && r.label !== 'Ties') out.push({ where, what: r.label.trim(), amount: r.value, note: r.note });
+    }
+  }
+  return out;
+}
+
 /** The plan and 3D view: from Wall Forms walls if the job has them, else from a one-piece slab. */
 export function jobDrawings(job: Job, items: FiguredItem[], company = ''): Drawings | null {
   const together = foundationDrawings(job, items, company);
@@ -554,6 +647,11 @@ export function buildReport(job: Job, s: Settings, opts: { now?: Date; crew?: bo
   );
   const totals = jobTotals(items, job);
   const foundation = confirmedFoundation(items, job);
+  const schedule = rebarSchedule(items, job);
+  const steelTotals: [string, string][] = [
+    ...[...totals.sticks].map(([k, v]): [string, string] => [`${k} to load`, commas(v)]),
+    ...(totals.rebarLb ? [['Rebar weight', `${commas(totals.rebarLb)} lb (${dec(totals.rebarLb / 2000, 2)} tons)`] as [string, string]] : []),
+  ];
   const company = companyLine(s);
   const drawings = jobDrawings(job, items, s.company.name);
   const sum = totalsRows(totals).filter(priced);
@@ -597,6 +695,8 @@ export function buildReport(job: Job, s: Settings, opts: { now?: Date; crew?: bo
   .draw { border: 1px solid #ccc; border-radius: 10px; overflow: hidden; margin-bottom: 12px; break-inside: avoid; }
   .notes { white-space: pre-wrap; font-size: 14px; }
   .fnd { margin: 0; padding-left: 18px; font-size: 14px; line-height: 1.5; }
+  table.rebar th { text-align: left; font-size: 12px; text-transform: uppercase; letter-spacing: .05em; color: #555; border-bottom: 2px solid #111; padding: 6px 4px; }
+  table.rebar tr.tot td { font-weight: 700; border-top: 2px solid #111; }
   .kind { font-size: 12px; font-weight: 800; letter-spacing: .12em; color: #b25c00; margin-bottom: 2px; }
   .scan { break-before: page; }
   .scan img { width: 100%; border: 1px solid #ccc; }
@@ -609,6 +709,9 @@ ${docCss(s.docs)}
 ${company || opts.logo ? `<div class="co">${logoHtml(opts.logo)}${esc(company).replace(/ · /g, '<br>')}</div>` : ''}</div>
 ${crew ? notesHtml : ''}
 ${sum.length ? `<h2>${crew ? 'Load list' : 'Order summary'}</h2><table class="sum">${sum.map((r) => `<tr><td>${esc(r.label)}</td><td class="v">${esc(r.value)}</td></tr>`).join('')}</table>` : ''}
+${schedule.length ? `<h2>Rebar schedule</h2><table class="rebar"><tr><th>Where</th><th>Bars</th><th class="v">How many / long</th></tr>${schedule
+      .map((r) => `<tr><td>${esc(r.where)}</td><td>${esc(r.what)}${r.note ? `<div class="note">${esc(r.note)}</div>` : ''}</td><td class="v">${esc(r.amount)}</td></tr>`)
+      .join('')}${steelTotals.map(([k, v]) => `<tr class="tot"><td colspan="2">${esc(k)}</td><td class="v">${esc(v)}</td></tr>`).join('')}</table>` : ''}
 ${drawings?.plan ? `<h2>${foundation ? 'Foundation plan' : 'Plan'}</h2><div class="draw">${drawings.plan}</div>` : ''}${drawings?.iso ? `<h2>3D view</h2><div class="draw">${drawings.iso}</div>` : ''}
 ${drawings?.section ? `<h2>${foundation ? 'Typical section' : 'Edge detail'}</h2><div class="draw">${drawings.section}</div>` : ''}
 ${drawings?.house ? `<h2>At the house</h2><div class="draw">${drawings.house}</div>` : ''}
@@ -627,6 +730,7 @@ ${noticeHtml('crew', s.docs)}
     date,
     '',
     ...(crew && job.notes ? ['NOTES', job.notes, ''] : []),
+    ...(schedule.length ? ['REBAR', ...schedule.map((r) => `${r.where} · ${r.what}: ${r.amount}`), ''] : []),
     ...(sum.length ? [crew ? 'LOAD LIST' : 'ORDER SUMMARY', ...sum.map((r) => `${r.label}: ${r.value}`), ''] : []),
     ...items.flatMap(({ item, tool, result }) => [
       `— ${item.label || tool.title}`,

@@ -93,3 +93,55 @@ test('your job: 70 × 70 stem wall (Footings & Walls), footing at the house size
   // Inside the 8" walls: 68.667 × 68.667 = 4,715.1 sq ft (not 4,900)
   expect(Math.round(f.insideArea * 10) / 10).toBe(4715.1);
 });
+
+describe('bill and crew sheet for the 70 × 70 stem wall', () => {
+  const { buildBill } = require('../billing') as typeof import('../billing');
+  const { buildReport } = require('../report') as typeof import('../report');
+  const stem: Job = {
+    id: 'j',
+    name: 'Stem wall',
+    address: '',
+    notes: '',
+    createdAt: 0,
+    items: [
+      item('w', 'footings', raw('footings', { kind: 'wall', shape: 'rect', bLength: len('70'), bWidth: len('70'), depth: len('2'), width: len('', '8'), bars: '1', lines: '2', vSpacing: '24' })),
+      item('f', 'footings', raw('footings', { kind: 'footing', shape: 'rect', bLength: len('70'), bWidth: len('70'), wallOn: '8', depth: len('', '10'), width: len('', '20'), bars: '1', lines: '2' })),
+      item('s', 'slab', raw('slab', { areas: [{ length: len('70'), width: len('70') }] as never, slabRebar: '1' })),
+    ],
+    together: { ids: ['w', 'f', 's'], slabDropIn: '8' },
+  };
+  const s = { ...DEFAULT_SETTINGS, prices: { ...DEFAULT_SETTINGS.prices, wallFt: '30', footingFt: '22', rebarLb: '1.1' } };
+
+  test('every piece is on the bill: walls as walls, footings, slab, concrete, and rebar for each', () => {
+    const lines = suggestLines(figureItems(stem), s, stem);
+    const desc = lines.map((l) => l.desc);
+    expect(lines[0]).toMatchObject({ desc: `Stem wall and slab: form and pour 8" × 2' 0" walls`, qty: '280', unit: 'ft', price: '30' });
+    expect(lines[1]).toMatchObject({ desc: 'Stem wall and slab: footings under the walls, dig, form and pour', qty: '277.3', price: '22' });
+    expect(desc).toContain('Stem wall and slab walls: rebar, cut, bent and tied');
+    expect(desc).toContain('Stem wall and slab footings: rebar, cut, bent and tied');
+    expect(desc).toContain('Stem wall and slab slab: rebar, cut, bent and tied');
+    expect(lines.filter((l) => l.unit === 'lb').every((l) => Number(l.qty) > 0 && l.price === '1.1')).toBe(true);
+    const bill = buildBill({ ...stem, lines: lines.map((l, i) => ({ ...l, id: String(i) })) }, s, figureItems(stem)).html;
+    expect(bill).toContain('rebar, cut, bent and tied');
+  });
+
+  test('the crew sheet has the rebar schedule: verticals, bars along the walls and footings, slab bars, sticks to load', () => {
+    const r = buildReport(stem, s, { crew: true });
+    expect(r.html).toContain('Rebar schedule');
+    expect(r.html).toContain('Stem wall and slab walls');
+    expect(r.html).toContain('Verticals');
+    expect(r.html).toContain('Bars along it');
+    expect(r.html).toContain('Slab bars');
+    expect(r.html).toMatch(/#4 20' sticks to load/);
+    expect(r.text).toContain('REBAR');
+  });
+
+  test(`the slab steel is figured inside the walls (68' 8" × 68' 8"), not at the house size`, () => {
+    const { rebarSchedule } = require('../report') as typeof import('../report');
+    const slabRow = (job: Job) => rebarSchedule(figureItems(job), job).find((r) => r.what === 'Slab bars')!;
+    const inside = Number(slabRow(stem).amount.replace(/[^\d.]/g, ''));
+    const house = Number(slabRow({ ...stem, together: undefined }).amount.replace(/[^\d.]/g, ''));
+    expect(inside).toBeLessThan(house);
+    expect(slabRow(stem).note).toContain("sized for a 68' 8\" long");
+  });
+});

@@ -7,7 +7,7 @@ import { commas, dec, ftIn, money } from '../tools/format';
 import { parseLength, parseNumber, RawLength, RawWallRow } from '../tools/run';
 import { DocMedia, docCss, logoHtml, noticeHtml } from './docStyle';
 import { confirmedFoundation } from './foundation';
-import { FiguredItem, jobDrawings, jobTotals, numberIn } from './report';
+import { builtItems, FiguredItem, itemRebarLb, jobDrawings, jobTotals, numberIn, pieceName, steelItems } from './report';
 
 const esc = (s: string) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 const num = (v: string | undefined) => {
@@ -82,6 +82,10 @@ export function suggestLines(items: FiguredItem[], s?: Settings, job?: Job): Omi
     else if (tool.id === 'wall-forms') {
       const total = ((raw.walls as RawWallRow[]) ?? []).reduce((a, w) => a + ft(w.length), 0);
       lines.push({ desc: `${name}: form and pour ${inFnd(item.id) ? `${wallText} ` : ''}walls`, qty: dec(total, 1), unit: 'ft', price: price(p?.wallFt), src });
+    } else if (tool.id === 'footings' && raw.kind === 'wall') {
+      // Walls entered in Footings & Walls: billed like Wall Forms, by the foot around the outside.
+      const around = rows.some((r) => r.label === 'House, around the outside') ? rowNum(rows, 'House, around the outside') : ft(raw.length) * (Number(raw.qty) || 1);
+      lines.push({ desc: `${name}: form and pour ${inFnd(item.id) ? `${wallText} ` : ''}walls`, qty: dec(around, 1), unit: 'ft', price: price(p?.wallFt), src });
     } else if (tool.id === 'footings') {
       lines.push({
         desc: `${name}: ${inFnd(item.id) ? 'footings under the walls, ' : ''}dig, form and pour`,
@@ -114,7 +118,11 @@ export function suggestLines(items: FiguredItem[], s?: Settings, job?: Job): Omi
     const perYd = t.concreteCost ? dec(t.concreteCost / t.concreteOrderYd, 2) : price(s?.defaults.price);
     lines.push({ desc: 'Concrete', qty: dec(t.concreteOrderYd, 2), unit: 'yd', price: perYd, src: 'concrete' });
   }
-  if (t.rebarLb) lines.push({ desc: 'Rebar, cut, bent and tied', qty: String(Math.round(t.rebarLb)), unit: 'lb', price: price(p?.rebarLb), src: 'rebar' });
+  // Rebar, a line for each piece that has it (footings, walls, slab, cut lists ...).
+  for (const f of steelItems(builtItems(items, job).items)) {
+    const lb = itemRebarLb(f);
+    if (lb > 0) lines.push({ desc: `${pieceName(f, items, job)}: rebar, cut, bent and tied`, qty: String(Math.round(lb)), unit: 'lb', price: price(p?.rebarLb), src: `item:${f.item.id}:rebar` });
+  }
   if (job?.order?.place === 'pump') lines.push({ desc: 'Pump truck', qty: '1', unit: 'pour', price: price(p?.pumpPour), src: 'pump' });
   lines.push({ desc: 'Labor', qty: '1', unit: 'job', price: price(p?.laborJob), src: 'labor' });
   return lines;

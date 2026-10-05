@@ -125,7 +125,7 @@ test('bid and bill: lines, tax, deposit, balance', () => {
 test('fill in from job: slab area, concrete at the job price, rebar, forms, labor', () => {
   const lines = suggestLines(figureItems(job));
   // Walls: 70 + 29.5 + 74 + 4 + 4 + 25.5 = 207 ft
-  expect(lines.map((l) => l.desc)).toEqual(['Foundation walls: form and pour walls', 'Slab: form, pour and finish', 'Concrete', 'Rebar, cut, bent and tied', 'Labor']);
+  expect(lines.map((l) => l.desc)).toEqual(['Foundation walls: form and pour walls', 'Slab: form, pour and finish', 'Concrete', 'Slab Rebar: rebar, cut, bent and tied', 'Labor']);
   expect(lines[0]).toMatchObject({ qty: '207', unit: 'ft' });
   expect(lines[2]).toMatchObject({ qty: '28.25', unit: 'yd', price: '150' });
 });
