@@ -1,7 +1,7 @@
 // The order block every concrete tool ends with: waste, order (rounded up to 1/4 yd), trucks, cost, bags.
 
 import { concreteResult, truckLoads } from '../lib/concrete';
-import { commas, commasTrim, dec, money } from './format';
+import { commas, commasTrim, dec, ftIn, money } from './format';
 import { Field, Inputs, ResultRow } from './types';
 
 export const CUFT_PER_CUYD = 27;
@@ -13,6 +13,18 @@ export const ORDER_FIELDS: Field[] = [
   { key: 'truck', label: 'Truck size', kind: 'number', unit: 'yd', default: '10', optional: true },
   { key: 'price', label: 'Price per yard', kind: 'number', unit: '$/yd', optional: true },
 ];
+
+/**
+ * A yellow "check this" when a size is far bigger than it should be, the usual slip being
+ * inches typed in the feet box (a 4" slab entered as 4 ft). Nothing is changed, only flagged.
+ */
+export function tooBig(label: string, ft: number, maxFt: number): string | null {
+  if (!(ft > maxFt)) return null;
+  const whole = Math.abs(ft - Math.round(ft)) < 1e-9 && ft <= 48;
+  return whole
+    ? `${label} is ${ft} feet. Did you mean ${ft} inches? Inches go in the “in” box.`
+    : `${label} is ${ftIn(ft)}. That’s bigger than usual. Check the number.`;
+}
 
 /** The standard answer block: yards with waste, order amount, trucks, bags, and the before-waste number. */
 export function concreteRows(baseCuFt: number, inp: Inputs, bags = true): ResultRow[] {

@@ -16,7 +16,7 @@ import { Field, Inputs, ResultRow, Tool, WallRow } from './types';
 import { cornersAfter } from '../report/geometry';
 import { addonLayout } from './addon';
 
-import { concreteRows, CUFT_PER_CUYD, ORDER_FIELDS } from './concreteShared';
+import { concreteRows, CUFT_PER_CUYD, ORDER_FIELDS, tooBig } from './concreteShared';
 import { slabLayout } from './slabLayoutTool';
 import { slab } from './slabTool';
 
@@ -178,6 +178,13 @@ const footings: Tool = {
     if (t <= 0 || h <= 0) return { error: 'Height and thickness must be more than 0.' };
     const run = footingRun(inp);
     if (run.error) return { error: run.error };
+    const isFooting = inp.choice('kind') === 'footing';
+    const warnings = [
+      tooBig(isFooting ? 'Footing width' : 'Wall thickness', t, 4),
+      tooBig(isFooting ? 'Footing thickness' : 'Wall height', h, isFooting ? 4 : 20),
+      inp.choice('shape') === 'rect' ? tooBig('House length', inp.len('bLength'), 400) : null,
+      inp.choice('shape') === 'rect' ? tooBig('House width', inp.len('bWidth'), 400) : null,
+    ].filter((w): w is string => !!w);
     const rows: ResultRow[] = [];
     if (run.addon) {
       rows.push({ label: 'As measured', value: `${commasTrim(run.outsideFt, 1)} ft`, note: run.addon });
@@ -195,7 +202,7 @@ const footings: Tool = {
       });
     }
     rows.push(...concreteRows(run.centerFt * t * h, inp));
-    if (!inp.on('bars')) return { rows };
+    if (!inp.on('bars')) return { rows, warnings };
 
     const bar = getBar(inp.choice('barSize'));
     const stockFt = Number(inp.choice('stockLength')) || 20;
@@ -226,7 +233,7 @@ const footings: Tool = {
       rows.push({ label: 'Verticals', value: `${commas(count)} × ${ftIn(len)}`, note: `#${bar.size} every ${dec(s)}", 3" from the top${run.ends ? '' : ', one at each corner'}` });
     }
     rows.push(...steelRows(new Map([[bar.size, sticks]]), totalLb, stockFt));
-    return { rows };
+    return { rows, warnings };
   },
 };
 
@@ -276,7 +283,8 @@ const piers: Tool = {
       each = columnCuFt(d, h, 1);
     }
     rows.push({ label: 'Each pier', value: `${dec(each, 2)} cu ft`, note: cuYd(each / CUFT_PER_CUYD) });
-    return { rows: [...rows, ...concreteRows(each * qty, inp)] };
+    const warnings = [tooBig('Diameter', d, 6), tooBig('Depth', h, 100)].filter((w): w is string => !!w);
+    return { rows: [...rows, ...concreteRows(each * qty, inp)], warnings };
   },
   notes: ['Drilled holes are rarely perfect. Many crews use more waste on piers.'],
 };
@@ -299,7 +307,8 @@ const steps: Tool = {
     if (inp.len('rise') <= 0 || inp.len('run') <= 0 || inp.len('width') <= 0) return { error: 'Rise, run and width must be more than 0.' };
     const stairs = stepsCuFt(n, inp.len('rise'), inp.len('run'), inp.len('width'));
     const landing = inp.len('landing') * inp.len('width') * n * inp.len('rise');
-    return { rows: concreteRows(stairs + landing, inp) };
+    const warnings = [tooBig('Rise', inp.len('rise'), 1), tooBig('Run', inp.len('run'), 4)].filter((w): w is string => !!w);
+    return { rows: concreteRows(stairs + landing, inp), warnings };
   },
 };
 

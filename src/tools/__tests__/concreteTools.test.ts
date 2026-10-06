@@ -547,3 +547,29 @@ describe('a 0 typed in a size box gets a note, not 0 yards', () => {
     expect(rowValue(runTool(tool('footings'), { ...run, length: 40 }), 'Before waste')).toBe('2.06 cu yd');
   });
 });
+
+describe('inches typed in the feet box get a yellow check, numbers unchanged', () => {
+  const warns = (r: ReturnType<typeof runTool>) => (r.status === 'ok' ? r.result.warnings ?? [] : []);
+  test('a 4 ft slab asks if you meant 4 inches; the answer still uses what was typed', () => {
+    const r = runTool(tool('slab'), { areas: [[10, 10]], thick: 4 });
+    expect(warns(r)).toContain('Thickness is 4 feet. Did you mean 4 inches? Inches go in the “in” box.');
+    expect(rowValue(r, 'Before waste')).toBe('14.81 cu yd'); // 10 × 10 × 4 = 400 cu ft
+    expect(warns(runTool(tool('slab'), { areas: [[10, 10]] }))).toEqual([]);
+  });
+  test('a 700 ft slab side is flagged', () => {
+    expect(warns(runTool(tool('slab'), { areas: [[700, 30]] }))[0]).toMatch(/^Slab side is 700' 0"\. That’s bigger than usual/);
+  });
+  test('a 20 ft wide, 10 ft thick footing', () => {
+    const r = runTool(tool('footings'), { shape: 'run', length: 40, width: 20, depth: 10 });
+    expect(warns(r)).toEqual([
+      'Footing width is 20 feet. Did you mean 20 inches? Inches go in the “in” box.',
+      'Footing thickness is 10 feet. Did you mean 10 inches? Inches go in the “in” box.',
+    ]);
+    // An 8 ft wall is normal.
+    expect(warns(runTool(tool('footings'), { kind: 'wall', shape: 'run', length: 40, width: { ft: '', in: '8' }, depth: 8 }))).toEqual([]);
+  });
+  test('a 12 ft pier and a 7 ft rise', () => {
+    expect(warns(runTool(tool('piers'), { size: 12, height: 8 }))[0]).toMatch(/^Diameter is 12 feet\. Did you mean 12 inches\?/);
+    expect(warns(runTool(tool('steps'), { steps: 3, rise: 7, run: { ft: '', in: '11' }, width: 4 }))[0]).toMatch(/^Rise is 7 feet/);
+  });
+});

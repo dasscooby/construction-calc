@@ -9,7 +9,7 @@
 
 import { beamBars, Bar, BARS, countAlong, getBar, lapIn, LB_PER_TON, planRun, slabBarsAdvice, sticksToCut, weightLb } from '../lib/rebar';
 import { buildLayout, insetRuns } from '../report/layoutGeom';
-import { concreteRows, CUFT_PER_CUYD, ORDER_FIELDS } from './concreteShared';
+import { concreteRows, CUFT_PER_CUYD, ORDER_FIELDS, tooBig } from './concreteShared';
 import { commas, commasTrim, cuYd, dec, ftIn, inches, lb, sqFt, tons } from './format';
 import { ChoiceField, ResultRow, Tool } from './types';
 
@@ -194,6 +194,9 @@ export const slab: Tool = {
     const area = rects.reduce((sum, r) => sum + r.length * r.width, 0) - rounded.reduce((a, r) => a + r * r * (1 - Math.PI / 4), 0);
     const rows: ResultRow[] = [{ label: 'Slab area', value: sqFt(area) }];
     const warnings: string[] = [];
+    const big = (w: string | null) => w && warnings.push(w);
+    big(tooBig('Thickness', t, 1));
+    for (const r of rects) big(tooBig(rects.length > 1 ? `Area ${rects.indexOf(r) + 1} side` : 'Slab side', Math.max(r.length, r.width), 400));
     const slabCuFt = area * t;
     let totalCuFt = slabCuFt;
     if (rounded.length) {
@@ -239,6 +242,8 @@ export const slab: Tool = {
       w = inp.len('fWidth');
       d = inp.len('fDepth');
       if (w <= 0 || d <= 0) return { error: 'Footing width and depth must be more than 0.' };
+      big(tooBig('Footing width', w, 4));
+      big(tooBig('Footing depth', d, 6));
       if (d <= t) warnings.push('The footing isn’t deeper than the slab. Measure footing depth from the top of the slab.');
       if (rounded.some((r) => r < w - 1e-9)) return { error: 'Make the corner radius at least the footing width so the footing can follow the curve.' };
       // Footing along its centerline, for a footing this wide.
