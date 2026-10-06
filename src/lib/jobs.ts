@@ -1,8 +1,10 @@
 // Jobs: a name, an address, and the calculations added to it (slab, rebar, wall forms ...).
 // Each item keeps the numbers typed in, so the report always figures them fresh.
 
-import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useSyncExternalStore } from 'react';
+
+import { mergeBackup, MergeResult } from './backup';
+import { readSavedList, saver } from './savedList';
 
 import type { RawLength, RawValues } from '../tools/run';
 import type { PlanRead } from './planReader';
@@ -24,6 +26,8 @@ export interface JobItem {
   label: string;
   raw: RawValues;
   at: number;
+  /** Hidden and left out of totals: the foundation layout (this item id) took its place. Restorable. */
+  replacedBy?: string;
 }
 
 /** A pour in progress: trucks counted in as they arrive. */
@@ -136,23 +140,28 @@ let jobs: Job[] = [];
 let loaded = false;
 const listeners = new Set<() => void>();
 
+const store = saver(SAVE_KEY);
+
 function set(next: Job[]) {
   jobs = next;
   listeners.forEach((l) => l());
-  AsyncStorage.setItem(SAVE_KEY, JSON.stringify(jobs)).catch(() => {});
+  store.save(jobs);
 }
+
+/** A saved job with every list it needs (a partial or older one can't crash the screens). */
+const tidy = (s: Job): Job => ({ ...s, name: s.name ?? 'Job', address: s.address ?? '', notes: s.notes ?? '', items: Array.isArray(s.items) ? s.items.filter((it) => it && typeof it === 'object') : [] });
 
 function load() {
   if (loaded) return;
   loaded = true;
-  AsyncStorage.getItem(SAVE_KEY)
-    .then((text) => {
-      const saved = text ? (JSON.parse(text) as Job[]) : [];
-      if (!Array.isArray(saved)) return;
-      jobs = [...jobs, ...saved.filter((s) => s?.id && !jobs.some((j) => j.id === s.id))];
+  readSavedList(SAVE_KEY).then((saved) => {
+    if (saved) {
+      const keep = (saved as Job[]).filter((s) => s && typeof s === 'object' && s.id && !jobs.some((j) => j.id === s.id)).map(tidy);
+      jobs = [...jobs, ...keep];
       listeners.forEach((l) => l());
-    })
-    .catch(() => {});
+    }
+    store.loaded(saved ? jobs : null);
+  });
 }
 
 const update = (id: string, fn: (j: Job) => Job) => set(jobs.map((j) => (j.id === id ? { ...fn(j), touchedAt: Date.now() } : j)));
@@ -178,10 +187,46 @@ export const jobStore = {
   editItem(jobId: string, itemId: string, patch: Partial<Pick<JobItem, 'label' | 'raw' | 'toolId' | 'title'>>) {
     update(jobId, (j) => ({ ...j, items: j.items.map((it) => (it.id === itemId ? { ...it, ...patch } : it)) }));
   },
+  /**
+   * Saves the job's foundation layout (one item), making it if there isn't one. Items in `replace` are
+   * hidden and left out of totals (never deleted) because the layout takes their place. Returns its id.
+   */
+  saveLayout(jobId: string, raw: RawValues, replace: string[] = []): string {
+    load();
+    const job = jobs.find((j) => j.id === jobId);
+    const have = job?.items.find((it) => it.toolId === 'foundation-layout');
+    const id = have?.id ?? newId();
+    update(jobId, (j) => {
+      const items = j.items.map((it) => (replace.includes(it.id) ? { ...it, replacedBy: id } : it));
+      return {
+        ...j,
+        items: have ? items.map((it) => (it.id === id ? { ...it, raw } : it)) : [...items, { id, toolId: 'foundation-layout', title: 'Foundation layout', label: '', raw, at: Date.now() }],
+        // The layout is the foundation now: no "they go together" check.
+        together: undefined,
+      };
+    });
+    return id;
+  },
+  /** Puts the jobs from a backup next to these. A job already here is never changed. */
+  restoreBackup(text: string): MergeResult {
+    load();
+    const r = mergeBackup(jobs, text);
+    if (!r.problem && (r.added || r.copies)) set(r.jobs);
+    return r;
+  },
+  /** Takes the layout out and brings back what it replaced. */
+  removeLayout(jobId: string) {
+    update(jobId, (j) => {
+      const layout = j.items.find((it) => it.toolId === 'foundation-layout');
+      if (!layout) return j;
+      return { ...j, items: j.items.filter((it) => it.id !== layout.id).map((it) => (it.replacedBy === layout.id ? { ...it, replacedBy: undefined } : it)) };
+    });
+  },
   removeItem(jobId: string, itemId: string) {
     update(jobId, (j) => ({ ...j, items: j.items.filter((it) => it.id !== itemId) }));
   },
   startPour(jobId: string, totalYd: number, truckYd: number) {
+    if (!(truckYd > 0)) truckYd = 10;
     const trucks = Math.max(1, Math.ceil(totalYd / truckYd - 1e-9));
     update(jobId, (j) => ({ ...j, pour: { startedAt: Date.now(), trucksIn: 0, trucks, totalYd, truckYd, done: false } }));
   },

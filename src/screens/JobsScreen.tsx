@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Image, Platform, Pressable, ScrollView, Share, Text, TextInput, View } from 'react-native';
 
+import { liveUri } from '../lib/docPath';
 import { feel } from '../lib/feel';
 import { dayLabel, timeLabel } from '../lib/history';
 import { Job, JobItem, jobStore, PriceLine, useJobs, yardsIn } from '../lib/jobs';
@@ -19,7 +20,12 @@ import SignaturePad from './SignaturePad';
 import { orderText, PLACE_TEXT, sendOrder } from '../lib/order';
 import { dayName, fetchForecast, pourWarnings } from '../lib/weather';
 import type { ConcreteOrder } from '../lib/jobs';
-import { buildReport, figureItems, FiguredItem, foundationDrawings, jobTotals } from '../report/report';
+import { buildReport, figureItems, FiguredItem, foundationDrawings, jobTotals, layoutItemDrawings } from '../report/report';
+import { buildLayout } from '../report/foundationLayout';
+import { LayoutRaw, runList } from '../report/layoutItems';
+import { fmtFtIn, Start, startFromJob } from '../lib/layoutEdit';
+import { mergeSummary, pickBackup, shareBackup } from '../lib/backup';
+import LayoutEditor from './LayoutEditor';
 import DrawingView from './DrawingView';
 import HeightRuns from './HeightRuns';
 import { findFoundation, foundationLines, foundationParts } from '../report/foundation';
@@ -80,13 +86,59 @@ export default function JobsScreen({ onOpenItem }: Props) {
           </Pressable>
         ))
       )}
+      <BackupCard jobs={jobs} />
     </ScrollView>
+  );
+}
+
+/** Back up every job to a file, or bring a backup back (nothing already here is changed). */
+function BackupCard({ jobs }: { jobs: Job[] }) {
+  const [msg, setMsg] = useState('');
+  const [busy, setBusy] = useState(false);
+  const backup = async () => {
+    setMsg('');
+    try {
+      await shareBackup(jobs);
+      setMsg(`Backed up ${jobs.length} job${jobs.length === 1 ? '' : 's'}. Keep the file somewhere safe, like Files or iCloud Drive.`);
+    } catch (e) {
+      setMsg(`Couldn't make the backup: ${pickError(e)}`);
+    }
+  };
+  const restore = async () => {
+    setMsg('');
+    setBusy(true);
+    try {
+      const text = await pickBackup();
+      if (text !== null) {
+        const r = jobStore.restoreBackup(text);
+        if (!r.problem) feel.success();
+        setMsg(mergeSummary(r));
+      }
+    } catch (e) {
+      setMsg(`Couldn't read that file: ${pickError(e)}`);
+    }
+    setBusy(false);
+  };
+  return (
+    <View style={[styles.card, styles.lineGap]}>
+      <Text style={styles.label}>Keep your jobs safe</Text>
+      <Text style={styles.help}>Your jobs are only on this phone. A backup is one file with all of them, to keep or to move to a new phone. Plan pages and photos stay on the phone.</Text>
+      <Pressable onPress={backup} style={[styles.secondary, !jobs.length && styles.disabled]} disabled={!jobs.length} accessibilityRole="button">
+        <Text style={styles.secondaryText}>Back up all jobs</Text>
+      </Pressable>
+      <Pressable onPress={restore} style={styles.secondary} disabled={busy} accessibilityRole="button">
+        <Text style={styles.secondaryText}>{busy ? 'Reading…' : 'Restore from a backup'}</Text>
+        <Text style={styles.secondarySub}>Adds the jobs that aren't here. Never changes one you have.</Text>
+      </Pressable>
+      {msg ? <Text style={styles.help}>{msg}</Text> : null}
+    </View>
   );
 }
 
 function JobDetail({ job, onBack, onOpenItem }: { job: Job; onBack: () => void; onOpenItem: (it: JobItem) => void }) {
   const prefs = useSettings();
   const [confirmDelete, setConfirmDelete] = useState(false);
+  const [layoutOpen, setLayoutOpen] = useState<{ start: Start | null; preset?: 'barn' } | null>(null);
   const figured = useMemo(() => figureItems(job), [job]);
   const report = useMemo(() => buildReport(job, prefs, { crew: true }), [job, prefs]);
   const totals = useMemo(() => jobTotals(figured, job), [figured, job]);
@@ -134,6 +186,11 @@ function JobDetail({ job, onBack, onOpenItem }: { job: Job; onBack: () => void; 
     return rows;
   }, [totals]);
 
+  if (layoutOpen) return <LayoutEditor job={job} start={layoutOpen.start} preset={layoutOpen.preset} onClose={() => setLayoutOpen(null)} />;
+  const layoutItem = job.items.find((it) => it.toolId === 'foundation-layout');
+  const layoutKids = layoutItem ? figured.filter((f) => f.item.id.startsWith(`${layoutItem.id}:`)) : [];
+  const replacedCount = job.items.filter((it) => it.replacedBy).length;
+
   return (
     <View style={styles.page}>
       <View style={styles.header}>
@@ -171,7 +228,14 @@ function JobDetail({ job, onBack, onOpenItem }: { job: Job; onBack: () => void; 
           </View>
         )}
 
-        <FoundationCard job={job} figured={figured} />
+        {layoutItem ? (
+          <LayoutCard job={job} figured={figured} onEdit={() => setLayoutOpen({ start: null })} replacedCount={replacedCount} />
+        ) : (
+          <>
+            <FoundationCard job={job} figured={figured} />
+            <BuildLayoutCard job={job} figured={figured} onOpen={setLayoutOpen} />
+          </>
+        )}
 
         <Text style={styles.section}>Send out</Text>
         <Pressable onPress={viewReport} style={[styles.primary, styles.wide]} accessibilityRole="button">
@@ -202,13 +266,32 @@ function JobDetail({ job, onBack, onOpenItem }: { job: Job; onBack: () => void; 
 
         <OrderCard job={job} yd={totals.concreteOrderYd} />
         <WeatherCard job={job} />
-        <PourCard job={job} orderYd={totals.concreteOrderYd} truckYd={Number(prefs.defaults.truck) || 10} />
+        <PourCard job={job} orderYd={totals.concreteOrderYd} truckYd={Number(prefs.defaults.truck) > 0 ? Number(prefs.defaults.truck) : 10} />
 
         <Text style={styles.section}>In this job</Text>
         {figured.length === 0 ? (
           <Text style={styles.help}>Nothing yet. Open any tool, fill it in, and tap “Add to job”.</Text>
         ) : (
-          figured.map(({ item, tool, result }) => (
+          figured.map(({ item, tool, result }) =>
+            // A layout's pieces show as one card: the foundation layout, where they're changed.
+            layoutItem && item.id.startsWith(`${layoutItem.id}:`) ? (
+              item === layoutKids[0].item ? (
+                <View key={layoutItem.id} style={styles.card}>
+                  <Text style={styles.cardTitle}>Foundation layout</Text>
+                  {layoutKids.map((f) => (
+                    <View key={f.item.id} style={styles.sumRow}>
+                      <Text style={styles.sumLabel}>{f.item.label}</Text>
+                      <Text style={styles.sumValue}>{f.result.status === 'ok' ? f.result.result.rows.find((r) => r.label === 'Order')?.value ?? '' : ''}</Text>
+                    </View>
+                  ))}
+                  <View style={styles.itemBtns}>
+                    <Pressable onPress={() => setLayoutOpen({ start: null })} style={styles.smallBtn} accessibilityRole="button" accessibilityLabel="Open the foundation layout">
+                      <Text style={styles.smallBtnText}>Open</Text>
+                    </Pressable>
+                  </View>
+                </View>
+              ) : null
+            ) : (
             <View key={item.id} style={styles.card}>
               <View style={styles.cardHead}>
                 <TextInput
@@ -247,7 +330,8 @@ function JobDetail({ job, onBack, onOpenItem }: { job: Job; onBack: () => void; 
                 </Pressable>
               </View>
             </View>
-          ))
+            ),
+          )
         )}
 
         <PlanReader job={job} />
@@ -268,7 +352,7 @@ function JobDetail({ job, onBack, onOpenItem }: { job: Job; onBack: () => void; 
                     accessibilityLabel={`Delete plan page ${i + 1}`}
                     style={styles.scanThumb}
                   >
-                    <Image source={{ uri }} style={styles.scanImg} resizeMode="cover" />
+                    <Image source={{ uri: liveUri(uri) }} style={styles.scanImg} resizeMode="cover" />
                     <Text style={styles.scanLabel}>Page {i + 1} · tap to delete</Text>
                   </Pressable>
                 ))}
@@ -299,7 +383,7 @@ function JobDetail({ job, onBack, onOpenItem }: { job: Job; onBack: () => void; 
                     accessibilityLabel={`Delete photo ${i + 1}`}
                     style={styles.scanThumb}
                   >
-                    <Image source={{ uri }} style={styles.photoImg} resizeMode="cover" />
+                    <Image source={{ uri: liveUri(uri) }} style={styles.photoImg} resizeMode="cover" />
                     <Text style={styles.scanLabel}>Tap to delete</Text>
                   </Pressable>
                 ))}
@@ -610,6 +694,74 @@ export function sendDoc(job: Job | null, s: Settings, make: (m: DocMedia) => { h
     const r = make({ logo, photos, scans });
     openReport(r.html, r.text, title);
   })();
+}
+
+/** Start a foundation layout: from the house already in the job, the container barn preset, or blank. */
+function BuildLayoutCard({ job, figured, onOpen }: { job: Job; figured: FiguredItem[]; onOpen: (o: { start: Start | null; preset?: 'barn' }) => void }) {
+  const start = useMemo(() => startFromJob(figured, job), [figured, job]);
+  return (
+    <View style={styles.card}>
+      <Text style={styles.label}>Foundation layout</Text>
+      <Text style={styles.help}>The whole foundation in one place: the house, add-ons off its walls, walls inside them, and the slabs, with every run listed.</Text>
+      {start ? (
+        <Pressable onPress={() => (feel.tap(), onOpen({ start }))} style={[styles.primary, styles.wide]} accessibilityRole="button">
+          <Text style={styles.primaryText}>Start from your {start.label}</Text>
+          <Text style={styles.primarySub}>Its wall, footing and slab move into the layout. You can bring them back.</Text>
+        </Pressable>
+      ) : null}
+      <Pressable onPress={() => (feel.tap(), onOpen({ start, preset: 'barn' }))} style={[start ? styles.secondary : styles.primary, styles.wide]} accessibilityRole="button">
+        <Text style={start ? styles.secondaryText : styles.primaryText}>Container barn</Text>
+        <Text style={start ? styles.secondarySub : styles.primarySub}>Add-on with walls under the containers, slab in the middle</Text>
+      </Pressable>
+      <Pressable onPress={() => (feel.tap(), onOpen({ start: null }))} style={styles.secondary} accessibilityRole="button">
+        <Text style={styles.secondaryText}>Build the foundation layout</Text>
+      </Pressable>
+    </View>
+  );
+}
+
+/** The job's foundation layout: plan, runs, pours, and the way back into the editor. */
+function LayoutCard({ job, figured, onEdit, replacedCount }: { job: Job; figured: FiguredItem[]; onEdit: () => void; replacedCount: number }) {
+  const prefs = useSettings();
+  const raw = job.items.find((it) => it.toolId === 'foundation-layout')!.raw as unknown as LayoutRaw;
+  const l = useMemo(() => (raw?.layout?.house?.length ? buildLayout(raw.layout) : null), [raw]);
+  const drawings = useMemo(() => layoutItemDrawings(job, figured, prefs.company.name), [job, figured, prefs.company.name]);
+  return (
+    <View style={styles.card}>
+      <Text style={styles.label}>Foundation layout</Text>
+      {l ? (
+        <>
+          <Text style={styles.fndLine}>• Walls: {runList(l)}</Text>
+          <Text style={styles.fndLine}>
+            • {l.totals.corners} corners · {l.totals.tees} tees · along the middle {fmtFtIn(l.totals.middle)}
+          </Text>
+          {l.pours.map((p, i) => (
+            <Text key={p} style={styles.fndLine}>
+              • Pour {i + 1}: {p}
+            </Text>
+          ))}
+          {l.problems.map((p) => (
+            <Text key={p} style={styles.warn}>
+              {p}
+            </Text>
+          ))}
+        </>
+      ) : null}
+      {drawings ? (
+        <View style={styles.lineGap}>
+          <DrawingView drawings={drawings} />
+        </View>
+      ) : null}
+      <Pressable onPress={() => (feel.tap(), onEdit())} style={[styles.primary, styles.wide]} accessibilityRole="button">
+        <Text style={styles.primaryText}>Edit the layout</Text>
+      </Pressable>
+      <Pressable onPress={() => jobStore.removeLayout(job.id)} style={styles.linkBtn} accessibilityRole="button">
+        <Text style={[styles.linkText, styles.danger]}>
+          Take the layout out{replacedCount ? ` (brings back the ${replacedCount} piece${replacedCount > 1 ? 's' : ''} it replaced)` : ''}
+        </Text>
+      </Pressable>
+    </View>
+  );
 }
 
 /** Walls, footings and slab that make one foundation, and how the slab is bid. */
@@ -1107,7 +1259,9 @@ const getStyles = themed(() => ({
   wide: { marginBottom: 10 },
   secondary: { backgroundColor: colors.panel2, borderRadius: 14, paddingVertical: 14, alignItems: 'center', marginBottom: 12 },
   secondaryText: { fontSize: 17, fontWeight: '700', color: colors.accent },
+  secondarySub: { fontSize: 14, color: colors.subtext, marginTop: 2, textAlign: 'center', paddingHorizontal: 12 },
   danger: { color: colors.danger },
+  disabled: { opacity: 0.4 },
   card: { backgroundColor: colors.panel, borderRadius: 16, padding: 14, marginBottom: 10 },
   pressed: { backgroundColor: colors.panel2 },
   cardHead: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'baseline' },

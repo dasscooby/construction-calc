@@ -35,6 +35,13 @@ const pourList = (f: Foundation) =>
     .filter(Boolean)
     .join(', ');
 
+/** "footings, walls, slab 1, slab 2" from a layout's pieces */
+const layoutPourList = (items: FiguredItem[]) =>
+  items
+    .filter((x) => /:(footings|walls|slab\d+)$/.test(x.item.id))
+    .map((x) => (x.item.id.endsWith(':footings') ? 'footings' : x.item.id.endsWith(':walls') ? 'walls' : `slab ${x.item.id.match(/slab(\d+)$/)![1]}`))
+    .join(', ');
+
 export const UNITS = ['sq ft', 'ft', 'yd', 'lb', 'tons', 'ea', 'set', 'job', 'pour', 'hr', 'day', 'lump sum'];
 
 const num = (v: string | undefined) => {
@@ -56,7 +63,7 @@ export function bidOptions(items: FiguredItem[], s: Settings, job?: Job): BidSou
   const ft = (v: unknown) => parseLength(v as RawLength) ?? 0;
 
   for (const f0 of items) {
-    if (f0.result.status !== 'ok') continue;
+    if (f0.result.status !== 'ok' || f0.item.id.endsWith(':forms')) continue;
     const f = built.find((b) => b.item.id === f0.item.id) ?? f0;
     const name = pieceName(f0, items, job);
     const src = `item:${f.item.id}`;
@@ -67,7 +74,12 @@ export function bidOptions(items: FiguredItem[], s: Settings, job?: Job): BidSou
     const area = rowOf(f0, 'Slab area');
     if (area) {
       const ms: BidMeasure[] = [];
-      if (fnd?.slab?.item.id === f.item.id && fnd.slabAtOutside) {
+      const outside = rowOf(f0, 'To the outside of the walls');
+      if (outside) {
+        // A slab in a foundation layout: bid at the size to the outside of its walls, or what's poured.
+        ms.push({ id: 'house', label: `To the outside of the walls (${Math.round(numberIn(outside.value)).toLocaleString()} sq ft)`, qty: numberIn(outside.value), unit: 'sq ft' });
+        ms.push({ id: 'inside', label: `Inside the walls, what's poured (${Math.round(numberIn(area.value)).toLocaleString()} sq ft)`, qty: numberIn(area.value), unit: 'sq ft' });
+      } else if (fnd?.slab?.item.id === f.item.id && fnd.slabAtOutside) {
         ms.push({ id: 'house', label: `At the house size (${Math.round(fnd.outsideArea).toLocaleString()} sq ft)`, qty: fnd.outsideArea, unit: 'sq ft' });
         ms.push({ id: 'inside', label: `Inside the walls (${Math.round(fnd.insideArea).toLocaleString()} sq ft)`, qty: fnd.insideArea, unit: 'sq ft' });
       } else {
@@ -177,14 +189,16 @@ export function bidOptions(items: FiguredItem[], s: Settings, job?: Job): BidSou
       prices: { yd: perYd },
     });
   }
-  const pours = fnd ? pourCount(fnd) : 1;
+  // A foundation layout knows its pours: footings, walls, each slab pour.
+  const layoutPours = items.filter((x) => /:(footings|walls|slab\d+)$/.test(x.item.id)).length;
+  const pours = layoutPours || (fnd ? pourCount(fnd) : 1);
   out.push({
     src: 'pump',
     what: 'Pump truck',
     group: 'Concrete and pump',
     measures: [
       { id: 'pour', label: 'One pour', qty: 1, unit: 'pour' },
-      ...(pours > 1 ? [{ id: 'pours', label: `Each pour (${pours}: ${pourList(fnd!)})`, qty: pours, unit: 'pour' }] : []),
+      ...(pours > 1 ? [{ id: 'pours', label: `Each pour (${pours}${layoutPours ? `: ${layoutPourList(items)}` : fnd ? `: ${pourList(fnd)}` : ''})`, qty: pours, unit: 'pour' }] : []),
     ],
     prices: { pour: price(p.pumpPour) },
   });

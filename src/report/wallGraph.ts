@@ -28,7 +28,8 @@ export interface Run {
   footing: { width: number; depth: number } | null;
 }
 
-export type EndKind = 'corner' | 'tee' | 'free';
+/** corner: two runs turn; tee: it stops against another; through: it carries straight on into the next run */
+export type EndKind = 'corner' | 'tee' | 'through' | 'free';
 
 export interface RunResult {
   run: Run;
@@ -37,6 +38,8 @@ export interface RunResult {
   middle: number;
   /** The footing under it, along its middle, ft (0 = no footing) */
   footingMiddle: number;
+  /** What each end meets (the corner's other run, or the run it tees into) */
+  hosts: [Run | null, Run | null];
   /** Taken off the middle at each end (a tee stops at the host's face), ft */
   trim: [number, number];
   /** Same for the footing (stops at the host footing's edge) */
@@ -49,6 +52,8 @@ export interface Face {
   /** Clear (inside the wall faces) outline */
   clear: Pt[];
   clearArea: number;
+  /** To the outside of the walls around it (the size it's usually bid at), sq ft */
+  outerArea: number;
   /** Clear length × width when it's a rectangle */
   rect: { w: number; h: number } | null;
 }
@@ -58,6 +63,8 @@ export interface GraphResult {
   corners: number;
   tees: number;
   faces: Face[];
+  /** The outside faces of the walls all the way around the building, clockwise (null if they don't close) */
+  outside: Pt[] | null;
 }
 
 const EPS = 1e-6;
@@ -73,9 +80,10 @@ function onInterior(p: Pt, r: Run): boolean {
 }
 
 /**
- * How each run's ends meet the others. Where three runs meet at a point, the first two listed make
- * the corner and later ones tee into the one they run square to (an add-on's side wall lining up
- * with the house wall tees into the house wall it meets).
+ * How each run's ends meet the others. Where runs meet at a point: two that line up carry straight
+ * through (one wall), and any square to them tee into it (a house side wall and the add-on side wall
+ * that lines up with it are one through wall; the house wall between them tees in). Otherwise the
+ * first two square to each other make the corner, and any more tee into the corner run they're square to.
  */
 function joints(runs: Run[]): { kind: EndKind; host: Run | null }[][] {
   const out = runs.map(() => [
@@ -99,6 +107,15 @@ function joints(runs: Run[]): { kind: EndKind; host: Run | null }[][] {
     const group = atNode.map((x, k) => ({ ...x, k })).filter((x) => near(x.p, first.p));
     group.forEach((x) => done.add(x.k));
     if (group.length < 2) return;
+    // Two ends from opposite sides on the same line: one wall carrying straight through.
+    const pair = group.flatMap((x, u) => group.slice(u + 1).map((y) => [x, y] as const)).find(([x, y]) => horiz(runs[x.i]) === horiz(runs[y.i]));
+    if (pair) {
+      const [x, y] = pair;
+      out[x.i][x.e] = { kind: 'through', host: runs[y.i] };
+      out[y.i][y.e] = { kind: 'through', host: runs[x.i] };
+      for (const z of group) if (z !== x && z !== y && horiz(runs[z.i]) !== horiz(runs[x.i])) out[z.i][z.e] = { kind: 'tee', host: runs[x.i] };
+      return;
+    }
     const a = group[0];
     const b = group.find((x) => horiz(runs[x.i]) !== horiz(runs[a.i]));
     if (!b) return;
@@ -130,13 +147,15 @@ export function solveGraph(runs: Run[]): GraphResult {
     return {
       run: r,
       ends: [j[i][0].kind, j[i][1].kind],
+      hosts: [j[i][0].host, j[i][1].host],
       trim,
       footTrim,
       middle: full - trim[0] - trim[1],
       footingMiddle: r.footing ? full - footTrim[0] - footTrim[1] : 0,
     };
   });
-  return { runs: results, corners: Math.round(corners), tees, faces: findFaces(runs) };
+  const found = findFaces(runs);
+  return { runs: results, corners: Math.round(corners), tees, faces: found.faces, outside: found.outside };
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -149,7 +168,9 @@ interface HalfEdge {
   used: boolean;
 }
 
-function findFaces(runs: Run[]): Face[] {
+function findFaces(runs: Run[]): { faces: Face[]; outside: Pt[] | null } {
+  let outside: Pt[] | null = null;
+  let outsideArea = 0;
   const nodes: Pt[] = [];
   const nodeOf = (p: Pt) => {
     const k = nodes.findIndex((q) => near(p, q));
@@ -197,11 +218,21 @@ function findFaces(runs: Run[]): Face[] {
     }
     if (loop.length < 3 || loop[loop.length - 1].to !== loop[0].from) continue;
     const middle = loop.map((e) => nodes[e.from]);
-    if (signedArea(middle) <= 0) continue; // the outside of everything
+    if (signedArea(middle) <= 0) {
+      // The loop around the outside of everything: walked this way the outside of the building is on
+      // the right, so moving its edges right by half a wall gives the outside faces.
+      const face = offsetIn(loop.map((e) => ({ a: nodes[e.from], b: nodes[e.to], d: e.run.thick / 2 })));
+      if (Math.abs(signedArea(middle)) > outsideArea) {
+        outsideArea = Math.abs(signedArea(middle));
+        outside = [...face].reverse();
+      }
+      continue;
+    }
     const clear = offsetIn(loop.map((e) => ({ a: nodes[e.from], b: nodes[e.to], d: e.run.thick / 2 })));
-    faces.push({ middle, clear, clearArea: Math.abs(signedArea(clear)), rect: rectOf(clear) });
+    const outer = offsetIn(loop.map((e) => ({ a: nodes[e.from], b: nodes[e.to], d: -e.run.thick / 2 })));
+    faces.push({ middle, clear, clearArea: Math.abs(signedArea(clear)), outerArea: Math.abs(signedArea(outer)), rect: rectOf(clear) });
   }
-  return faces;
+  return { faces, outside };
 }
 
 /** Positive for clockwise with y down. */

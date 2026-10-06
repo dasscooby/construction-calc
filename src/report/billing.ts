@@ -69,6 +69,8 @@ export function suggestLines(items: FiguredItem[], s?: Settings, job?: Job): Omi
   const ft = (v: unknown) => parseLength(v as RawLength) ?? 0;
   for (const { item, tool, result } of items) {
     if (result.status !== 'ok') continue;
+    // A layout's wall forms are the load list; the walls themselves are billed.
+    if (item.id.endsWith(':forms')) continue;
     const pour = fnd ? fnd.pours.findIndex((x) => x.item.id === item.id) : -1;
     const name = !inFnd(item.id) ? item.label || tool.title : fnd!.addOns.some((a) => a.item.item.id === item.id) ? `${fnd!.kind} add-on` : pour >= 0 ? `${fnd!.kind}, ${pourName(pour)}` : fnd!.kind;
     const raw = item.raw;
@@ -128,7 +130,8 @@ export function suggestLines(items: FiguredItem[], s?: Settings, job?: Job): Omi
     const lb = itemRebarLb(f);
     if (lb > 0) lines.push({ desc: `${pieceName(f, items, job)}: rebar, cut, bent and tied`, qty: String(Math.round(lb)), unit: 'lb', price: price(p?.rebarLb), src: `item:${f.item.id}:rebar` });
   }
-  if (job?.order?.place === 'pump') lines.push({ desc: 'Pump truck', qty: String(fnd ? pourCount(fnd) : 1), unit: 'pour', price: price(p?.pumpPour), src: 'pump' });
+  const layoutPours = items.filter((x) => /:(footings|walls|slab\d+)$/.test(x.item.id)).length;
+  if (job?.order?.place === 'pump') lines.push({ desc: 'Pump truck', qty: String(layoutPours || (fnd ? pourCount(fnd) : 1)), unit: 'pour', price: price(p?.pumpPour), src: 'pump' });
   lines.push({ desc: 'Labor', qty: '1', unit: 'job', price: price(p?.laborJob), src: 'labor' });
   return lines;
 }

@@ -133,12 +133,38 @@ List what you had to guess in "unsure". Call plan_data once.`;
 const json = (body, status = 200) =>
   new Response(JSON.stringify(body), {
     status,
-    headers: { 'content-type': 'application/json', 'access-control-allow-origin': '*', 'access-control-allow-headers': 'content-type' },
+    headers: { 'content-type': 'application/json', 'access-control-allow-origin': '*', 'access-control-allow-headers': 'content-type, x-calc-app' },
   });
 
-export default async (req) => {
+// Only the app reads plans: it sends this header. (The code is public, so this keeps out bots and
+// drive-by use, not a determined person; the hourly limit below caps what anyone can spend.)
+export const APP_HEADER = 'x-calc-app';
+export const APP_VALUE = 'construction-calc/plan-reader/1';
+
+// Plan reads per connection per hour, counted on each running copy of this function.
+const PER_HOUR = 20;
+const seen = new Map();
+export function overLimit(ip, now = Date.now()) {
+  const hourAgo = now - 3_600_000;
+  const times = (seen.get(ip) ?? []).filter((t) => t > hourAgo);
+  if (times.length >= PER_HOUR) {
+    seen.set(ip, times);
+    return true;
+  }
+  times.push(now);
+  seen.set(ip, times);
+  if (seen.size > 5000) for (const [k, v] of seen) if (!v.some((t) => t > hourAgo)) seen.delete(k);
+  return false;
+}
+
+export default async (req, context) => {
   if (req.method === 'OPTIONS') return json({});
   if (req.method !== 'POST') return json({ error: 'Send a plan page.' }, 405);
+  if (req.headers.get(APP_HEADER) !== APP_VALUE) return json({ error: 'Plan reading works from the Construction Calc app.' }, 403);
+  const ip = context?.ip || req.headers.get('x-nf-client-connection-ip') || req.headers.get('x-forwarded-for') || 'unknown';
+  if (overLimit(ip)) return json({ error: 'That’s a lot of plans this hour. Try again in a bit.' }, 429);
+  const size = Number(req.headers.get('content-length') || 0);
+  if (size > MAX_BYTES * 1.4 + 2000) return json({ error: 'That file is too big. Try one page, or a smaller picture.' }, 413);
   const key = process.env.ANTHROPIC_API_KEY;
   if (!key) return json({ error: 'Plan reading isn’t switched on yet.' }, 503);
 
@@ -172,7 +198,7 @@ export default async (req) => {
   if (!res.ok) {
     const detail = `${res.status} ${(await res.text()).slice(0, 300)}`;
     console.error('read-plan', detail);
-    return json({ error: 'Couldn’t read the plan right now. Try again in a minute.', detail }, 502);
+    return json({ error: 'Couldn’t read the plan right now. Try again in a minute.' }, 502);
   }
   const out = await res.json();
   const used = out.content?.find((c) => c.type === 'tool_use' && c.name === 'plan_data');

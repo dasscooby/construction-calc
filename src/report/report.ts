@@ -56,6 +56,8 @@ const add = (m: Map<string, number>, k: string, n: number) => m.set(k, (m.get(k)
 export function figureItems(job: Job): FiguredItem[] {
   const out: FiguredItem[] = [];
   for (const item of job.items) {
+    // Taken over by the foundation layout: kept, but not counted.
+    if (item.replacedBy) continue;
     // A foundation layout is figured as its pieces: walls, footing, and each slab.
     if (item.toolId === LAYOUT_TOOL_ID) {
       out.push(...layoutChildren(item));

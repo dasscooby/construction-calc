@@ -1,0 +1,856 @@
+// The foundation layout editor: the plan on top (tap a wall or a bay), a run strip that never scrolls
+// away, a big toolbar, and one step at a time below it: the main house, + Add-on (tap the wall it builds
+// off, how far it comes out), + Inside walls (the bays between them, clear, wall face to wall face), and
+// Slab & pours (tap the bays that get slab). Every step can be undone; nothing asks "are you sure".
+
+import { useEffect, useMemo, useRef, useState } from 'react';
+import { GestureResponderEvent, LayoutChangeEvent, Modal, Pressable, ScrollView, Text, TextInput, View } from 'react-native';
+import { SvgXml } from 'react-native-svg';
+
+import { feel } from '../lib/feel';
+import { Job, jobStore } from '../lib/jobs';
+import { addOnProblem, addedRuns, blankLayout, fmtFtIn, insideProblem, parseFtIn, putAddOn, removeAddOn, setBayLabel, setInside, setPour, Start, toggleSlab } from '../lib/layoutEdit';
+import { AddOnSpec, bayName, buildLayout, fillBays, Layout, LayoutSpec, SIDE_NAME, Side, sideLength, SlabSpot } from '../report/foundationLayout';
+import { layoutChildren, LayoutRaw, rollUp } from '../report/layoutItems';
+import { graphPlanSvg, hitLayout, planFrame } from '../report/layoutPlanDraw';
+import { faceAt } from '../report/wallGraph';
+import { colors, onThemeChange, themed } from '../theme';
+
+type Mode = 'idle' | 'main' | 'addon-pick' | 'addon-size' | 'inside' | 'slab';
+
+const SIDES: Side[] = ['left', 'top', 'right', 'bottom'];
+const SIDE_SHORT: Record<Side, string> = { left: 'Left A–B', top: 'Back B–C', right: 'Right C–D', bottom: 'Front D–A' };
+const MAIN_RUN: Record<Side, string> = { left: 'Main left A–B', top: 'Main back B–C', right: 'Main right C–D', bottom: 'Main front D–A' };
+
+/** Order (yd) of each slab pour, from the pieces the layout figures as. */
+function pourYards(raw: LayoutRaw): Record<number, number> {
+  const out: Record<number, number> = {};
+  for (const f of layoutChildren({ id: 'x', toolId: 'foundation-layout', title: '', label: '', raw: raw as never, at: 0 })) {
+    const m = f.item.id.match(/:slab(\d+)$/);
+    const order = f.result.status === 'ok' ? f.result.result.rows.find((r) => r.label === 'Order') : undefined;
+    if (m && order) out[Number(m[1])] = Number(order.value.replace(/[^\d.]/g, ''));
+  }
+  return out;
+}
+
+export default function LayoutEditor({ job, start, preset, onClose }: { job: Job; start: Start | null; preset?: 'barn'; onClose: () => void }) {
+  const existing = job.items.find((it) => it.toolId === 'foundation-layout');
+  const initial: LayoutRaw = (existing?.raw as unknown as LayoutRaw) ?? { layout: start?.spec ?? blankLayout(), wall: start?.wall, footing: start?.footing, slab: start?.slab };
+  const [raw, setRaw] = useState<LayoutRaw>(initial);
+  const [undo, setUndo] = useState<LayoutSpec[]>([]);
+  const [redo, setRedo] = useState<LayoutSpec[]>([]);
+  const hasHouse = raw.layout.house.length > 0 && raw.layout.house.width > 0;
+  const [mode, setMode] = useState<Mode>(hasHouse ? (preset === 'barn' ? 'addon-pick' : 'idle') : 'main');
+  const [note, setNote] = useState<{ text: string; undoTo: LayoutSpec } | null>(null);
+  const [showRuns, setShowRuns] = useState(false);
+  const [pick, setPick] = useState<{ run?: number; face?: number }>({});
+  const replaced = useRef(existing ? [] : start?.replace ?? []);
+  const noteTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // Work in progress for the step that's open (drawn live, saved on Done).
+  const [draft, setDraft] = useState<LayoutSpec | null>(null);
+  const spec = draft ?? raw.layout;
+  const layout = useMemo<Layout | null>(() => (spec.house.length > 0 && spec.house.width > 0 ? buildLayout(spec) : null), [spec]);
+  const yards = useMemo(() => (layout ? pourYards({ ...raw, layout: spec }) : {}), [raw, spec, layout]);
+
+  /** Saves a finished step: keeps the old one for Undo and shows what changed. */
+  const commit = (next: LayoutSpec, text?: string) => {
+    const before = raw.layout;
+    const r = { ...raw, layout: next };
+    setRaw(r);
+    setUndo((u) => [...u, before].slice(-50));
+    setRedo([]);
+    setDraft(null);
+    jobStore.saveLayout(job.id, r as never, replaced.current);
+    replaced.current = [];
+    feel.success();
+    if (text) {
+      setNote({ text, undoTo: before });
+      if (noteTimer.current) clearTimeout(noteTimer.current);
+      noteTimer.current = setTimeout(() => setNote(null), 7000);
+    }
+  };
+  const restore = (to: LayoutSpec, from: LayoutSpec, push: 'undo' | 'redo') => {
+    const r = { ...raw, layout: to };
+    setRaw(r);
+    if (push === 'redo') setRedo((x) => [...x, from]);
+    else setUndo((x) => [...x, from]);
+    setDraft(null);
+    setNote(null);
+    jobStore.saveLayout(job.id, r as never);
+    feel.tap();
+  };
+  const doUndo = () => {
+    const prev = undo[undo.length - 1];
+    if (!prev) return;
+    setUndo((u) => u.slice(0, -1));
+    restore(prev, raw.layout, 'redo');
+  };
+  const doRedo = () => {
+    const next = redo[redo.length - 1];
+    if (!next) return;
+    setRedo((r) => r.slice(0, -1));
+    restore(next, raw.layout, 'undo');
+  };
+  useEffect(() => () => {
+    if (noteTimer.current) clearTimeout(noteTimer.current);
+  }, []);
+
+  // ---- the plan ----
+  const [planW, setPlanW] = useState(0);
+  const svg = useMemo(
+    () => (layout ? graphPlanSvg(layout, { title: 'Foundation layout', job: job.name, company: '', date: '', pourYd: yards, highlight: pick, compact: true }) : ''),
+    [layout, job.name, yards, pick],
+  );
+  const vb = svg.match(/viewBox="0 0 ([\d.]+) ([\d.]+)"/);
+  const vbW = vb ? Number(vb[1]) : 760;
+  const vbH = vb ? Number(vb[2]) : 900;
+  const onPlanTap = (e: GestureResponderEvent) => {
+    if (!layout || !planW) return;
+    const k = vbW / planW;
+    const x = e.nativeEvent.locationX * k;
+    const y = e.nativeEvent.locationY * k;
+    if (mode === 'addon-pick') {
+      // The main wall nearest the tap: a fat target, no fine aiming.
+      const p = planFrame(layout).toPlan(x, y);
+      const dist = (side: Side) => {
+        const g = layout.graph.runs.find((r) => r.run.name === MAIN_RUN[side])?.run;
+        if (!g) return Infinity;
+        const tx = Math.max(Math.min(g.a.x, g.b.x), Math.min(Math.max(g.a.x, g.b.x), p.x));
+        const ty = Math.max(Math.min(g.a.y, g.b.y), Math.min(Math.max(g.a.y, g.b.y), p.y));
+        return Math.hypot(p.x - tx, p.y - ty);
+      };
+      pickWall([...SIDES].sort((u, v) => dist(u) - dist(v))[0]);
+      return;
+    }
+    const hit = hitLayout(layout, x, y);
+    if (mode === 'slab' && hit.face !== undefined) {
+      const spot = spotOfFace(layout, hit.face);
+      if (spot) toggleSlabAt(spot);
+      return;
+    }
+    setPick(hit);
+    if (hit.run !== undefined) setShowRuns(true);
+  };
+
+  // ---- + Add-on ----
+  const [addon, setAddon] = useState<{ index?: number; side: Side; depth: string; part: boolean; from: string; width: string } | null>(null);
+  const pickWall = (side: Side) => {
+    feel.tap();
+    setAddon({ side, depth: '', part: false, from: '', width: '' });
+    setMode('addon-size');
+  };
+  const addonSpec = (): AddOnSpec | null => {
+    if (!addon) return null;
+    const wall = sideLength(spec, addon.side);
+    const depth = parseFtIn(addon.depth) ?? 0;
+    const from = addon.part ? parseFtIn(addon.from) ?? 0 : 0;
+    const width = addon.part ? parseFtIn(addon.width) ?? Math.max(0, wall - from) : wall;
+    const old = addon.index !== undefined ? raw.layout.addOns[addon.index] : undefined;
+    return { ...(old ?? {}), side: addon.side, depth, from, width };
+  };
+  useEffect(() => {
+    if (mode !== 'addon-size' || !addon) return;
+    const a = addonSpec();
+    const base = raw.layout;
+    if (a && !addOnProblem(base, a)) setDraft(putAddOn(base, a, addon.index));
+    else setDraft(null);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [addon, mode]);
+  const finishAddon = () => {
+    const a = addonSpec();
+    if (!a || addOnProblem(raw.layout, a)) return;
+    const next = putAddOn(raw.layout, a, addon!.index);
+    const added = addedRuns(raw.layout, next);
+    commit(next, `Add-on in: ${fmtFtIn(added)} of wall${spec.footing ? ' and footing' : ''}. Its side walls tee into the main ${SIDE_NAME[a.side]} wall.`);
+    setAddon(null);
+    const idx = addon!.index ?? next.addOns.length - 1;
+    setInsideIdx(idx);
+    if (preset === 'barn') openInside(idx, next);
+    else setMode('idle');
+  };
+
+  // ---- + Inside walls ----
+  const [insideIdx, setInsideIdx] = useState(Math.max(0, raw.layout.addOns.length - 1));
+  const [inside, setInsideState] = useState<{ dir: 'out' | 'across'; bays: string[]; same: boolean } | null>(null);
+  const openInside = (i: number, base: LayoutSpec = raw.layout) => {
+    const a = base.addOns[i];
+    if (!a) return;
+    setInsideIdx(i);
+    const bays = a.bays && a.bays.length > 1 ? a.bays.map((b) => (b === null ? '' : fmtFtIn(b))) : ['', '', ''];
+    const restAt = a.bays ? a.bays.findIndex((b) => b === null) : 1;
+    setInsideState({ dir: a.inside ?? 'out', bays: bays.map((b, k) => (k === restAt ? 'rest' : b)), same: !a.bays || (a.bays.length > 2 && a.bays[0] === a.bays[a.bays.length - 1]) });
+    setMode('inside');
+  };
+  const insideBays = (): (number | null)[] => (inside ? inside.bays.map((b) => (b === 'rest' || !b.trim() ? null : parseFtIn(b))) : []);
+  const insideIssue = inside && raw.layout.addOns[insideIdx] ? insideProblem(raw.layout, insideIdx, inside.dir, insideBays()) : null;
+  useEffect(() => {
+    if (mode !== 'inside' || !inside || !raw.layout.addOns[insideIdx]) return;
+    setDraft(insideIssue ? null : setInside(raw.layout, insideIdx, inside.dir, insideBays()));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [inside, mode, insideIdx]);
+  const setBay = (k: number, v: string) => {
+    if (!inside) return;
+    const bays = [...inside.bays];
+    bays[k] = v;
+    // Same both ends: the first and last bays match.
+    if (inside.same && bays.length > 2 && (k === 0 || k === bays.length - 1)) bays[k === 0 ? bays.length - 1 : 0] = v;
+    setInsideState({ ...inside, bays });
+  };
+  const bayCount = (n: number) => {
+    if (!inside) return;
+    const count = Math.max(1, Math.min(8, n));
+    const bays = Array.from({ length: count }, (_, k) => inside.bays[k] ?? '');
+    if (!bays.includes('rest')) bays[Math.floor((count - 1) / 2)] = 'rest';
+    setInsideState({ ...inside, bays });
+  };
+  const finishInside = () => {
+    if (!inside || insideIssue) return;
+    const before = raw.layout;
+    const next = setInside(before, insideIdx, inside.dir, insideBays());
+    const walls = Math.max(0, inside.bays.length - 1);
+    commit(next, `${walls} inside wall${walls === 1 ? '' : 's'}: ${fmtFtIn(addedRuns(before, next))} of wall${spec.footing ? ' and footing' : ''}.`);
+    setInsideState(null);
+    setMode(preset === 'barn' ? 'slab' : 'idle');
+  };
+
+  // ---- Slab & pours ----
+  const toggleSlabAt = (spot: SlabSpot) => {
+    const next = toggleSlab(raw.layout, spot);
+    const on = next.slabs.length > raw.layout.slabs.length;
+    commit(next, on ? 'Slab added, its own pour.' : 'Slab taken out.');
+  };
+
+  // ---- Main ----
+  const [main, setMain] = useState(() => ({
+    length: hasHouse ? fmtFtIn(raw.layout.house.length) : '',
+    width: hasHouse ? fmtFtIn(raw.layout.house.width) : '',
+    wallT: String(Math.round(raw.layout.wall.thick * 12)),
+    wallH: fmtFtIn(raw.layout.wall.height),
+    footW: String(Math.round((raw.layout.footing?.width ?? 16 / 12) * 12)),
+    footD: String(Math.round((raw.layout.footing?.depth ?? 10 / 12) * 12)),
+    footing: !!raw.layout.footing,
+    existing: !!raw.layout.existing,
+  }));
+  const mainSpec = (): LayoutSpec | null => {
+    const L = parseFtIn(main.length);
+    const W = parseFtIn(main.width);
+    const t = Number(main.wallT) / 12;
+    const h = parseFtIn(main.wallH);
+    if (!L || !W || !(t > 0) || !h) return null;
+    return {
+      ...raw.layout,
+      house: { length: L, width: W },
+      wall: { thick: t, height: h },
+      footing: main.footing ? { width: (Number(main.footW) || 16) / 12, depth: (Number(main.footD) || 10) / 12 } : null,
+      existing: main.existing || undefined,
+      slabs: raw.layout.slabs.length || hasHouse ? raw.layout.slabs : [{ at: { in: 'main' }, thick: 4 / 12 }],
+    };
+  };
+  const mainIssue = (() => {
+    const s = mainSpec();
+    if (!s) return 'Put in the length and width (outside), the wall size and height.';
+    if (s.house.length <= 2 * s.wall.thick || s.house.width <= 2 * s.wall.thick) return 'The house is too small for that wall.';
+    return null;
+  })();
+  const finishMain = () => {
+    const s = mainSpec();
+    if (!s || mainIssue) return;
+    commit(s, `Main: ${fmtFtIn(s.house.length)} × ${fmtFtIn(s.house.width)}, ${fmtFtIn(2 * (s.house.length + s.house.width))} of wall${s.footing ? ' and footing' : ''}.`);
+    setMode(preset === 'barn' ? 'addon-pick' : 'idle');
+  };
+
+  // ---- run strip ----
+  const groups = layout ? [...new Set(layout.runs.map((r) => r.group))] : [];
+  const strip = layout && groups.length === 1
+    ? `${groups[0]} ${fmtFtIn(layout.totals.measured)} of wall${spec.footing ? ' and footing' : ''}${layout.runs.some((r) => r.existing) ? ' (existing)' : ''}`
+    : layout
+    ? `${groups.map((g) => `${g} ${fmtFtIn(layout.runs.filter((r) => r.group === g).reduce((s, r) => s + r.measured, 0))}${layout.runs.some((r) => r.group === g && r.existing) ? ' (existing)' : ''}`).join(' + ')} = ${fmtFtIn(layout.totals.measured)} wall${spec.footing ? ` · ${fmtFtIn(layout.totals.measured)} footing` : ''}`
+    : 'Start with the main house';
+
+  const btn = (label: string, onPress: () => void, opts: { on?: boolean; disabled?: boolean; label?: string } = {}) => (
+    <Pressable
+      key={label}
+      onPress={() => {
+        if (opts.disabled) return;
+        feel.tap();
+        onPress();
+      }}
+      style={[styles.tool, opts.on && styles.toolOn, opts.disabled && styles.toolOff]}
+      accessibilityRole="button"
+      accessibilityState={{ selected: !!opts.on, disabled: !!opts.disabled }}
+      accessibilityLabel={opts.label ?? label}
+    >
+      <Text style={[styles.toolText, opts.on && styles.toolTextOn]}>{label}</Text>
+    </Pressable>
+  );
+  const chip = (label: string, on: boolean, onPress: () => void, a11y?: string) => (
+    <Pressable key={label} onPress={() => (feel.tap(), onPress())} style={[styles.chip, on && styles.chipOn]} accessibilityRole="button" accessibilityState={{ selected: on }} accessibilityLabel={a11y ?? label}>
+      <Text style={[styles.chipText, on && styles.chipTextOn]}>{label}</Text>
+    </Pressable>
+  );
+  const done = (label: string, onPress: () => void, disabled: boolean) => (
+    <View style={styles.doneRow}>
+      <Pressable onPress={() => (setDraft(null), setMode('idle'), setAddon(null), setInsideState(null))} style={styles.cancel} accessibilityRole="button">
+        <Text style={styles.cancelText}>Cancel</Text>
+      </Pressable>
+      <Pressable onPress={() => !disabled && onPress()} style={[styles.done, disabled && styles.toolOff]} accessibilityRole="button" accessibilityState={{ disabled }}>
+        <Text style={styles.doneText}>{label}</Text>
+      </Pressable>
+    </View>
+  );
+
+  const addOnsHere = raw.layout.addOns;
+  const a = addOnsHere[insideIdx];
+
+  return (
+    <View style={styles.page}>
+      <View style={styles.header}>
+        <Pressable onPress={onClose} style={styles.back} accessibilityRole="button" accessibilityLabel="Back to the job">
+          <Text style={styles.backText}>‹ Job</Text>
+        </Pressable>
+        <Text style={styles.title}>Foundation layout</Text>
+        <Pressable onPress={doUndo} style={[styles.hBtn, !undo.length && styles.toolOff]} accessibilityRole="button" accessibilityLabel="Undo">
+          <Text style={styles.hBtnText}>↶ Undo</Text>
+        </Pressable>
+        <Pressable onPress={doRedo} style={[styles.hBtn, !redo.length && styles.toolOff]} accessibilityRole="button" accessibilityLabel="Redo">
+          <Text style={styles.hBtnText}>↷</Text>
+        </Pressable>
+      </View>
+
+      <ScrollView contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled" stickyHeaderIndices={[1]}>
+        {/* 0: the plan */}
+        <View onLayout={(e: LayoutChangeEvent) => setPlanW(e.nativeEvent.layout.width)}>
+          {mode === 'addon-pick' ? <Text style={styles.banner}>Tap the wall it builds off</Text> : null}
+          {mode === 'slab' ? <Text style={styles.banner}>Tap the bays that get slab</Text> : null}
+          {layout && planW > 0 ? (
+            <Pressable onPress={onPlanTap} accessibilityLabel="Foundation plan. Tap a wall or a bay." accessibilityRole="image">
+              <SvgXml xml={svg} width={planW} height={(planW * vbH) / vbW} />
+            </Pressable>
+          ) : (
+            <View style={styles.empty}>
+              <Text style={styles.emptyText}>The plan draws itself as you put in sizes.</Text>
+            </View>
+          )}
+        </View>
+
+        {/* 1: run strip (sticks to the top) */}
+        <View style={styles.stripWrap}>
+          <Pressable onPress={() => layout && setShowRuns(true)} style={styles.strip} accessibilityRole="button" accessibilityLabel={`Runs: ${strip}. Tap for the run list.`}>
+            <Text style={styles.stripText}>{strip}</Text>
+            {layout ? <Text style={styles.stripMore}>Run list ›</Text> : null}
+          </Pressable>
+          <View style={styles.toolbar}>
+            {btn('Main', () => setMode('main'), { on: mode === 'main' })}
+            {btn('+ Add-on', () => setMode('addon-pick'), { on: mode === 'addon-pick' || mode === 'addon-size', disabled: !layout })}
+            {btn('+ Inside walls', () => openInside(Math.min(insideIdx, addOnsHere.length - 1)), { on: mode === 'inside', disabled: !addOnsHere.length })}
+            {btn('Slab & pours', () => setMode('slab'), { on: mode === 'slab', disabled: !layout })}
+          </View>
+        </View>
+
+        <Text style={styles.rule}>Runs are measured outside to outside, each wall counted once. Yards use the middle of the wall, plus your waste.</Text>
+        {layout?.problems.map((p) => (
+          <Text key={p} style={styles.problem}>
+            {p}
+          </Text>
+        ))}
+
+        {/* ---- Main ---- */}
+        {mode === 'main' ? (
+          <View style={styles.panel}>
+            <Text style={styles.panelTitle}>Main house (outside)</Text>
+            <View style={styles.row2}>
+              <LenBox label="Length" value={main.length} onChange={(length) => setMain({ ...main, length })} autoFocus={!hasHouse} />
+              <LenBox label="Width" value={main.width} onChange={(width) => setMain({ ...main, width })} />
+            </View>
+            <View style={styles.row2}>
+              <NumBox label="Wall thick" unit="in" value={main.wallT} onChange={(wallT) => setMain({ ...main, wallT })} />
+              <LenBox label="Wall height" value={main.wallH} onChange={(wallH) => setMain({ ...main, wallH })} />
+            </View>
+            <View style={styles.chips}>
+              {chip('Footing under the walls', main.footing, () => setMain({ ...main, footing: true }))}
+              {chip('No footing', !main.footing, () => setMain({ ...main, footing: false }))}
+            </View>
+            {main.footing ? (
+              <View style={styles.row2}>
+                <NumBox label="Footing wide" unit="in" value={main.footW} onChange={(footW) => setMain({ ...main, footW })} />
+                <NumBox label="Footing deep" unit="in" value={main.footD} onChange={(footD) => setMain({ ...main, footD })} />
+              </View>
+            ) : null}
+            <View style={styles.chips}>
+              {chip('In this bid', !main.existing, () => setMain({ ...main, existing: false }))}
+              {chip('Already there (not in bid)', main.existing, () => setMain({ ...main, existing: true }))}
+            </View>
+            {mainIssue ? <Text style={styles.help}>{mainIssue}</Text> : null}
+            {done(hasHouse ? 'Done' : 'Next: add-ons', finishMain, !!mainIssue)}
+          </View>
+        ) : null}
+
+        {/* ---- + Add-on: pick the wall ---- */}
+        {mode === 'addon-pick' && layout ? (
+          <View style={styles.panel}>
+            <Text style={styles.panelTitle}>Which main wall does it build off?</Text>
+            <View style={styles.chips}>
+              {SIDES.map((side) => chip(`${SIDE_SHORT[side]} ${fmtFtIn(sideLength(spec, side))}`, false, () => pickWall(side), `Builds off the ${SIDE_SHORT[side]} wall`))}
+            </View>
+            {addOnsHere.length ? (
+              <>
+                <Text style={styles.sub}>Or change one you have:</Text>
+                {addOnsHere.map((o, i) => (
+                  <View key={i} style={styles.listRow}>
+                    <Text style={styles.listText}>
+                      Add-on{addOnsHere.length > 1 ? ` ${i + 1}` : ''}: {fmtFtIn(o.width)} wide, out {fmtFtIn(o.depth)} off {SIDE_SHORT[o.side]}
+                    </Text>
+                    <Pressable
+                      onPress={() => {
+                        setAddon({ index: i, side: o.side, depth: fmtFtIn(o.depth), part: (o.from ?? 0) > 0 || o.width < sideLength(spec, o.side), from: fmtFtIn(o.from ?? 0), width: fmtFtIn(o.width) });
+                        setMode('addon-size');
+                      }}
+                      style={styles.small}
+                      accessibilityRole="button"
+                    >
+                      <Text style={styles.smallText}>Change</Text>
+                    </Pressable>
+                    <Pressable onPress={() => commit(removeAddOn(raw.layout, i), 'Add-on taken out.')} style={styles.small} accessibilityRole="button">
+                      <Text style={[styles.smallText, styles.danger]}>Remove</Text>
+                    </Pressable>
+                  </View>
+                ))}
+              </>
+            ) : null}
+            {done('Close', () => setMode('idle'), false)}
+          </View>
+        ) : null}
+
+        {/* ---- + Add-on: size ---- */}
+        {mode === 'addon-size' && addon ? (
+          <View style={styles.panel}>
+            <Text style={styles.panelTitle}>Off the main {SIDE_SHORT[addon.side]} wall</Text>
+            <Text style={styles.sub}>Shared wall: already counted in Main.</Text>
+            <LenBox label={`Comes out (from the outside of ${SIDE_SHORT[addon.side].split(' ')[1]})`} value={addon.depth} onChange={(depth) => setAddon({ ...addon, depth })} autoFocus wide />
+            <View style={styles.chips}>
+              {chip(`Full wall ${fmtFtIn(sideLength(spec, addon.side))}`, !addon.part, () => setAddon({ ...addon, part: false }))}
+              {chip('Only part of it…', addon.part, () => setAddon({ ...addon, part: true }))}
+            </View>
+            {addon.part ? (
+              <View style={styles.row2}>
+                <LenBox label="From the corner" value={addon.from} onChange={(from) => setAddon({ ...addon, from })} />
+                <LenBox label="Width" value={addon.width} onChange={(width) => setAddon({ ...addon, width })} />
+              </View>
+            ) : null}
+            {(() => {
+              const s = addonSpec();
+              const p = s ? addOnProblem(raw.layout, s) : null;
+              return p ? <Text style={styles.problem}>{p}</Text> : null;
+            })()}
+            {done('Done', finishAddon, (() => {
+              const s = addonSpec();
+              return !s || !!addOnProblem(raw.layout, s);
+            })())}
+          </View>
+        ) : null}
+
+        {/* ---- + Inside walls ---- */}
+        {mode === 'inside' && inside && a ? (
+          <View style={styles.panel}>
+            <Text style={styles.panelTitle}>Walls inside the add-on</Text>
+            {addOnsHere.length > 1 ? <View style={styles.chips}>{addOnsHere.map((_, i) => chip(`Add-on ${i + 1}`, i === insideIdx, () => openInside(i)))}</View> : null}
+            <View style={styles.chips}>
+              {chip(`Front to back, ${fmtFtIn(a.depth)}`, inside.dir === 'out', () => setInsideState({ ...inside, dir: 'out' }), 'Walls run front to back, out from the main wall')}
+              {chip(`Side to side, ${fmtFtIn(a.width)}`, inside.dir === 'across', () => setInsideState({ ...inside, dir: 'across' }), 'Walls run side to side, along the main wall')}
+            </View>
+            <View style={styles.countRow}>
+              <Text style={styles.sub}>Inside walls</Text>
+              <Pressable onPress={() => bayCount(inside.bays.length - 1)} style={styles.step} accessibilityRole="button" accessibilityLabel="One less inside wall">
+                <Text style={styles.stepText}>−</Text>
+              </Pressable>
+              <Text style={styles.count}>{inside.bays.length - 1}</Text>
+              <Pressable onPress={() => bayCount(inside.bays.length + 1)} style={styles.step} accessibilityRole="button" accessibilityLabel="One more inside wall">
+                <Text style={styles.stepText}>+</Text>
+              </Pressable>
+            </View>
+            <Text style={styles.sub}>
+              Bays {inside.dir === 'out' ? 'across' : 'out'}, {bayWord(a, inside.dir)}, CLEAR (wall face to wall face):
+            </Text>
+            <View style={styles.bays}>
+              {inside.bays.map((b, k) => {
+                const fill = fillBays({ ...a, inside: inside.dir, bays: insideBays() }, spec.wall.thick);
+                const isRest = b === 'rest';
+                return (
+                  <View key={k} style={styles.bay}>
+                    {isRest ? (
+                      <Pressable onPress={() => setBay(k, '')} style={[styles.box, styles.restBox]} accessibilityRole="button" accessibilityLabel={`Bay ${k + 1} is the rest, ${fmtFtIn(fill.widths[k])}. Tap to type it.`}>
+                        <Text style={styles.calc}>rest</Text>
+                      </Pressable>
+                    ) : (
+                      <TextInput
+                        style={styles.box}
+                        value={b}
+                        onChangeText={(v) => setBay(k, v)}
+                        placeholder="ft"
+                        placeholderTextColor={colors.faint}
+                        keyboardType="numbers-and-punctuation"
+                        accessibilityLabel={`Bay ${k + 1} clear`}
+                      />
+                    )}
+                    <Text style={[styles.bayCap, isRest && styles.calc]}>{Number.isFinite(fill.widths[k]) && fill.widths[k] > 0 ? fmtFtIn(fill.widths[k]) : '–'}</Text>
+                  </View>
+                );
+              })}
+            </View>
+            <View style={styles.chips}>
+              {chip('Same both ends', inside.same, () => setInsideState({ ...inside, same: !inside.same }))}
+              {!inside.bays.includes('rest') ? chip('Make one "the rest"', false, () => setBay(Math.floor((inside.bays.length - 1) / 2), 'rest')) : null}
+            </View>
+            {insideIssue ? <Text style={styles.problem}>{insideIssue}</Text> : null}
+            {done('Done', finishInside, !!insideIssue)}
+          </View>
+        ) : null}
+
+        {/* ---- Slab & pours ---- */}
+        {mode === 'slab' && layout ? (
+          <View style={styles.panel}>
+            <Text style={styles.panelTitle}>Slab & pours</Text>
+            <View style={styles.chips}>
+              {chip('Main house', spec.slabs.some((s) => s.at.in === 'main'), () => toggleSlabAt({ in: 'main' }), 'Slab in the main house')}
+              {layout.bays.flatMap((bs, ai) =>
+                bs.map((_, bi) => {
+                  const on = spec.slabs.some((s) => s.at.in === 'addon' && s.at.addOn === ai && s.at.bay === bi);
+                  const name = cap(`${addOnsHere.length > 1 ? `Add-on ${ai + 1} ` : ''}${bs.length > 1 ? bayName(bi, bs.length, addOnsHere[ai]) : 'add-on'}`);
+                  return chip(name, on, () => toggleSlabAt({ in: 'addon', addOn: ai, bay: bi }), `Slab in the ${name}`);
+                }),
+              )}
+            </View>
+            {layout.slabs.map((sl) => {
+              const yd = yards[sl.pour];
+              const r = sl.face.rect;
+              const first = layout.slabs[0];
+              const own = !spec.slabs[sl.index].pour;
+              return (
+                <View key={sl.index} style={styles.slabRow}>
+                  <Text style={styles.listText}>
+                    Slab {sl.pour}: {sl.name}
+                  </Text>
+                  <Text style={styles.sub}>
+                    {r ? `${fmtFtIn(r.w)} × ${fmtFtIn(r.h)} clear = ` : ''}
+                    {Math.round(sl.face.clearArea).toLocaleString()} sq ft · {Math.round(sl.thick * 12)}" {yd ? `· ${yd} yd` : ''}
+                  </Text>
+                  {sl.index !== first.index ? (
+                    <View style={styles.chips}>
+                      {chip(`With Slab ${first.pour}`, !own, () => commit(setPour(raw.layout, sl.index, first.pour), `Poured with Slab ${first.pour}.`))}
+                      {chip('Own pour', own, () => commit(setPour(raw.layout, sl.index, undefined), 'Its own pour.'))}
+                    </View>
+                  ) : null}
+                </View>
+              );
+            })}
+            {layout.bays.flatMap((bs, ai) =>
+              bs.map((_, bi) => {
+                if (spec.slabs.some((s) => s.at.in === 'addon' && s.at.addOn === ai && s.at.bay === bi)) return null;
+                const key = `${ai}:${bi}`;
+                const cur = spec.bayLabels?.[key] ?? '';
+                return (
+                  <View key={key} style={styles.slabRow}>
+                    <Text style={styles.sub}>{cap(bs.length > 1 ? bayName(bi, bs.length, addOnsHere[ai]) : 'Add-on')}, no slab:</Text>
+                    <View style={styles.chips}>
+                      {['container pad', 'gravel', ''].map((lab) => chip(lab || 'nothing', cur === lab, () => commit(setBayLabel(raw.layout, ai, bi, lab))))}
+                    </View>
+                  </View>
+                );
+              }),
+            )}
+            <Text style={styles.panelTitle}>Pours</Text>
+            {layout.pours.map((p, i) => (
+              <Text key={p} style={styles.listText}>
+                {i + 1}. {p}
+              </Text>
+            ))}
+            <Text style={styles.help}>Each pour is a pump line on the bid (Pump truck: Each pour).</Text>
+            {done('Done', () => setMode('idle'), false)}
+          </View>
+        ) : null}
+
+        {mode === 'idle' && layout ? (
+          <View style={styles.panel}>
+            <Text style={styles.help}>Tap a wall or a bay on the plan to see it in the run list. Use the buttons above to add on.</Text>
+          </View>
+        ) : null}
+      </ScrollView>
+
+      {note ? (
+        <View style={styles.snack} accessibilityLiveRegion="polite">
+          <Text style={styles.snackText}>{note.text}</Text>
+          <Pressable
+            onPress={() => {
+              setUndo((u) => u.slice(0, -1));
+              restore(note.undoTo, raw.layout, 'redo');
+            }}
+            style={styles.snackBtn}
+            accessibilityRole="button"
+          >
+            <Text style={styles.snackBtnText}>UNDO</Text>
+          </Pressable>
+        </View>
+      ) : null}
+
+      {layout ? <RunList visible={showRuns} layout={layout} pick={pick} onPick={setPick} onClose={() => setShowRuns(false)} spec={raw.layout} onSave={(s, t) => commit(s, t)} /> : null}
+    </View>
+  );
+}
+
+const cap = (t: string) => t.charAt(0).toUpperCase() + t.slice(1);
+
+function bayWord(a: AddOnSpec, dir: 'out' | 'across'): string {
+  const n = bayName(0, 3, { side: a.side, inside: dir });
+  const m = bayName(2, 3, { side: a.side, inside: dir });
+  return `${n.replace(' bay', '')} to ${m.replace(' bay', '')}`;
+}
+
+/** Which slab spot a face is: the main house, or a bay of an add-on. */
+function spotOfFace(l: Layout, face: number): SlabSpot | null {
+  const L = l.spec.house.length;
+  const W = l.spec.house.width;
+  if (faceAt(l.graph.faces, { x: L / 2, y: W / 2 }) === face) return { in: 'main' };
+  for (const [ai, g] of l.addOnGeom.entries()) {
+    const bi = g.seeds.findIndex((p) => faceAt(l.graph.faces, p) === face);
+    if (bi >= 0) return { in: 'addon', addOn: ai, bay: bi };
+  }
+  return null;
+}
+
+/** The run list: grouped, rolled up, each run's ends; tap one to light it up and change its length. */
+function RunList({
+  visible,
+  layout,
+  pick,
+  onPick,
+  onClose,
+  spec,
+  onSave,
+}: {
+  visible: boolean;
+  layout: Layout;
+  pick: { run?: number };
+  onPick: (p: { run?: number; face?: number }) => void;
+  onClose: () => void;
+  spec: LayoutSpec;
+  onSave: (s: LayoutSpec, text: string) => void;
+}) {
+  const [edit, setEdit] = useState<{ run: number; text: string } | null>(null);
+  const groups = [...new Set(layout.runs.map((r) => r.group))];
+  /** What a run's length is in the layout, and how to change it. */
+  const lengthOf = (i: number): { set: (ft: number) => LayoutSpec; why?: string } | null => {
+    const r = layout.runs[i];
+    if (r.group === 'Main') {
+      const along = /back|front/.test(r.name);
+      return { set: (ft) => ({ ...spec, house: along ? { ...spec.house, length: ft } : { ...spec.house, width: ft } }), why: along ? 'Changes the back and front' : 'Changes both sides' };
+    }
+    const n = r.group === 'Add-on' ? 0 : Number(r.group.split(' ')[1]) - 1;
+    const a = spec.addOns[n];
+    if (!a) return null;
+    if (/ side$/.test(r.name)) return { set: (ft) => ({ ...spec, addOns: spec.addOns.map((o, k) => (k === n ? { ...o, depth: ft } : o)) }), why: 'How far it comes out (both sides)' };
+    if (/ far$/.test(r.name)) return { set: (ft) => ({ ...spec, addOns: spec.addOns.map((o, k) => (k === n ? { ...o, width: ft } : o)) }), why: 'How wide it is' };
+    return null;
+  };
+  return (
+    <Modal visible={visible} animationType="slide" transparent onRequestClose={onClose}>
+      <Pressable style={styles.backdrop} onPress={onClose} accessibilityLabel="Close the run list">
+        <Pressable style={styles.sheet} onPress={() => {}}>
+          <View style={styles.sheetHead}>
+            <Text style={styles.sheetTitle}>Run list</Text>
+            <Pressable onPress={onClose} accessibilityRole="button" style={styles.sheetDone}>
+              <Text style={styles.sheetDoneText}>Done</Text>
+            </Pressable>
+          </View>
+          <ScrollView style={styles.sheetBody} keyboardShouldPersistTaps="handled">
+            <Text style={styles.sub}>
+              {layout.totals.corners} corners · {layout.totals.tees} tees
+            </Text>
+            {groups.map((g) => {
+              const rs = layout.runs.map((r, i) => ({ r, i })).filter(({ r }) => r.group === g);
+              const shares = g !== 'Main' ? spec.addOns[g === 'Add-on' ? 0 : Number(g.split(' ')[1]) - 1] : null;
+              return (
+                <View key={g}>
+                  <Text style={styles.groupHead}>
+                    {g}: {rollUp(rs.map(({ r }) => r))}
+                    {rs.some(({ r }) => r.existing) ? ' (existing, not in bid)' : ''}
+                  </Text>
+                  {shares ? <Text style={styles.sub}>Shares {SIDE_SHORT[shares.side]}: 0' new</Text> : null}
+                  {rs.map(({ r, i }) => {
+                    const on = pick.run === i;
+                    const editable = lengthOf(i);
+                    return (
+                      <View key={i}>
+                        <Pressable
+                          onPress={() => {
+                            feel.tap();
+                            onPick({ run: i });
+                            setEdit(editable ? { run: i, text: fmtFtIn(r.measured) } : null);
+                          }}
+                          style={[styles.runRow, on && styles.runOn, r.existing && styles.runOld]}
+                          accessibilityRole="button"
+                          accessibilityLabel={`${r.name}, ${fmtFtIn(r.measured)}`}
+                        >
+                          <View style={styles.runMain}>
+                            <Text style={styles.runName}>
+                              {r.name}
+                              {r.shared ? '  SHARED, counted once' : ''}
+                            </Text>
+                            <Text style={styles.runEnds}>Ends: {r.ends.join(' / ')}</Text>
+                          </View>
+                          <Text style={styles.runLen}>{fmtFtIn(r.measured)}</Text>
+                        </Pressable>
+                        {edit && edit.run === i && editable ? (
+                          <View style={styles.editRow}>
+                            <LenBox label={editable.why ?? 'Length'} value={edit.text} onChange={(text) => setEdit({ run: i, text })} autoFocus wide />
+                            <Pressable
+                              onPress={() => {
+                                const ft = parseFtIn(edit.text);
+                                if (!ft) return;
+                                onSave(editable.set(ft), `${r.name}: ${fmtFtIn(ft)}.`);
+                                setEdit(null);
+                              }}
+                              style={styles.done}
+                              accessibilityRole="button"
+                            >
+                              <Text style={styles.doneText}>Set</Text>
+                            </Pressable>
+                          </View>
+                        ) : null}
+                      </View>
+                    );
+                  })}
+                </View>
+              );
+            })}
+            <Text style={styles.calcLine}>
+              Along the middle: {fmtFtIn(layout.totals.middle)} wall{layout.spec.footing ? ` / ${fmtFtIn(layout.totals.footingMiddle)} footing` : ''} (corners and tees counted once). Yards come from this plus
+              your waste.
+            </Text>
+          </ScrollView>
+        </Pressable>
+      </Pressable>
+    </Modal>
+  );
+}
+
+/** A length box that takes 40, 40 6, 40-6 or 40'6" and shows what it read. */
+function LenBox({ label, value, onChange, autoFocus, wide }: { label: string; value: string; onChange: (v: string) => void; autoFocus?: boolean; wide?: boolean }) {
+  const ft = parseFtIn(value);
+  return (
+    <View style={[styles.field, wide && styles.fieldWide]}>
+      <Text style={styles.fieldLabel}>{label}</Text>
+      <TextInput
+        style={styles.input}
+        value={value}
+        onChangeText={onChange}
+        placeholder="40 or 40 6"
+        placeholderTextColor={colors.faint}
+        keyboardType="numbers-and-punctuation"
+        autoFocus={autoFocus}
+        accessibilityLabel={label}
+      />
+      <Text style={value.trim() && ft === null ? styles.bad : styles.calc}>{value.trim() ? (ft === null ? 'Type it like 40 or 40 6' : fmtFtIn(ft)) : ' '}</Text>
+    </View>
+  );
+}
+
+function NumBox({ label, unit, value, onChange }: { label: string; unit: string; value: string; onChange: (v: string) => void }) {
+  return (
+    <View style={styles.field}>
+      <Text style={styles.fieldLabel}>
+        {label} ({unit})
+      </Text>
+      <TextInput style={styles.input} value={value} onChangeText={onChange} keyboardType="decimal-pad" accessibilityLabel={`${label}, ${unit}`} />
+    </View>
+  );
+}
+
+const getStyles = themed(() => ({
+  page: { flex: 1, backgroundColor: colors.bg },
+  header: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 8, paddingTop: 8, paddingBottom: 6, gap: 6 },
+  back: { paddingHorizontal: 8, paddingVertical: 10, minHeight: 44, justifyContent: 'center' },
+  backText: { fontSize: 18, fontWeight: '700', color: colors.accent },
+  title: { flex: 1, fontSize: 19, fontWeight: '800', color: colors.text },
+  hBtn: { paddingHorizontal: 12, paddingVertical: 10, borderRadius: 10, backgroundColor: colors.panel2, minHeight: 44, justifyContent: 'center' },
+  hBtnText: { fontSize: 16, fontWeight: '800', color: colors.text },
+  content: { paddingHorizontal: 12, paddingBottom: 140 },
+  banner: { backgroundColor: colors.accent, color: colors.accentText, fontSize: 17, fontWeight: '800', textAlign: 'center', paddingVertical: 10, borderRadius: 10, marginBottom: 6 },
+  empty: { height: 160, alignItems: 'center', justifyContent: 'center', borderRadius: 12, borderWidth: 1, borderColor: colors.border, borderStyle: 'dashed' },
+  emptyText: { fontSize: 16, color: colors.subtext },
+  stripWrap: { backgroundColor: colors.bg, paddingTop: 6 },
+  strip: { flexDirection: 'row', alignItems: 'center', backgroundColor: colors.panel, borderRadius: 12, paddingHorizontal: 12, paddingVertical: 12, minHeight: 52 },
+  stripText: { flex: 1, fontSize: 17, fontWeight: '800', color: colors.text },
+  stripMore: { fontSize: 15, fontWeight: '700', color: colors.accent, marginLeft: 8 },
+  toolbar: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginTop: 8, marginBottom: 6 },
+  tool: { flexGrow: 1, minHeight: 52, paddingHorizontal: 12, borderRadius: 12, backgroundColor: colors.panel2, alignItems: 'center', justifyContent: 'center' },
+  toolOn: { backgroundColor: colors.accent },
+  toolOff: { opacity: 0.4 },
+  toolText: { fontSize: 17, fontWeight: '800', color: colors.text },
+  toolTextOn: { color: colors.accentText },
+  rule: { fontSize: 13, color: colors.subtext, marginVertical: 6, lineHeight: 18 },
+  problem: { fontSize: 16, fontWeight: '700', color: colors.error, marginVertical: 6 },
+  panel: { backgroundColor: colors.panel, borderRadius: 14, padding: 14, marginTop: 8 },
+  panelTitle: { fontSize: 19, fontWeight: '800', color: colors.text, marginBottom: 8 },
+  sub: { fontSize: 15, color: colors.subtext, marginBottom: 6 },
+  help: { fontSize: 15, color: colors.subtext, marginVertical: 6, lineHeight: 20 },
+  row2: { flexDirection: 'row', gap: 10 },
+  field: { flex: 1, marginBottom: 8 },
+  fieldWide: { flexGrow: 0, flexShrink: 0, flexBasis: 'auto', alignSelf: 'stretch' },
+  fieldLabel: { fontSize: 14, fontWeight: '700', color: colors.subtext, marginBottom: 4 },
+  input: { backgroundColor: colors.bg, color: colors.text, fontSize: 22, fontWeight: '800', borderRadius: 10, paddingHorizontal: 12, paddingVertical: 10, minHeight: 52, borderWidth: 1, borderColor: colors.border },
+  calc: { fontSize: 15, color: colors.subtext, marginTop: 3, fontWeight: '600' },
+  bad: { fontSize: 15, color: colors.error, marginTop: 3, fontWeight: '700' },
+  chips: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginVertical: 6 },
+  chip: { minHeight: 48, paddingHorizontal: 14, borderRadius: 999, backgroundColor: colors.panel2, justifyContent: 'center' },
+  chipOn: { backgroundColor: colors.accent },
+  chipText: { fontSize: 16, fontWeight: '700', color: colors.text },
+  chipTextOn: { color: colors.accentText },
+  countRow: { flexDirection: 'row', alignItems: 'center', gap: 12, marginVertical: 6 },
+  step: { width: 52, height: 52, borderRadius: 12, backgroundColor: colors.panel2, alignItems: 'center', justifyContent: 'center' },
+  stepText: { fontSize: 26, fontWeight: '800', color: colors.text },
+  count: { fontSize: 24, fontWeight: '800', color: colors.text, minWidth: 28, textAlign: 'center' },
+  bays: { flexDirection: 'row', gap: 6, flexWrap: 'wrap' },
+  bay: { flexGrow: 1, flexBasis: 80, alignItems: 'center' },
+  box: { alignSelf: 'stretch', backgroundColor: colors.bg, color: colors.text, fontSize: 20, fontWeight: '800', borderRadius: 10, paddingHorizontal: 8, paddingVertical: 10, minHeight: 52, borderWidth: 1, borderColor: colors.border, textAlign: 'center', justifyContent: 'center' },
+  restBox: { borderStyle: 'dashed', alignItems: 'center' },
+  bayCap: { fontSize: 15, fontWeight: '800', color: colors.text, marginTop: 4 },
+  doneRow: { flexDirection: 'row', gap: 10, marginTop: 12 },
+  cancel: { flex: 1, minHeight: 52, borderRadius: 12, backgroundColor: colors.panel2, alignItems: 'center', justifyContent: 'center' },
+  cancelText: { fontSize: 17, fontWeight: '800', color: colors.text },
+  done: { flex: 2, minHeight: 52, borderRadius: 12, backgroundColor: colors.accent, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 16 },
+  doneText: { fontSize: 18, fontWeight: '800', color: colors.accentText },
+  listRow: { flexDirection: 'row', alignItems: 'center', gap: 8, marginVertical: 4 },
+  listText: { flex: 1, fontSize: 16, fontWeight: '700', color: colors.text },
+  small: { paddingHorizontal: 12, minHeight: 44, borderRadius: 10, backgroundColor: colors.panel2, justifyContent: 'center' },
+  smallText: { fontSize: 15, fontWeight: '800', color: colors.text },
+  danger: { color: colors.danger },
+  slabRow: { borderTopWidth: 0.5, borderTopColor: colors.border, paddingVertical: 8 },
+  snack: { position: 'absolute', left: 12, right: 12, top: 64, backgroundColor: '#1b1b1b', borderRadius: 14, padding: 14, flexDirection: 'row', alignItems: 'center', gap: 10, borderWidth: 1, borderColor: '#444' },
+  snackText: { flex: 1, color: '#fff', fontSize: 16, fontWeight: '600' },
+  snackBtn: { paddingHorizontal: 12, minHeight: 44, justifyContent: 'center' },
+  snackBtnText: { color: colors.accent, fontSize: 17, fontWeight: '900' },
+  backdrop: { flex: 1, backgroundColor: 'rgba(0,0,0,0.55)', justifyContent: 'flex-end' },
+  sheet: { backgroundColor: colors.bg, borderTopLeftRadius: 20, borderTopRightRadius: 20, maxHeight: '85%', paddingBottom: 30 },
+  sheetHead: { flexDirection: 'row', alignItems: 'center', padding: 16, borderBottomWidth: 0.5, borderBottomColor: colors.border },
+  sheetTitle: { flex: 1, fontSize: 20, fontWeight: '800', color: colors.text },
+  sheetDone: { paddingHorizontal: 8, minHeight: 44, justifyContent: 'center' },
+  sheetDoneText: { fontSize: 17, fontWeight: '800', color: colors.accent },
+  sheetBody: { paddingHorizontal: 14, paddingTop: 10 },
+  groupHead: { fontSize: 17, fontWeight: '800', color: colors.text, marginTop: 12, marginBottom: 4 },
+  runRow: { flexDirection: 'row', alignItems: 'center', backgroundColor: colors.panel, borderRadius: 12, padding: 12, marginBottom: 6, minHeight: 56 },
+  runOn: { borderWidth: 2, borderColor: colors.accent },
+  runOld: { opacity: 0.55 },
+  runMain: { flex: 1 },
+  runName: { fontSize: 16, fontWeight: '800', color: colors.text },
+  runEnds: { fontSize: 13, color: colors.subtext, marginTop: 2 },
+  runLen: { fontSize: 20, fontWeight: '800', color: colors.text, marginLeft: 8 },
+  editRow: { flexDirection: 'row', alignItems: 'flex-end', gap: 8, marginBottom: 8 },
+  calcLine: { fontSize: 14, color: colors.subtext, marginVertical: 14, lineHeight: 19 },
+}));
+
+// Rebuilt when the colors or text size change.
+let styles = getStyles();
+onThemeChange(() => {
+  styles = getStyles();
+});

@@ -4,7 +4,7 @@
 import { AppState, Platform } from 'react-native';
 
 import { allJobs, jobStore } from './jobs';
-import { scansForReport } from './scanner';
+import { deleteScanFile, scansForReport } from './scanner';
 
 import { slabLayout } from '../tools/slabLayoutTool';
 import { defaultRaw, RawLength, RawOutlineRow, RawValues } from '../tools/run';
@@ -70,7 +70,7 @@ export async function readPlan(data: string, mediaType: string): Promise<PlanRea
   if (Platform.OS === 'web' && typeof navigator !== 'undefined' && navigator.onLine === false) throw new OfflineError('No signal');
   let res: Response;
   try {
-    res = await fetch(ENDPOINT, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ data, mediaType }) });
+    res = await fetch(ENDPOINT, { method: 'POST', headers: { 'content-type': 'application/json', 'x-calc-app': 'construction-calc/plan-reader/1' }, body: JSON.stringify({ data, mediaType }) });
   } catch {
     throw new OfflineError('No signal');
   }
@@ -212,6 +212,9 @@ export async function processPlanQueue(): Promise<void> {
           jobStore.planDone(job.id, p.id, { error: e instanceof Error ? e.message : 'Couldn’t read the plan.' });
         }
         if (!p.uri) void dropPendingFile(p.id);
+        // A file picked from Files was copied in only to wait for signal: done with it now. Scanned pages
+        // stay, they're the job's plans.
+        else if (!(job.scans ?? []).includes(p.uri)) deleteScanFile(p.uri);
       }
     }
   } finally {
