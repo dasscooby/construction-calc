@@ -525,3 +525,25 @@ test('a shorter stretch of wall uses the shortest stack of your panels that reac
   // Taller than the panels reach
   expect(stackFor(108, [60, 36])).toEqual({ stack: [0, 1], short: true });
 });
+
+describe('a 0 typed in a size box gets a note, not 0 yards', () => {
+  const msg = (r: ReturnType<typeof runTool>) => (r.status === 'invalid' ? r.message : r.status);
+  test('piers', () => {
+    expect(msg(runTool(tool('piers'), { size: 0, height: 8, qty: 4 }))).toBe('Diameter and depth must be more than 0.');
+    expect(msg(runTool(tool('piers'), { size: 1, height: 0, qty: 4 }))).toBe('Diameter and depth must be more than 0.');
+    expect(msg(runTool(tool('piers'), { size: 1, height: 8, qty: 0 }))).toBe('How many must be at least 1.');
+  });
+  test('steps', () => {
+    const base = { steps: 3, rise: { ft: '', in: '7' }, run: { ft: '', in: '11' }, width: 4 };
+    expect(msg(runTool(tool('steps'), { ...base, steps: 0 }))).toBe('Enter at least 1 step.');
+    expect(msg(runTool(tool('steps'), { ...base, width: 0 }))).toBe('Rise, run and width must be more than 0.');
+    expect(msg(runTool(tool('steps'), { ...base, rise: { ft: '0', in: '0' } }))).toBe('Rise, run and width must be more than 0.');
+  });
+  test('footings & walls, straight run', () => {
+    const run = { shape: 'run', depth: { ft: '', in: '10' }, width: { ft: '', in: '20' } };
+    expect(msg(runTool(tool('footings'), { ...run, length: 0 }))).toBe('Length must be more than 0.');
+    expect(msg(runTool(tool('footings'), { ...run, length: 40, qty: 0 }))).toBe('How many must be at least 1.');
+    // 40 ft of 20" × 10" = 40 × 1.6667 × 0.8333 = 55.56 cu ft = 2.06 cu yd
+    expect(rowValue(runTool(tool('footings'), { ...run, length: 40 }), 'Before waste')).toBe('2.06 cu yd');
+  });
+});

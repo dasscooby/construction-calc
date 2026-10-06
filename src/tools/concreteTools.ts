@@ -80,6 +80,8 @@ export function footingRun(inp: Inputs): { error?: string; outsideFt: number; ce
     const addon = `${ftIn(D)} + ${ftIn(W)} + ${ftIn(D)} outside${k ? `, plus ${k} inside × ${ftIn(D)}` : ''}`;
     return { outsideFt: a.asMeasuredFt, centerFt: a.centerFt, corners: a.corners, tees: a.tees, ends: false, addon };
   }
+  if (inp.len('length') <= 0) return { error: 'Length must be more than 0.', outsideFt: 0, centerFt: 0, corners: 0, ends: true };
+  if (inp.count('qty') < 1) return { error: 'How many must be at least 1.', outsideFt: 0, centerFt: 0, corners: 0, ends: true };
   const run = inp.len('length') * inp.count('qty');
   return { outsideFt: run, centerFt: run, corners: inp.has('corners') ? inp.count('corners') : 0, ends: true };
 }
@@ -255,6 +257,8 @@ const piers: Tool = {
     const d = inp.len('size');
     const h = inp.len('height');
     const qty = inp.count('qty');
+    if (d <= 0 || h <= 0) return { error: 'Diameter and depth must be more than 0.' };
+    if (qty < 1) return { error: 'How many must be at least 1.' };
     const rows: ResultRow[] = [];
     let each: number;
     if (inp.choice('shape') === 'square') {
@@ -291,6 +295,8 @@ const steps: Tool = {
   ],
   compute: (inp) => {
     const n = inp.count('steps');
+    if (n < 1) return { error: 'Enter at least 1 step.' };
+    if (inp.len('rise') <= 0 || inp.len('run') <= 0 || inp.len('width') <= 0) return { error: 'Rise, run and width must be more than 0.' };
     const stairs = stepsCuFt(n, inp.len('rise'), inp.len('run'), inp.len('width'));
     const landing = inp.len('landing') * inp.len('width') * n * inp.len('rise');
     return { rows: concreteRows(stairs + landing, inp) };
