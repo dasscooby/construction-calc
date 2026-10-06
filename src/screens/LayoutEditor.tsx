@@ -262,7 +262,9 @@ export default function LayoutEditor({ job, start, preset, onClose }: { job: Job
 
   // ---- run strip ----
   const groups = layout ? [...new Set(layout.runs.map((r) => r.group))] : [];
-  const strip = layout
+  const strip = layout && groups.length === 1
+    ? `${groups[0]} ${fmtFtIn(layout.totals.measured)} of wall${spec.footing ? ' and footing' : ''}${layout.runs.some((r) => r.existing) ? ' (existing)' : ''}`
+    : layout
     ? `${groups.map((g) => `${g} ${fmtFtIn(layout.runs.filter((r) => r.group === g).reduce((s, r) => s + r.measured, 0))}${layout.runs.some((r) => r.group === g && r.existing) ? ' (existing)' : ''}`).join(' + ')} = ${fmtFtIn(layout.totals.measured)} wall${spec.footing ? ` · ${fmtFtIn(layout.totals.measured)} footing` : ''}`
     : 'Start with the main house';
 

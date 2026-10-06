@@ -187,6 +187,9 @@ export function graphPlanSvg(l: Layout, info: LayoutDrawInfo): string {
     const name = info.compact ? r.run.name.replace(/^(Main|Add-on( \d+)?) /, '') : r.run.name;
     const text = `${name.toUpperCase()} ${ft(r.run.measured)}${info2.existing ? ' (EXISTING)' : ''}`;
     const on = hl.run === i;
+    // On the phone, a label longer than its wall would run into the next one: the run list has it.
+    const size = (inside ? 12 : 14) * fs;
+    if (info.compact && text.length * size * 0.6 > Math.hypot(r.run.b.x - r.run.a.x, r.run.b.y - r.run.a.y) * s + 20 && !on) return;
     out.push(
       `<text x="${n(tx)}" y="${n(ty + (vertical ? 0 : 5))}" text-anchor="middle" ${FONT} font-size="${(inside ? 12 : 14) * fs}" font-weight="800" fill="${on ? HILITE : '#111'}"${vertical ? ` transform="rotate(-90 ${n(tx)} ${n(ty)})"` : ''}>${esc(text)}</text>`,
     );
@@ -200,6 +203,8 @@ export function graphPlanSvg(l: Layout, info: LayoutDrawInfo): string {
     out.push(`<line x1="${n(a.x)}" y1="${n(a.y)}" x2="${n(c.x)}" y2="${n(c.y)}" stroke="#111" stroke-width="1"/>`);
     for (const e of [a, c]) out.push(`<line x1="${n(e.x - 5)}" y1="${n(e.y + 5)}" x2="${n(e.x + 5)}" y2="${n(e.y - 5)}" stroke="#111" stroke-width="2"/>`);
     const vertical = Math.abs(q.x - p.x) < Math.abs(q.y - p.y);
+    // A size that won't fit over its bay is left off on the phone (the bay boxes show it).
+    if (info.compact && label.length * 15 * fs * 0.6 > Math.hypot(c.x - a.x, c.y - a.y) + 6) return;
     const mx = (a.x + c.x) / 2 + nx * 13 * fs;
     const my = (a.y + c.y) / 2 + ny * 13 * fs;
     out.push(`<text x="${n(mx)}" y="${n(my + (vertical ? 0 : 5))}" text-anchor="middle" ${FONT} font-size="${15 * fs}" font-weight="700" fill="#111"${vertical ? ` transform="rotate(-90 ${n(mx)} ${n(my)})"` : ''}>${esc(label)}</text>`);
@@ -215,6 +220,7 @@ export function graphPlanSvg(l: Layout, info: LayoutDrawInfo): string {
     for (let i = 0; i + 1 < marks.length; i += 2) dimString(pt(marks[i]), pt(marks[i + 1]), dir.x, dir.y, 52, ft(marks[i + 1] - marks[i]));
     const mid = pt((marks[0] + marks[marks.length - 1]) / 2);
     const vertical = along ? Math.abs(g.dir.x) < Math.abs(g.dir.y) : Math.abs(g.out.x) < Math.abs(g.out.y);
+    if (info.compact) continue; // the editor says "clear, wall face to wall face" by the bay boxes
     const lx = Number(X(mid.x)) + dir.x * 92;
     const ly2 = Number(Y(mid.y)) + dir.y * 92;
     out.push(`<text x="${n(lx)}" y="${n(ly2 + (vertical ? 0 : 5))}" text-anchor="middle" ${FONT} font-size="${13 * fs}" font-weight="700" fill="#333"${vertical ? ` transform="rotate(-90 ${n(lx)} ${n(ly2)})"` : ''}>BAYS, CLEAR (FACE TO FACE)</text>`);

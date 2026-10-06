@@ -104,7 +104,8 @@ export function addOnProblem(spec: LayoutSpec, a: AddOnSpec): string | null {
   if (!(a.width > 0)) return 'Put in how wide it is.';
   if (a.depth <= 2 * t) return `It has to come out more than ${fmtFtIn(2 * t)} to fit its walls.`;
   if (a.width <= 2 * t) return `It has to be wider than ${fmtFtIn(2 * t)} to fit its walls.`;
-  if (from < 0 || from + a.width > wall + 1 / 96) return `The main ${SIDE_NAME[a.side]} wall is only ${fmtFtIn(wall)}. Starting ${fmtFtIn(from)} in, it can be up to ${fmtFtIn(Math.max(0, wall - from))} wide.`;
+  if (from < 0 || from >= wall - 2 * t) return `It has to start on the wall: the main ${SIDE_NAME[a.side]} wall is ${fmtFtIn(wall)} long.`;
+  if (from + a.width > wall + 1 / 96) return `The main ${SIDE_NAME[a.side]} wall is only ${fmtFtIn(wall)}. Starting ${fmtFtIn(from)} in, it can be up to ${fmtFtIn(Math.max(0, wall - from))} wide.`;
   if (spec.addOns.some((o) => o !== a && o.side === a.side && from < (o.from ?? 0) + o.width && (o.from ?? 0) < from + a.width)) return 'There is already an add-on on that part of the wall.';
   return null;
 }
