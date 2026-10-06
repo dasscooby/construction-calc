@@ -89,3 +89,18 @@ export function docCss(d: DocSettings): string {
       : ''
   }`;
 }
+
+/**
+ * Every drawing in a document gets its own pattern and fill names (two drawings both using "hatch" or
+ * "earth" can leave one drawn empty on a phone, where the first one's pattern is used for both).
+ */
+export function uniqueSvgIds(html: string): string {
+  let n = 0;
+  return html.replace(/<svg[\s\S]*?<\/svg>/g, (svg) => {
+    n++;
+    const ids = [...svg.matchAll(/\bid="([^"]+)"/g)].map((m) => m[1]);
+    let out = svg;
+    for (const id of ids) out = out.split(`id="${id}"`).join(`id="d${n}-${id}"`).split(`url(#${id})`).join(`url(#d${n}-${id})`);
+    return out;
+  });
+}

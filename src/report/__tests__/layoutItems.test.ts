@@ -172,3 +172,9 @@ describe('the bid shows the whole job', () => {
     expect(missingLines(src, all).length).toBe(0);
   });
 });
+
+test('every drawing in a document has its own pattern names (so none is drawn empty)', () => {
+  const { uniqueSvgIds } = require('../docStyle') as typeof import('../docStyle');
+  const two = '<svg><defs><pattern id="hatch"/></defs><rect fill="url(#hatch)"/></svg><svg><defs><pattern id="hatch"/></defs><rect fill="url(#hatch)"/></svg>';
+  expect(uniqueSvgIds(two)).toBe('<svg><defs><pattern id="d1-hatch"/></defs><rect fill="url(#d1-hatch)"/></svg><svg><defs><pattern id="d2-hatch"/></defs><rect fill="url(#d2-hatch)"/></svg>');
+});

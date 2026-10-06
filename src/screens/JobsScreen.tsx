@@ -86,7 +86,7 @@ export default function JobsScreen({ onOpenItem }: Props) {
         jobs.map((j) => (
           <Pressable key={j.id} onPress={() => setOpenId(j.id)} accessibilityRole="button" style={({ pressed }) => [styles.card, pressed && styles.pressed]}>
             <View style={styles.cardHead}>
-              <Text style={styles.cardTitle}>{j.name}</Text>
+              <JobName job={j} />
               <Text style={styles.cardMeta}>{dayLabel(j.createdAt)}</Text>
             </View>
             {j.address ? <Text style={styles.cardSub}>{j.address}</Text> : null}
@@ -98,6 +98,56 @@ export default function JobsScreen({ onOpenItem }: Props) {
       )}
       <BackupCard jobs={jobs} />
     </ScrollView>
+  );
+}
+
+/** A job's name with a ✎ Rename button: a box filled in with the name, Save or Cancel. A blank name isn't saved. */
+function JobName({ job, big }: { job: Job; big?: boolean }) {
+  const [text, setText] = useState<string | null>(null);
+  const save = () => {
+    if (text === null) return;
+    if (jobStore.rename(job.id, text)) {
+      feel.success();
+      setText(null);
+    }
+  };
+  if (text === null) {
+    return (
+      <View style={styles.nameRow}>
+        <Text style={big ? styles.nameBig : styles.cardTitle} numberOfLines={big ? 3 : 2}>
+          {job.name}
+        </Text>
+        <Pressable onPress={() => (feel.tap(), setText(job.name))} style={styles.renameBtn} accessibilityRole="button" accessibilityLabel={`Rename ${job.name}`} hitSlop={8}>
+          <Text style={styles.renameText}>✎ Rename</Text>
+        </Pressable>
+      </View>
+    );
+  }
+  const blank = !text.trim();
+  return (
+    <View style={styles.renameBox}>
+      <TextInput
+        style={styles.renameInput}
+        value={text}
+        onChangeText={setText}
+        autoFocus
+        selectTextOnFocus
+        returnKeyType="done"
+        onSubmitEditing={save}
+        placeholder="Job name"
+        placeholderTextColor={colors.faint}
+        accessibilityLabel="Job name, rename"
+      />
+      {blank ? <Text style={styles.warn}>A job needs a name.</Text> : null}
+      <View style={styles.renameBtns}>
+        <Pressable onPress={() => setText(null)} style={styles.smallBtn} accessibilityRole="button">
+          <Text style={styles.smallBtnText}>Cancel</Text>
+        </Pressable>
+        <Pressable onPress={save} style={[styles.smallBtn, styles.saveBtn, blank && styles.disabled]} disabled={blank} accessibilityRole="button">
+          <Text style={[styles.smallBtnText, styles.saveText]}>Save</Text>
+        </Pressable>
+      </View>
+    </View>
   );
 }
 
@@ -220,14 +270,7 @@ function JobDetail({ job, onBack, onOpenItem }: { job: Job; onBack: () => void; 
         </Pressable>
       </View>
       <ScrollView contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled">
-        <TextInput
-          style={styles.nameInput}
-          value={job.name}
-          onChangeText={(name) => jobStore.edit(job.id, { name })}
-          placeholder="Job name"
-          placeholderTextColor={colors.faint}
-          accessibilityLabel="Job name"
-        />
+        <JobName job={job} big />
         <TextInput
           style={styles.field}
           value={job.address}
@@ -1313,6 +1356,15 @@ const getStyles = themed(() => ({
   secondarySub: { fontSize: 14, color: colors.subtext, marginTop: 2, textAlign: 'center', paddingHorizontal: 12 },
   danger: { color: colors.danger },
   overlap: { backgroundColor: colors.warningBg, borderRadius: 12, padding: 12 },
+  nameRow: { flexDirection: 'row', alignItems: 'center', gap: 8, flexShrink: 1, flex: 1 },
+  nameBig: { fontSize: 28, fontWeight: '800', color: colors.text, paddingVertical: 6, flexShrink: 1 },
+  renameBtn: { paddingHorizontal: 10, minHeight: 40, borderRadius: 10, backgroundColor: colors.panel2, justifyContent: 'center' },
+  renameText: { fontSize: 14, fontWeight: '800', color: colors.accent },
+  renameBox: { flex: 1, marginBottom: 6 },
+  renameInput: { backgroundColor: colors.bg, color: colors.text, fontSize: 22, fontWeight: '800', borderRadius: 10, paddingHorizontal: 12, minHeight: 50, borderWidth: 1, borderColor: colors.accent },
+  renameBtns: { flexDirection: 'row', gap: 8, marginTop: 8 },
+  saveBtn: { backgroundColor: colors.accent },
+  saveText: { color: colors.accentText },
   disabled: { opacity: 0.4 },
   card: { backgroundColor: colors.panel, borderRadius: 16, padding: 14, marginBottom: 10 },
   pressed: { backgroundColor: colors.panel2 },

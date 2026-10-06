@@ -178,6 +178,13 @@ export const jobStore = {
   edit(id: string, patch: Partial<Pick<Job, 'name' | 'address' | 'notes' | 'customer' | 'taxPct' | 'paid' | 'slabBid' | 'together'>>) {
     update(id, (j) => ({ ...j, ...patch }));
   },
+  /** A new name for a job (trimmed). A blank name is refused: returns false and nothing changes. */
+  rename(id: string, name: string): boolean {
+    const clean = name.replace(/\s+/g, ' ').trim();
+    if (!clean || !jobs.some((j) => j.id === id)) return false;
+    update(id, (j) => ({ ...j, name: clean }));
+    return true;
+  },
   remove(id: string) {
     set(jobs.filter((j) => j.id !== id));
   },

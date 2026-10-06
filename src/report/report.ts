@@ -14,7 +14,7 @@ import type { ResultRow, Tool } from '../tools/types';
 import { houseSectionSvg, isoSlabSvg, isoSvg, planSvg, roundedLabels, roundedRect, sectionSvg, sideLabels, SlabSide, slabPlanSvg } from './drawings';
 import { insetOutline, Pt, wallOutline } from './geometry';
 import { layoutIsoSvg, layoutPlanSvg } from './layoutDraw';
-import { DocMedia, docCss, logoHtml, noticeHtml } from './docStyle';
+import { DocMedia, docCss, logoHtml, noticeHtml, uniqueSvgIds } from './docStyle';
 import { buildLayout, matBars } from './layoutGeom';
 import { confirmedFoundation, Foundation, foundationLines, pourName } from './foundation';
 import { daylightWall, splitOutline, WallSteel } from './heightRuns';
@@ -844,7 +844,7 @@ export function buildReport(job: Job, s: Settings, opts: { now?: Date; crew?: bo
   .warn { background: #fff4dc; border: 1px solid #e0a000; border-radius: 6px; padding: 6px 8px; font-size: 13px; margin-bottom: 6px; }
   .draw { border: 1px solid #ccc; border-radius: 10px; overflow: hidden; margin-bottom: 12px; break-inside: avoid; page-break-inside: avoid; }
   h2.page { break-before: page; page-break-before: always; }
-  .draw svg { max-height: 92vh; }
+  .draw svg { display: block; width: 100%; height: auto; max-height: 92vh; }
   .notes { white-space: pre-wrap; font-size: 14px; }
   .fnd { margin: 0; padding-left: 18px; font-size: 14px; line-height: 1.5; }
   table.rebar th { text-align: left; font-size: 12px; text-transform: uppercase; letter-spacing: .05em; color: #555; border-bottom: 2px solid #111; padding: 6px 4px; }
@@ -896,5 +896,5 @@ ${noticeHtml('crew', s.docs)}
     .join('\n')
     .trim();
 
-  return { html, text };
+  return { html: uniqueSvgIds(html), text };
 }

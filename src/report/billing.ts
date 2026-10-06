@@ -5,7 +5,7 @@ import type { ChangeOrder, Job, PriceLine, Signature } from '../lib/jobs';
 import type { Settings } from '../lib/settings';
 import { commas, dec, ftIn, money } from '../tools/format';
 import { parseLength, parseNumber, RawLength, RawWallRow } from '../tools/run';
-import { DocMedia, docCss, logoHtml, noticeHtml } from './docStyle';
+import { DocMedia, docCss, logoHtml, noticeHtml, uniqueSvgIds } from './docStyle';
 import { confirmedFoundation, pourCount, pourName } from './foundation';
 import { bidOptions, refreshLines, remapLines } from './bidOptions';
 import { buildLayout, LayoutRun, LayoutSpec } from './foundationLayout';
@@ -194,7 +194,7 @@ const STYLE = `
   .co-sum { width: 340px; margin-left: auto; margin-top: 10px; }
   .draw { border: 1px solid #ccc; border-radius: 10px; overflow: hidden; margin-top: 10px; break-inside: avoid; page-break-inside: avoid; }
   h3.page { break-before: page; page-break-before: always; }
-  .draw svg { max-height: 92vh; }
+  .draw svg { display: block; width: 100%; height: auto; max-height: 92vh; }
   h3 { font-size: 13px; text-transform: uppercase; letter-spacing: .08em; color: #333; margin: 26px 0 6px; border-bottom: 2px solid #111; padding-bottom: 4px; }
   .scope { margin: 0; padding: 0; list-style: none; }
   .scope li { font-size: 14px; padding: 6px 0; border-bottom: 1px solid #e5e5e5; display: flex; gap: 12px; }
@@ -345,7 +345,7 @@ ${noticeHtml(kind, s.docs)}
     .filter((l, i, a) => l !== '' || a[i - 1] !== '')
     .join('\n')
     .trim();
-  return { html, text };
+  return { html: uniqueSvgIds(html), text };
 }
 
 export const buildBid = (job: Job, s: Settings, items: FiguredItem[], now = new Date(), media: DocMedia = {}) => moneyDoc('bid', job, s, items, now, media);
@@ -383,6 +383,6 @@ ${noticeHtml('change', s.docs)}
   ]
     .filter(Boolean)
     .join('\n');
-  return { html, text };
+  return { html: uniqueSvgIds(html), text };
 }
 export const buildBill = (job: Job, s: Settings, items: FiguredItem[], now = new Date(), media: DocMedia = {}) => moneyDoc('bill', job, s, items, now, media);
