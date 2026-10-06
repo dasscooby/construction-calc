@@ -250,7 +250,7 @@ const stirrups: Tool = {
     { key: 'spacing', label: 'On center', kind: 'number', unit: 'in', default: '24' },
     { key: 'width', label: 'Beam width', kind: 'number', unit: 'in' },
     { key: 'depth', label: 'Beam depth', kind: 'number', unit: 'in' },
-    { key: 'cover', label: 'Clear', kind: 'number', unit: 'in', default: '1.5', help: 'Concrete outside the stirrup' },
+    { key: 'cover', label: 'Cover', kind: 'number', unit: 'in', default: '1.5', help: 'Concrete outside the stirrup. 1-1/2" is common.' },
     barSizeField(3, 5, '3'),
     {
       key: 'hook',
@@ -276,7 +276,7 @@ const stirrups: Tool = {
     if (spacingIn <= 0) return { error: 'On center must be more than 0.' };
     const outW = widthIn - 2 * coverIn;
     const outD = depthIn - 2 * coverIn;
-    if (outW <= 0 || outD <= 0) return { error: 'The clear leaves no room for a stirrup.' };
+    if (outW <= 0 || outD <= 0) return { error: 'The cover leaves no room for a stirrup.' };
 
     const ext = tieHookExtIn(bar, hook);
     const cutIn = tieCutLengthIn(widthIn, depthIn, coverIn, bar, hook);
