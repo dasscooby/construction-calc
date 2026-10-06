@@ -98,7 +98,12 @@ describe('runTool', () => {
 
   test('missing, invalid and compute errors', () => {
     expect(runTool(box, {})).toEqual({ status: 'missing', message: 'Enter length' });
-    expect(runTool(box, { l: { ft: 'abc', in: '' } })).toEqual({ status: 'invalid', message: 'Check Length' });
+    expect(runTool(box, { l: { ft: 'abc', in: '' } })).toEqual({ status: 'invalid', message: 'Length: type a number, like 12 or 6 1/2' });
+    expect(runTool(box, { l: { ft: '-5', in: '' } })).toEqual({ status: 'invalid', message: 'Length can’t be less than 0' });
+    expect(runTool(box, { l: { ft: '5', in: '-3' } })).toEqual({ status: 'invalid', message: 'Length can’t be less than 0' });
+    expect(runTool(box, { l: 4, x: '12ft' })).toEqual({ status: 'invalid', message: 'Extra: type a number, like 12 or 6 1/2' });
+    expect(runTool(box, { l: 4, x: '-2' })).toEqual({ status: 'invalid', message: 'Extra can’t be less than 0' });
+    expect(runTool(box, { l: { ft: '6', in: '1-1/2' } }).status).toBe('ok'); // a dash in a fraction is fine
     expect(runTool(box, { l: 4, n: '2.5' })).toEqual({ status: 'invalid', message: 'Quantity must be a whole number' });
     expect(runTool(box, { l: 200 })).toEqual({ status: 'invalid', message: 'Too long' });
   });

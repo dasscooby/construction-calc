@@ -91,7 +91,7 @@ describe('squaring', () => {
     expect(runTool(sq, { length: 30, width: 0 })).toEqual({ status: 'invalid', message: 'Length and width must be more than 0.' });
     expect(runTool(sq, { length: 30, width: 20, diag1: { ft: 'x', in: '' } })).toEqual({
       status: 'invalid',
-      message: 'Check Diagonal 1 (measured)',
+      message: 'Diagonal 1 (measured): type a number, like 12 or 6 1/2',
     });
   });
 });

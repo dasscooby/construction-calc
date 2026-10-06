@@ -34,6 +34,11 @@ export function parseNumber(text: string, allowNegative = false): number | null 
   return null;
 }
 
+/** What to say when a box can't be read: a minus sign where it can't go, or letters and other junk. */
+function badNumber(label: string, text: string, allowNegative = false): string {
+  return !allowNegative && /(^|\s)[-−]/.test(text.trim()) ? `${label} can’t be less than 0` : `${label}: type a number, like 12 or 6 1/2`;
+}
+
 const blankLength = (r: RawLength) => r.ft.trim() === '' && r.in.trim() === '';
 
 /** Feet + inches boxes → feet. null if blank, NaN if it can't be read. */
@@ -240,7 +245,7 @@ export function runTool(tool: Tool, values: Record<string, LooseValue | boolean>
       case 'length': {
         const n = parseLength(v as RawLength);
         if (n === null) blank = true;
-        else if (Number.isNaN(n)) return { status: 'invalid', message: `Check ${f.label}` };
+        else if (Number.isNaN(n)) return { status: 'invalid', message: badNumber(f.label, `${(v as RawLength).ft} ${(v as RawLength).in}`) };
         else value = n;
         break;
       }
@@ -249,7 +254,7 @@ export function runTool(tool: Tool, values: Record<string, LooseValue | boolean>
         if (text.trim() === '') blank = true;
         else {
           const n = parseNumber(text, f.allowNegative);
-          if (n === null) return { status: 'invalid', message: `Check ${f.label}` };
+          if (n === null) return { status: 'invalid', message: badNumber(f.label, text, f.allowNegative) };
           value = n;
         }
         break;
