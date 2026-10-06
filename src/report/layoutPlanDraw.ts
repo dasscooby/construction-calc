@@ -304,6 +304,52 @@ const clockwise = (pts: Pt[]) => {
   return a >= 0 ? pts : [...pts].reverse();
 };
 
+/**
+ * The order to draw square-cornered pieces in the 3D view (looking from the front right, so bigger
+ * x + y is nearer): a piece that is wholly behind another along x or y, where they overlap the other
+ * way, is drawn first. Sorting by the middle of each piece isn't enough: a long wall's middle can be
+ * nearer than a short wall in front of it, and the long one gets drawn over it.
+ */
+export function paintOrder(polys: Pt[][]): number[] {
+  const box = polys.map((p) => ({
+    x0: Math.min(...p.map((q) => q.x)),
+    x1: Math.max(...p.map((q) => q.x)),
+    y0: Math.min(...p.map((q) => q.y)),
+    y1: Math.max(...p.map((q) => q.y)),
+  }));
+  const e = 1e-6;
+  const behind = (a: number, b: number) => {
+    const A = box[a];
+    const B = box[b];
+    const overlapX = A.x0 < B.x1 - e && B.x0 < A.x1 - e;
+    const overlapY = A.y0 < B.y1 - e && B.y0 < A.y1 - e;
+    return (A.x1 <= B.x0 + e && overlapY) || (A.y1 <= B.y0 + e && overlapX);
+  };
+  const n = polys.length;
+  const after = Array.from({ length: n }, () => [] as number[]);
+  const waiting = new Array(n).fill(0);
+  for (let a = 0; a < n; a++)
+    for (let b = 0; b < n; b++)
+      if (a !== b && behind(a, b)) {
+        after[a].push(b);
+        waiting[b]++;
+      }
+  const mid = (i: number) => box[i].x0 + box[i].x1 + box[i].y0 + box[i].y1;
+  const out: number[] = [];
+  const done = new Set<number>();
+  while (out.length < n) {
+    // Of the pieces with nothing left behind them, the farthest back first; if none (shouldn't happen
+    // with walls that don't cross), the farthest back of what's left.
+    const ready = [...Array(n).keys()].filter((i) => !done.has(i) && waiting[i] === 0);
+    const pool = ready.length ? ready : [...Array(n).keys()].filter((i) => !done.has(i));
+    const next = pool.sort((u, v) => mid(u) - mid(v))[0];
+    done.add(next);
+    out.push(next);
+    for (const b of after[next]) waiting[b]--;
+  }
+  return out;
+}
+
 export function graphIsoSvg(l: Layout, highlight: { run?: number; face?: number } = {}): string {
   const spec = l.spec;
   const fd = spec.footing ? spec.footing.depth : 0;
@@ -344,15 +390,18 @@ export function graphIsoSvg(l: Layout, highlight: { run?: number; face?: number 
     out.push(`<polygon points="${poly.map((p) => pt(p.x, p.y, z1)).join(' ')}" fill="${topFill}" stroke="#55514b" stroke-width="0.9"/>`);
   };
   // Footings, then slabs, then walls; each set back to front.
-  if (spec.footing) for (const f of foots.filter((x): x is Pt[] => !!x).sort((a, b) => depth(a) - depth(b))) prism(f, 0, Hf, '#cfcac1', '#b9b5ad', '#9a958d');
+  if (spec.footing) {
+    const fs = foots.filter((x): x is Pt[] => !!x);
+    for (const k of paintOrder(fs)) prism(fs[k], 0, Hf, '#cfcac1', '#b9b5ad', '#9a958d');
+  }
   for (const sl of l.slabs) {
     const i = l.graph.faces.indexOf(sl.face);
     out.push(`<polygon points="${clockwise(sl.face.clear).map((p) => pt(p.x, p.y, slabTop)).join(' ')}" fill="${highlight.face === i ? '#ffc58a' : '#dedad2'}" stroke="#55514b" stroke-width="0.9"/>`);
   }
-  walls
-    .map((w, i) => ({ w, i }))
-    .sort((a, b) => depth(a.w) - depth(b.w))
-    .forEach(({ w, i }) => (highlight.run === i ? prism(w, Hf, top, '#ffb366', '#ff9a40', '#e5822a') : prism(w, Hf, top, '#ece9e3', '#c9c5bd', '#a9a49b')));
+  for (const i of paintOrder(walls)) {
+    if (highlight.run === i) prism(walls[i], Hf, top, '#ffb366', '#ff9a40', '#e5822a');
+    else prism(walls[i], Hf, top, '#ece9e3', '#c9c5bd', '#a9a49b');
+  }
   if (z > 1.5) out.push(`<text x="${W - 14}" y="${H - 10}" text-anchor="end" ${FONT} font-size="12" fill="#666">Height stretched to show the footing, walls and slabs</text>`);
   return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${W} ${H}" width="100%" role="img" aria-label="3D view">${out.join('')}</svg>`;
 }

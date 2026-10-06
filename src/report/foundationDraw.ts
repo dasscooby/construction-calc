@@ -10,6 +10,7 @@ import { ftIn } from '../tools/format';
 import { barSpots } from './footingDraw';
 import { bounds, insetOutline, Pt } from './geometry';
 import { addonLayout, Rect } from '../tools/addon';
+import { paintOrder } from './layoutPlanDraw';
 
 const n = (v: number) => Math.round(v * 10) / 10;
 const esc = (s: string) => s.replace(/&/g, '+').replace(/</g, '‹').replace(/>/g, '›');
@@ -505,9 +506,9 @@ export function foundationIsoSvg(d: FoundationDraw): string {
   const mid = (ps: Pt[]) => ps.reduce((sum, p) => sum + p.x + p.y, 0) / ps.length;
   const drawAdd = (x: PlacedAddOn) => {
     const hf = x.a.footing ? (x.a.footing.depthIn / 12) * z : Hf;
-    for (const p of [...x.footings].sort((u, v) => mid(u) - mid(v))) prism(p, Hf - hf, Hf, '#cfcac1', '#b9b5ad', '#9a958d');
+    for (const p of paintOrder(x.footings).map((k) => x.footings[k])) prism(p, Hf - hf, Hf, '#cfcac1', '#b9b5ad', '#9a958d');
     if (x.pour && x.a.pour) out.push(`<polygon points="${x.pour.map((p) => pt(p.x, p.y, Hf + x.a.wallFt * z - ((d.slab?.dropIn ?? 0) / 12) * z)).join(' ')}" fill="#dedad2" stroke="#55514b" stroke-width="0.9"/>`);
-    for (const p of [...x.walls].sort((u, v) => mid(u) - mid(v))) prism(p, Hf, Hf + x.a.wallFt * z, '#ece9e3', '#c9c5bd', '#a9a49b');
+    for (const p of paintOrder(x.walls).map((k) => x.walls[k])) prism(p, Hf, Hf + x.a.wallFt * z, '#ece9e3', '#c9c5bd', '#a9a49b');
   };
   const house = mid(outer);
   for (const x of adds) if (mid(x.box) < house) drawAdd(x);

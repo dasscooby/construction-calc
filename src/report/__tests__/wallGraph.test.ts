@@ -88,3 +88,33 @@ test('three walls at a point: the two that line up carry through, the third tees
   expect(g.runs[0].middle).toBe(9.5);
   expect(g.runs[2].middle).toBe(5);
 });
+
+test('3D: every wall is drawn, and none is drawn over a wall in front of it', () => {
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  const { graphIsoSvg, paintOrder } = require('../layoutPlanDraw') as typeof import('../layoutPlanDraw');
+  for (const side of ['top', 'right', 'bottom', 'left'] as const) {
+    const l = buildLayout({ ...job, addOns: [{ ...job.addOns[0], side }] });
+    // One wall top per run.
+    expect((graphIsoSvg(l).match(/fill="#ece9e3"/g) ?? []).length).toBe(l.graph.runs.length);
+    // A wall wholly behind another (looking from the front right) comes first.
+    const rects = l.graph.runs.map((r) => {
+      const xs = [r.run.a.x, r.run.b.x];
+      const ys = [r.run.a.y, r.run.b.y];
+      return [
+        { x: Math.min(...xs) - 0.3, y: Math.min(...ys) - 0.3 },
+        { x: Math.max(...xs) + 0.3, y: Math.min(...ys) - 0.3 },
+        { x: Math.max(...xs) + 0.3, y: Math.max(...ys) + 0.3 },
+        { x: Math.min(...xs) - 0.3, y: Math.max(...ys) + 0.3 },
+      ];
+    });
+    const order = paintOrder(rects);
+    const at = (i: number) => order.indexOf(i);
+    rects.forEach((a, i) =>
+      rects.forEach((b, k) => {
+        const overlapY = a[0].y < b[2].y && b[0].y < a[2].y;
+        const overlapX = a[0].x < b[2].x && b[0].x < a[2].x;
+        if ((a[2].x <= b[0].x && overlapY) || (a[2].y <= b[0].y && overlapX)) expect(at(i)).toBeLessThan(at(k));
+      }),
+    );
+  }
+});
