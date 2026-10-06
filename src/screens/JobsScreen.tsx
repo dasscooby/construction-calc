@@ -24,6 +24,7 @@ import { buildReport, figureItems, FiguredItem, foundationDrawings, jobTotals, l
 import { buildLayout } from '../report/foundationLayout';
 import { LayoutRaw, runList } from '../report/layoutItems';
 import { fmtFtIn, Start, startFromJob } from '../lib/layoutEdit';
+import { mergeSummary, pickBackup, shareBackup } from '../lib/backup';
 import LayoutEditor from './LayoutEditor';
 import DrawingView from './DrawingView';
 import HeightRuns from './HeightRuns';
@@ -85,7 +86,52 @@ export default function JobsScreen({ onOpenItem }: Props) {
           </Pressable>
         ))
       )}
+      <BackupCard jobs={jobs} />
     </ScrollView>
+  );
+}
+
+/** Back up every job to a file, or bring a backup back (nothing already here is changed). */
+function BackupCard({ jobs }: { jobs: Job[] }) {
+  const [msg, setMsg] = useState('');
+  const [busy, setBusy] = useState(false);
+  const backup = async () => {
+    setMsg('');
+    try {
+      await shareBackup(jobs);
+      setMsg(`Backed up ${jobs.length} job${jobs.length === 1 ? '' : 's'}. Keep the file somewhere safe, like Files or iCloud Drive.`);
+    } catch (e) {
+      setMsg(`Couldn't make the backup: ${pickError(e)}`);
+    }
+  };
+  const restore = async () => {
+    setMsg('');
+    setBusy(true);
+    try {
+      const text = await pickBackup();
+      if (text !== null) {
+        const r = jobStore.restoreBackup(text);
+        if (!r.problem) feel.success();
+        setMsg(mergeSummary(r));
+      }
+    } catch (e) {
+      setMsg(`Couldn't read that file: ${pickError(e)}`);
+    }
+    setBusy(false);
+  };
+  return (
+    <View style={[styles.card, styles.lineGap]}>
+      <Text style={styles.label}>Keep your jobs safe</Text>
+      <Text style={styles.help}>Your jobs are only on this phone. A backup is one file with all of them, to keep or to move to a new phone. Plan pages and photos stay on the phone.</Text>
+      <Pressable onPress={backup} style={[styles.secondary, !jobs.length && styles.disabled]} disabled={!jobs.length} accessibilityRole="button">
+        <Text style={styles.secondaryText}>Back up all jobs</Text>
+      </Pressable>
+      <Pressable onPress={restore} style={styles.secondary} disabled={busy} accessibilityRole="button">
+        <Text style={styles.secondaryText}>{busy ? 'Reading…' : 'Restore from a backup'}</Text>
+        <Text style={styles.secondarySub}>Adds the jobs that aren't here. Never changes one you have.</Text>
+      </Pressable>
+      {msg ? <Text style={styles.help}>{msg}</Text> : null}
+    </View>
   );
 }
 
@@ -1215,6 +1261,7 @@ const getStyles = themed(() => ({
   secondaryText: { fontSize: 17, fontWeight: '700', color: colors.accent },
   secondarySub: { fontSize: 14, color: colors.subtext, marginTop: 2, textAlign: 'center', paddingHorizontal: 12 },
   danger: { color: colors.danger },
+  disabled: { opacity: 0.4 },
   card: { backgroundColor: colors.panel, borderRadius: 16, padding: 14, marginBottom: 10 },
   pressed: { backgroundColor: colors.panel2 },
   cardHead: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'baseline' },

@@ -3,6 +3,7 @@
 
 import { useSyncExternalStore } from 'react';
 
+import { mergeBackup, MergeResult } from './backup';
 import { readSavedList, saver } from './savedList';
 
 import type { RawLength, RawValues } from '../tools/run';
@@ -205,6 +206,13 @@ export const jobStore = {
       };
     });
     return id;
+  },
+  /** Puts the jobs from a backup next to these. A job already here is never changed. */
+  restoreBackup(text: string): MergeResult {
+    load();
+    const r = mergeBackup(jobs, text);
+    if (!r.problem && (r.added || r.copies)) set(r.jobs);
+    return r;
   },
   /** Takes the layout out and brings back what it replaced. */
   removeLayout(jobId: string) {

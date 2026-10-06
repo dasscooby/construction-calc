@@ -8,6 +8,26 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { AppState } from 'react-native';
 
+// ---- when a save fails (the phone is full) ----
+let problem = '';
+const problemListeners = new Set<() => void>();
+const setProblem = (p: string) => {
+  if (p === problem) return;
+  problem = p;
+  problemListeners.forEach((l) => l());
+};
+/** Why the last save failed ('' when saves are going through). */
+export const saveProblem = () => problem;
+export const onSaveProblem = (l: () => void) => {
+  problemListeners.add(l);
+  return () => problemListeners.delete(l);
+};
+const write = (key: string, list: unknown) =>
+  AsyncStorage.setItem(key, JSON.stringify(list)).then(
+    () => setProblem(''),
+    () => setProblem("Couldn't save on this phone. It may be out of space. Back up your jobs (Jobs tab) and free up some room."),
+  );
+
 /** Everything waiting to be saved, saved now (the app is going to the background). */
 const flushers = new Set<() => void>();
 export const flushSaves = () => flushers.forEach((f) => f());
@@ -56,7 +76,7 @@ export function saver(key: string, pauseMs = 300) {
   const flush = () => {
     if (timer) clearTimeout(timer);
     timer = null;
-    if (pending && ready && !blocked) AsyncStorage.setItem(key, JSON.stringify(pending)).catch(() => {});
+    if (pending && ready && !blocked) void write(key, pending);
     pending = null;
   };
   flushers.add(flush);
@@ -79,7 +99,7 @@ export function saver(key: string, pauseMs = 300) {
         return;
       }
       ready = true;
-      if (waiting) AsyncStorage.setItem(key, JSON.stringify(list)).catch(() => {});
+      if (waiting) void write(key, list);
       waiting = false;
     },
   };
