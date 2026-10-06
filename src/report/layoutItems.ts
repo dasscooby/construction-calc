@@ -135,7 +135,13 @@ export function layoutChildren(item: JobItem): FiguredItem[] {
       areas: rects.map((r) => ({ length: toRaw(r.w), width: toRaw(r.h) })) as never,
     });
     const size = these.map((s) => (s.face.rect ? `${ftIn(s.face.rect.w)} × ${ftIn(s.face.rect.h)}` : `${Math.round(s.face.clearArea).toLocaleString()} sq ft`)).join(' + ');
-    out.push(child(`slab${pour}`, `Slab ${pour}: ${these.map((s) => s.name).join(' + ')}`, slabTool, slabRaw, [{ label: 'Pour', value: `Slab ${pour}`, note: `Inside the walls: ${size}` }]));
+    const outer = these.reduce((sum, s) => sum + s.face.outerArea, 0);
+    out.push(
+      child(`slab${pour}`, `Slab ${pour}: ${these.map((s) => s.name).join(' + ')}`, slabTool, slabRaw, [
+        { label: 'Pour', value: `Slab ${pour}`, note: `Inside the walls: ${size}` },
+        { label: 'To the outside of the walls', value: `${commasTrim(outer, 1)} sq ft`, note: 'The size it is usually bid at; yards are for what is poured inside' },
+      ]),
+    );
   }
   return out;
 }

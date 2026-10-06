@@ -26,6 +26,8 @@ export interface LayoutDrawInfo {
   pourYd?: Record<number, number>;
   /** Light up a run (index in layout.runs) or an area (index in layout.graph.faces) */
   highlight?: { run?: number; face?: number };
+  /** Just the plan (no legend or title block), for the editor */
+  compact?: boolean;
 }
 
 /** Plan scale and placement, shared by the drawing and the hit-test. */
@@ -106,8 +108,8 @@ export function hitLayout(l: Layout, px: number, py: number): { run?: number; fa
 export function graphPlanSvg(l: Layout, info: LayoutDrawInfo): string {
   const F = planFrame(l);
   const { W, s, X, Y, planH } = F;
-  const legendH = 24 + 32 * (2 + (l.spec.footing ? 1 : 0) + l.slabs.length);
-  const titleH = 76;
+  const legendH = info.compact ? 0 : 24 + 32 * (2 + (l.spec.footing ? 1 : 0) + l.slabs.length);
+  const titleH = info.compact ? 6 : 76;
   const H = Math.round(planH + legendH + titleH);
   const path = (pts: Pt[]) => `M${pts.map((p) => `${X(p.x)} ${Y(p.y)}`).join(' L')} Z`;
   const out: string[] = [];
@@ -118,6 +120,9 @@ export function graphPlanSvg(l: Layout, info: LayoutDrawInfo): string {
   );
   out.push(`<rect x="6" y="6" width="${W - 12}" height="${H - 12}" fill="none" stroke="#111" stroke-width="2"/>`);
   const hl = info.highlight ?? {};
+  // On the phone the plan is about half size: bigger, shorter labels so they read in sunlight.
+  const fs = info.compact ? 1.9 : 1;
+  const ft = (v: number) => (info.compact ? dim(v).replace(/-0"$/, '') : dim(v));
   const slabFaces = new Map(l.slabs.map((sl) => [l.graph.faces.indexOf(sl.face), sl]));
 
   // Slabs: shaded inside the walls.
@@ -175,14 +180,15 @@ export function graphPlanSvg(l: Layout, info: LayoutDrawInfo): string {
         ny = -ny;
       }
     }
-    const gap = r.run.thick / 2 * s + (inside ? 12 : 20);
+    const gap = (r.run.thick / 2) * s + (inside ? 12 : 20) * fs;
     const tx = Number(X(mx)) + nx * gap;
     const ty = Number(Y(my)) + ny * gap;
     const vertical = Math.abs(d.x) < Math.abs(d.y);
-    const text = `${r.run.name.toUpperCase()} ${dim(r.run.measured)}${info2.existing ? ' (EXISTING)' : ''}`;
+    const name = info.compact ? r.run.name.replace(/^(Main|Add-on( \d+)?) /, '') : r.run.name;
+    const text = `${name.toUpperCase()} ${ft(r.run.measured)}${info2.existing ? ' (EXISTING)' : ''}`;
     const on = hl.run === i;
     out.push(
-      `<text x="${n(tx)}" y="${n(ty + (vertical ? 0 : 5))}" text-anchor="middle" ${FONT} font-size="${inside ? 12 : 14}" font-weight="800" fill="${on ? HILITE : '#111'}"${vertical ? ` transform="rotate(-90 ${n(tx)} ${n(ty)})"` : ''}>${esc(text)}</text>`,
+      `<text x="${n(tx)}" y="${n(ty + (vertical ? 0 : 5))}" text-anchor="middle" ${FONT} font-size="${(inside ? 12 : 14) * fs}" font-weight="800" fill="${on ? HILITE : '#111'}"${vertical ? ` transform="rotate(-90 ${n(tx)} ${n(ty)})"` : ''}>${esc(text)}</text>`,
     );
   });
 
@@ -194,9 +200,9 @@ export function graphPlanSvg(l: Layout, info: LayoutDrawInfo): string {
     out.push(`<line x1="${n(a.x)}" y1="${n(a.y)}" x2="${n(c.x)}" y2="${n(c.y)}" stroke="#111" stroke-width="1"/>`);
     for (const e of [a, c]) out.push(`<line x1="${n(e.x - 5)}" y1="${n(e.y + 5)}" x2="${n(e.x + 5)}" y2="${n(e.y - 5)}" stroke="#111" stroke-width="2"/>`);
     const vertical = Math.abs(q.x - p.x) < Math.abs(q.y - p.y);
-    const mx = (a.x + c.x) / 2 + nx * 13;
-    const my = (a.y + c.y) / 2 + ny * 13;
-    out.push(`<text x="${n(mx)}" y="${n(my + (vertical ? 0 : 5))}" text-anchor="middle" ${FONT} font-size="15" font-weight="700" fill="#111"${vertical ? ` transform="rotate(-90 ${n(mx)} ${n(my)})"` : ''}>${esc(label)}</text>`);
+    const mx = (a.x + c.x) / 2 + nx * 13 * fs;
+    const my = (a.y + c.y) / 2 + ny * 13 * fs;
+    out.push(`<text x="${n(mx)}" y="${n(my + (vertical ? 0 : 5))}" text-anchor="middle" ${FONT} font-size="${15 * fs}" font-weight="700" fill="#111"${vertical ? ` transform="rotate(-90 ${n(mx)} ${n(my)})"` : ''}>${esc(label)}</text>`);
   };
   for (const g of l.addOnGeom) {
     const marks = g.bays.marks;
@@ -206,12 +212,12 @@ export function graphPlanSvg(l: Layout, info: LayoutDrawInfo): string {
     const along = g.bays.axis === 'u';
     const pt = (k: number) => (along ? g.at(k, g.depth) : g.at(g.from + g.width, k));
     const dir = along ? g.out : g.dir;
-    for (let i = 0; i + 1 < marks.length; i += 2) dimString(pt(marks[i]), pt(marks[i + 1]), dir.x, dir.y, 52, dim(marks[i + 1] - marks[i]));
+    for (let i = 0; i + 1 < marks.length; i += 2) dimString(pt(marks[i]), pt(marks[i + 1]), dir.x, dir.y, 52, ft(marks[i + 1] - marks[i]));
     const mid = pt((marks[0] + marks[marks.length - 1]) / 2);
     const vertical = along ? Math.abs(g.dir.x) < Math.abs(g.dir.y) : Math.abs(g.out.x) < Math.abs(g.out.y);
     const lx = Number(X(mid.x)) + dir.x * 92;
     const ly2 = Number(Y(mid.y)) + dir.y * 92;
-    out.push(`<text x="${n(lx)}" y="${n(ly2 + (vertical ? 0 : 5))}" text-anchor="middle" ${FONT} font-size="13" font-weight="700" fill="#333"${vertical ? ` transform="rotate(-90 ${n(lx)} ${n(ly2)})"` : ''}>BAYS, CLEAR (FACE TO FACE)</text>`);
+    out.push(`<text x="${n(lx)}" y="${n(ly2 + (vertical ? 0 : 5))}" text-anchor="middle" ${FONT} font-size="${13 * fs}" font-weight="700" fill="#333"${vertical ? ` transform="rotate(-90 ${n(lx)} ${n(ly2)})"` : ''}>BAYS, CLEAR (FACE TO FACE)</text>`);
   }
 
   // Slab callouts.
@@ -224,17 +230,19 @@ export function graphPlanSvg(l: Layout, info: LayoutDrawInfo): string {
     const yd = info.pourYd?.[sl.pour];
     const widthPx = (Math.max(...xs) - Math.min(...xs)) * s;
     const heightPx = (Math.max(...ys) - Math.min(...ys)) * s;
-    const big = widthPx > 220;
+    const big = widthPx > 220 && !info.compact;
     // A narrow bay gets a one-line callout; the full one is on the legend's pour list.
     const small = Math.min(widthPx, heightPx) < 90;
     const full = [`${inch(sl.thick)} SLAB ${sl.pour}`, size, `${Math.round(face.clearArea).toLocaleString()} SQ FT${yd ? ` · ${yd} YD` : ''}`].filter(Boolean);
-    const lines = small ? [`SLAB ${sl.pour}`] : full;
+    const lines = small || info.compact ? [`SLAB ${sl.pour}`, ...(small ? [] : [`${Math.round(face.clearArea).toLocaleString()} SQ FT`])] : full;
     lines.forEach((t, k) =>
       out.push(
-        `<text x="${X(c.x)}" y="${n(Number(Y(c.y)) - ((lines.length - 1) * (big ? 22 : 17)) / 2 + k * (big ? 22 : 17) + 5)}" text-anchor="middle" ${FONT} font-size="${k === 0 ? (big ? 18 : 14) : big ? 15 : 12}" font-weight="${k === 0 ? 800 : 600}" fill="#111">${esc(t)}</text>`,
+        `<text x="${X(c.x)}" y="${n(Number(Y(c.y)) - ((lines.length - 1) * (big ? 22 : 17) * fs) / 2 + k * (big ? 22 : 17) * fs + 5 * fs)}" text-anchor="middle" ${FONT} font-size="${(k === 0 ? (big ? 18 : 14) : big ? 15 : 12) * fs}" font-weight="${k === 0 ? 800 : 600}" fill="#111">${esc(t)}</text>`,
       ),
     );
   });
+
+  if (info.compact) return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${W} ${H}" width="100%" role="img" aria-label="Plan view">${out.join('')}</svg>`;
 
   // Legend.
   const spec = l.spec;

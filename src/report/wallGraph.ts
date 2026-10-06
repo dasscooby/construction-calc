@@ -52,6 +52,8 @@ export interface Face {
   /** Clear (inside the wall faces) outline */
   clear: Pt[];
   clearArea: number;
+  /** To the outside of the walls around it (the size it's usually bid at), sq ft */
+  outerArea: number;
   /** Clear length × width when it's a rectangle */
   rect: { w: number; h: number } | null;
 }
@@ -213,7 +215,8 @@ function findFaces(runs: Run[]): Face[] {
     const middle = loop.map((e) => nodes[e.from]);
     if (signedArea(middle) <= 0) continue; // the outside of everything
     const clear = offsetIn(loop.map((e) => ({ a: nodes[e.from], b: nodes[e.to], d: e.run.thick / 2 })));
-    faces.push({ middle, clear, clearArea: Math.abs(signedArea(clear)), rect: rectOf(clear) });
+    const outer = offsetIn(loop.map((e) => ({ a: nodes[e.from], b: nodes[e.to], d: -e.run.thick / 2 })));
+    faces.push({ middle, clear, clearArea: Math.abs(signedArea(clear)), outerArea: Math.abs(signedArea(outer)), rect: rectOf(clear) });
   }
   return faces;
 }
