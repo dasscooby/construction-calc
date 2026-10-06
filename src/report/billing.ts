@@ -9,6 +9,7 @@ import { DocMedia, docCss, logoHtml, noticeHtml, uniqueSvgIds } from './docStyle
 import { confirmedFoundation, pourCount, pourName } from './foundation';
 import { bidOptions, refreshLines, remapLines } from './bidOptions';
 import { buildLayout, LayoutRun, LayoutSpec } from './foundationLayout';
+import { Block, contentWidth, drawingCss, drawingPage, footerHtml, letterPortrait, pageCss, paginate, textHeight } from './pager';
 import { builtItems, FiguredItem, itemRebarLb, jobDrawings, jobTotals, numberIn, pieceName, steelItems } from './report';
 
 const esc = (s: string) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
@@ -168,7 +169,7 @@ const docNumber = (job: Job) => {
 };
 
 const STYLE = `
-  body { font-family: -apple-system, Helvetica, Arial, sans-serif; color: #111; margin: 0; padding: 28px; background: #fff; }
+  body { font-family: -apple-system, Helvetica, Arial, sans-serif; color: #111; margin: 0; background: #fff; }
   .top { display: flex; justify-content: space-between; gap: 16px; border-bottom: 3px solid #111; padding-bottom: 12px; }
   .co { font-size: 14px; line-height: 1.45; }
   .co b { font-size: 20px; }
@@ -196,6 +197,8 @@ const STYLE = `
   h3.page { break-before: page; page-break-before: always; }
   .draw svg { display: block; width: 100%; height: auto; max-height: 92vh; }
   h3 { font-size: 13px; text-transform: uppercase; letter-spacing: .08em; color: #333; margin: 26px 0 6px; border-bottom: 2px solid #111; padding-bottom: 4px; }
+  h2 { font-size: 14px; text-transform: uppercase; letter-spacing: .08em; color: #333; margin: 0 0 6px; padding-top: 4px; }
+  table.scope td.k { width: 30%; font-weight: 700; }
   .scope { margin: 0; padding: 0; list-style: none; }
   .scope li { font-size: 14px; padding: 6px 0; border-bottom: 1px solid #e5e5e5; display: flex; gap: 12px; }
   .scope li b { min-width: 34%; }
@@ -310,22 +313,62 @@ function moneyDoc(kind: 'bid' | 'bill', job: Job, s: Settings, items: FiguredIte
   const terms = num(s.prices.termsDays);
   const when = kind === 'bid' ? `Good through ${fmtDate(days(30))}` : terms > 0 ? `Due ${fmtDate(days(terms))}` : 'Due on receipt';
 
-  const html = `<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
-<title>${esc(job.name)} – ${kind === 'bid' ? 'Bid' : 'Invoice'}</title><style>${STYLE}${docCss(s.docs)}</style></head><body>
-<div class="top"><div class="co">${logoHtml(media.logo)}${c.name ? `<b>${esc(c.name)}</b><br>` : ''}${coLines.map(esc).join('<br>')}</div>
+  // Laid out on Letter pages: the bid (lines run on with their heads if there are many), the totals
+  // kept with the signature, the scope of work on a fresh page, then each drawing on a page of its own.
+  const box = letterPortrait;
+  const W = contentWidth(box);
+  const header = `<div class="top"><div class="co">${logoHtml(media.logo)}${c.name ? `<b>${esc(c.name)}</b><br>` : ''}${coLines.map(esc).join('<br>')}</div>
 <div class="doc"><h1>${title}</h1><div class="meta">#${no}</div><div class="meta">${esc(date)}</div><div class="meta"><b>${esc(when)}</b></div></div></div>
 <div class="to">${job.customer ? `<div><h4>${kind === 'bid' ? 'Prepared for' : 'Bill to'}</h4>${esc(job.customer).replace(/\n/g, '<br>')}</div>` : ''}
-<div><h4>Job</h4>${esc(job.name)}${job.address ? `<br>${esc(job.address)}` : ''}</div></div>
-<table><tr><th>Description</th><th class="r">Qty</th><th class="r">Price</th><th class="r">Amount</th></tr>
-${lines.map((l) => `<tr><td>${esc(l.desc)}</td><td class="r">${esc(qtyText(l))}</td><td class="r">${num(l.price) ? money(num(l.price)) : ''}</td><td class="r">${money(lineAmount(l))}</td></tr>`).join('')}
-</table>
-<table class="sum">${sumRows.map(([k, v, cls]) => `<tr class="${cls ?? ''}"><td>${k}</td><td class="r">${v}</td></tr>`).join('')}</table>
-${scope.length ? `<h3>Scope of work</h3><ul class="scope">${scope.map(([k, v]) => `<li><b>${esc(k)}</b><span>${esc(v)}</span></li>`).join('')}</ul>` : ''}
-${kind === 'bid' ? signBlock('Accepted by', job.signature) : ''}
-${drawings?.plan ? `<h3 class="page">Plan</h3><div class="draw">${drawings.plan}</div>` : ''}
-${drawings?.iso ? `<h3 class="page">3D view</h3><div class="draw">${drawings.iso}</div>` : ''}
-${drawings?.section ? `<h3 class="page">Typical section</h3><div class="draw">${drawings.section}</div>` : ''}
-${noticeHtml(kind, s.docs)}
+<div><h4>Job</h4>${esc(job.name)}${job.address ? `<br>${esc(job.address)}` : ''}</div></div>`;
+  const headerH = 150 + (media.logo ? 70 : 0) + Math.max(coLines.length * 20, (job.customer ?? '').split('\n').length * 20);
+  const sumH = sumRows.length * 30 + 24;
+  const notice = noticeHtml(kind, s.docs);
+  const blocks: Block[] = [
+    { kind: 'block', html: header, h: headerH, keepWithNext: true },
+    {
+      kind: 'table',
+      title: '',
+      contTitle: kind === 'bid' ? 'Bid' : 'Invoice',
+      cls: 'lines',
+      head: '<tr><th>Description</th><th class="r">Qty</th><th class="r">Price</th><th class="r">Amount</th></tr>',
+      headH: 34,
+      rows: lines.map((l) => ({
+        html: `<tr><td>${esc(l.desc)}</td><td class="r">${esc(qtyText(l))}</td><td class="r">${num(l.price) ? money(num(l.price)) : ''}</td><td class="r">${money(lineAmount(l))}</td></tr>`,
+        h: textHeight(l.desc, 14, W * 0.5) + 18,
+      })),
+    },
+    {
+      kind: 'block',
+      html: `<table class="sum">${sumRows.map(([k, v, cls]) => `<tr class="${cls ?? ''}"><td>${k}</td><td class="r">${v}</td></tr>`).join('')}</table>`,
+      h: sumH,
+      keepWithNext: kind === 'bid',
+    },
+    ...(kind === 'bid' ? [{ kind: 'block' as const, html: signBlock('Accepted by', job.signature), h: job.signature ? 120 : 80 }] : []),
+    ...(notice ? [{ kind: 'block' as const, html: notice, h: textHeight(notice.replace(/<[^>]+>/g, ''), 13, W) + 40 }] : []),
+  ];
+  if (scope.length) {
+    blocks.push({
+      kind: 'table',
+      title: 'Scope of work',
+      cls: 'scope',
+      head: '<tr><th>What</th><th>Included</th></tr>',
+      headH: 34,
+      newPage: true,
+      rows: scope.map(([k, v]) => ({
+        html: `<tr><td class="k">${esc(k)}</td><td>${esc(v)}</td></tr>`,
+        h: Math.max(textHeight(k, 14, W * 0.3), textHeight(v, 14, W * 0.66)) + 16,
+      })),
+    });
+  }
+  const sheetNote = `${esc(job.name)} · ${esc(date)}`;
+  if (drawings?.plan) blocks.push(drawingPage(drawings.plan, 'Plan', sheetNote, box));
+  if (drawings?.iso) blocks.push(drawingPage(drawings.iso, '3D view', sheetNote, box));
+  if (drawings?.section) blocks.push(drawingPage(drawings.section, 'Typical section', sheetNote, box));
+
+  const html = `<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>${esc(job.name)} – ${kind === 'bid' ? 'Bid' : 'Invoice'}</title><style>${STYLE}${docCss(s.docs)}${pageCss(box)}${drawingCss}</style></head><body>
+${paginate(blocks, box, (n, of) => footerHtml(`${esc(job.name)} · ${kind === 'bid' ? 'Bid' : 'Invoice'} #${no} · ${esc(date)}`, n, of))}
 <button class="print" onclick="window.print()">Save as PDF / Print</button>
 </body></html>`;
 

@@ -15,6 +15,7 @@ import { houseSectionSvg, isoSlabSvg, isoSvg, planSvg, roundedLabels, roundedRec
 import { insetOutline, Pt, wallOutline } from './geometry';
 import { layoutIsoSvg, layoutPlanSvg } from './layoutDraw';
 import { DocMedia, docCss, logoHtml, noticeHtml, uniqueSvgIds } from './docStyle';
+import { Block, contentHeight, contentWidth, drawingCss, drawingPage, footerHtml, letterPortrait, pageCss, paginate, textHeight } from './pager';
 import { buildLayout, matBars } from './layoutGeom';
 import { confirmedFoundation, Foundation, foundationLines, pourName } from './foundation';
 import { daylightWall, splitOutline, WallSteel } from './heightRuns';
@@ -814,22 +815,85 @@ export function buildReport(job: Job, s: Settings, opts: { now?: Date; crew?: bo
 
   // Shown as built: a slab inside checked walls, walls whose height changes.
   const shown = builtItems(items, job).items;
-  const itemHtml = shown
-    .map(({ item, tool, result, inputs }) => {
+  const pieces = shown.map(({ item, tool, result, inputs }) => {
       const head = `<h3>${esc(item.label || tool.title)}${item.label ? ` <span class="tool">${esc(tool.title)}</span>` : ''}</h3>`;
       const inp = `<div class="inputs">${inputs.map((i) => `<span><b>${esc(i.label)}:</b> ${esc(i.value)}</span>`).join('')}</div>`;
       const body =
         result.status === 'ok'
           ? `${(result.result.warnings ?? []).map((w) => `<div class="warn">⚠ ${esc(w)}</div>`).join('')}${rowsTable(result.result.rows)}`
           : `<div class="warn">Not finished: ${esc(result.message)}</div>`;
-      return `<section class="item">${head}${inp}${body}</section>`;
-    })
-    .join('');
+      const rows = result.status === 'ok' ? result.result.rows : [];
+      const h =
+        46 +
+        textHeight(inputs.map((i) => `${i.label}: ${i.value}`).join('    '), 12.5, contentWidth(letterPortrait) - 30) +
+        rows.reduce((t, r) => t + 30 + (r.note ? textHeight(r.note, 12, contentWidth(letterPortrait) * 0.55) : 0), 0) +
+        (result.status === 'ok' ? (result.result.warnings ?? []).length * 40 : 40);
+      return { html: `<section class="item">${head}${inp}${body}</section>`, h };
+    });
+
+  // Laid out on Letter pages: the load list and rebar schedule up front, each drawing on a page of its
+  // own, then the details (a piece never split across pages), then any scanned plan pages.
+  const box = letterPortrait;
+  const W = contentWidth(box);
+  const blocks: Block[] = [];
+  blocks.push({
+    kind: 'block',
+    html: `<div class="top"><div>${crew ? '<div class="kind">CREW SHEET</div>' : ''}<h1>${esc(job.name)}</h1>${job.address ? `<div class="meta">${esc(job.address)}</div>` : ''}<div class="meta">${esc(date)}</div></div>
+${company || opts.logo ? `<div class="co">${logoHtml(opts.logo)}${esc(company).replace(/ · /g, '<br>')}</div>` : ''}</div>`,
+    h: 120 + (opts.logo ? 70 : 0),
+  });
+  if (crew && job.notes) blocks.push({ kind: 'block', html: notesHtml, h: textHeight(job.notes, 14, W) + 60 });
+  if (sum.length) {
+    blocks.push({
+      kind: 'table',
+      title: crew ? 'Load list' : 'Order summary',
+      cls: 'sum',
+      head: '',
+      headH: 0,
+      rows: sum.map((r) => ({ html: `<tr><td>${esc(r.label)}</td><td class="v">${esc(r.value)}</td></tr>`, h: textHeight(r.label, 15, W * 0.6) + 14 })),
+    });
+  }
+  if (schedule.length) {
+    blocks.push({
+      kind: 'table',
+      title: 'Rebar schedule',
+      cls: 'rebar',
+      head: '<tr><th>Where</th><th>Bars</th><th class="v">How many / long</th></tr>',
+      headH: 34,
+      rows: [
+        ...schedule.map((r) => ({
+          html: `<tr><td>${esc(r.where)}</td><td>${esc(r.what)}${r.note ? `<div class="note">${esc(r.note)}</div>` : ''}</td><td class="v">${esc(r.amount)}</td></tr>`,
+          h: Math.max(textHeight(r.where, 14, W * 0.25), textHeight(r.what, 14, W * 0.45) + (r.note ? textHeight(r.note, 12, W * 0.45) : 0)) + 14,
+        })),
+        ...steelTotals.map(([k, v]) => ({ html: `<tr class="tot"><td colspan="2">${esc(k)}</td><td class="v">${esc(v)}</td></tr>`, h: 32 })),
+      ],
+    });
+  }
+  const sheetNote = `${esc(job.name)} · ${esc(date)}`;
+  if (drawings?.plan) blocks.push(drawingPage(drawings.plan, foundation ? 'Foundation plan' : 'Plan', sheetNote, box));
+  if (drawings?.iso) blocks.push(drawingPage(drawings.iso, '3D view', sheetNote, box));
+  if (drawings?.section) blocks.push(drawingPage(drawings.section, foundation ? 'Typical section' : 'Section', sheetNote, box));
+  if (drawings?.house) blocks.push(drawingPage(drawings.house, 'At the house', sheetNote, box));
+  (opts.photos ?? []).forEach((src, i) => blocks.push({ kind: 'block', html: `${i === 0 ? '<h2>Photos</h2>' : ''}<div class="photo"><img src="${src}" alt="Photo ${i + 1}"></div>`, h: 420 + (i === 0 ? 44 : 0), newPage: i === 0 }));
+  if (foundation) {
+    const fl = foundationLines(foundation, job);
+    blocks.push({ kind: 'block', html: `<h2>Foundation: ${esc(foundation.kind)}</h2><div class="item"><ul class="fnd">${fl.map((l) => `<li>${esc(l)}</li>`).join('')}</ul></div>`, h: 80 + fl.reduce((t, l) => t + textHeight(l, 14, W - 40, 1.5), 0), newPage: true });
+  }
+  if (items.length) {
+    pieces.forEach((pc, i) => blocks.push({ kind: 'block', html: `${i === 0 ? '<h2>Details</h2>' : ''}${pc.html}`, h: pc.h + (i === 0 ? 44 : 0), newPage: i === 0 && !foundation }));
+  } else blocks.push({ kind: 'block', html: '<p>Nothing added to this job yet.</p>', h: 40 });
+  if (!crew && job.notes) blocks.push({ kind: 'block', html: notesHtml, h: textHeight(job.notes, 14, W) + 60 });
+  scans.forEach((src, i) => blocks.push({ kind: 'sheet', html: `<div class="dhead"><b>Plans · page ${i + 1}</b><span>${sheetNote}</span></div><div class="fit" style="height:${contentHeight(box) - 46}px"><img src="${src}" alt="Plan page ${i + 1}"></div>` }));
+  const notice = noticeHtml('crew', s.docs);
+  if (notice) blocks.push({ kind: 'block', html: notice, h: textHeight(notice.replace(/<[^>]+>/g, ''), 13, W) + 40 });
 
   const html = `<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
 <title>${esc(job.name)} – ${crew ? 'Crew sheet' : 'Job report'}</title>
 <style>
-  body { font-family: -apple-system, Helvetica, Arial, sans-serif; color: #111; margin: 0; padding: 24px; background: #fff; }
+  body { font-family: -apple-system, Helvetica, Arial, sans-serif; color: #111; margin: 0; background: #fff; }
+  h2:first-child { margin-top: 0; }
+  .photo img { width: 100%; max-height: 400px; object-fit: contain; border: 1px solid #ccc; border-radius: 8px; }
+  .fit img { max-width: 100%; max-height: 100%; object-fit: contain; }
   .top { display: flex; justify-content: space-between; align-items: flex-start; gap: 16px; border-bottom: 3px solid #111; padding-bottom: 12px; }
   .co { font-size: 13px; color: #444; }
   h1 { font-size: 26px; margin: 0 0 4px; }
@@ -862,23 +926,9 @@ export function buildReport(job: Job, s: Settings, opts: { now?: Date; crew?: bo
   .print { position: fixed; right: 16px; bottom: 16px; padding: 12px 18px; border-radius: 999px; border: 0; background: #ff9f0a; color: #000; font-size: 16px; font-weight: 700; }
   @media print { .print { display: none; } body { padding: 0; } }
 ${docCss(s.docs)}
+${pageCss(letterPortrait)}${drawingCss}
 </style></head><body>
-<div class="top"><div>${crew ? '<div class="kind">CREW SHEET</div>' : ''}<h1>${esc(job.name)}</h1>${job.address ? `<div class="meta">${esc(job.address)}</div>` : ''}<div class="meta">${esc(date)}</div></div>
-${company || opts.logo ? `<div class="co">${logoHtml(opts.logo)}${esc(company).replace(/ · /g, '<br>')}</div>` : ''}</div>
-${crew ? notesHtml : ''}
-${sum.length ? `<h2>${crew ? 'Load list' : 'Order summary'}</h2><table class="sum">${sum.map((r) => `<tr><td>${esc(r.label)}</td><td class="v">${esc(r.value)}</td></tr>`).join('')}</table>` : ''}
-${schedule.length ? `<h2>Rebar schedule</h2><table class="rebar"><tr><th>Where</th><th>Bars</th><th class="v">How many / long</th></tr>${schedule
-      .map((r) => `<tr><td>${esc(r.where)}</td><td>${esc(r.what)}${r.note ? `<div class="note">${esc(r.note)}</div>` : ''}</td><td class="v">${esc(r.amount)}</td></tr>`)
-      .join('')}${steelTotals.map(([k, v]) => `<tr class="tot"><td colspan="2">${esc(k)}</td><td class="v">${esc(v)}</td></tr>`).join('')}</table>` : ''}
-${drawings?.plan ? `<h2 class="page">${foundation ? 'Foundation plan' : 'Plan'}</h2><div class="draw">${drawings.plan}</div>` : ''}${drawings?.iso ? `<h2 class="page">3D view</h2><div class="draw">${drawings.iso}</div>` : ''}
-${drawings?.section ? `<h2 class="page">${foundation ? 'Typical section' : 'Edge detail'}</h2><div class="draw">${drawings.section}</div>` : ''}
-${drawings?.house ? `<h2 class="page">At the house</h2><div class="draw">${drawings.house}</div>` : ''}
-${opts.photos?.length ? `<h2>Photos</h2><div class="photos">${opts.photos.map((src, i) => `<img src="${src}" alt="Photo ${i + 1}">`).join('')}</div>` : ''}
-${foundation ? `<h2>Foundation: ${esc(foundation.kind)}</h2><div class="item"><ul class="fnd">${foundationLines(foundation, job).map((l) => `<li>${esc(l)}</li>`).join('')}</ul></div>` : ''}
-${items.length ? `<h2>Details</h2>${itemHtml}` : '<p>Nothing added to this job yet.</p>'}
-${crew ? '' : notesHtml}
-${scans.map((src, i) => `<div class="scan"><h2>Plans · page ${i + 1}</h2><img src="${src}" alt="Plan page ${i + 1}"></div>`).join('')}
-${noticeHtml('crew', s.docs)}
+${paginate(blocks, box, (n, of) => footerHtml(`${esc(job.name)} · ${crew ? 'Crew sheet' : 'Job report'} · ${esc(date)}`, n, of))}
 <button class="print" onclick="window.print()">Save as PDF / Print</button>
 </body></html>`;
 
