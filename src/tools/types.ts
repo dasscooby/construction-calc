@@ -4,6 +4,8 @@
 export interface Option {
   value: string;
   label: string;
+  /** Kept so saved entries still open, but not offered for new ones */
+  legacy?: boolean;
 }
 
 interface FieldBase {

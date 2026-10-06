@@ -134,7 +134,7 @@ export function graphPlanSvg(l: Layout, info: LayoutDrawInfo): string {
   const rects = l.graph.runs.map(wallRect);
   for (const r of rects) out.push(`<path d="${path(r)}" fill="none" stroke="#111" stroke-width="5" stroke-linejoin="miter"/>`);
   for (const r of rects) out.push(`<path d="${path(r)}" fill="#ffffff" stroke="none"/>`);
-  for (const r of rects) out.push(`<path d="${path(r)}" fill="url(#lhatch)" stroke="none"/>`);
+  rects.forEach((r, i) => out.push(`<path d="${path(r)}" fill="${l.runs[i].existing ? '#d9d9d9' : 'url(#lhatch)'}" stroke="none"/>`));
   if (hl.run !== undefined && rects[hl.run]) out.push(`<path d="${path(rects[hl.run])}" fill="${HILITE}" fill-opacity="0.75" stroke="${HILITE}" stroke-width="2"/>`);
 
   // Run labels: name and length as measured, beside each wall, on the side away from the middle (house
@@ -151,10 +151,11 @@ export function graphPlanSvg(l: Layout, info: LayoutDrawInfo): string {
     let nx = -d.y;
     let ny = d.x;
     const inside = /inside/i.test(r.run.name);
-    const [ox, oy] = /^House/.test(r.run.name) ? [hx, hy] : [cx, cy];
+    const info2 = l.runs[i];
+    const [ox, oy] = info2.group === 'Main' ? [hx, hy] : [cx, cy];
     const away = (mx - ox) * nx + (my - oy) * ny;
-    // A house wall an add-on is built against: its label goes inside the house.
-    const shared = l.spec.addOns.some((a) => r.run.name === `House ${a.side}`);
+    // A main wall an add-on builds off: its label goes inside the main house.
+    const shared = info2.shared;
     if ((away < 0) !== shared) {
       nx = -nx;
       ny = -ny;
@@ -178,7 +179,7 @@ export function graphPlanSvg(l: Layout, info: LayoutDrawInfo): string {
     const tx = Number(X(mx)) + nx * gap;
     const ty = Number(Y(my)) + ny * gap;
     const vertical = Math.abs(d.x) < Math.abs(d.y);
-    const text = `${r.run.name.toUpperCase()} ${dim(r.run.measured)}`;
+    const text = `${r.run.name.toUpperCase()} ${dim(r.run.measured)}${info2.existing ? ' (EXISTING)' : ''}`;
     const on = hl.run === i;
     out.push(
       `<text x="${n(tx)}" y="${n(ty + (vertical ? 0 : 5))}" text-anchor="middle" ${FONT} font-size="${inside ? 12 : 14}" font-weight="800" fill="${on ? HILITE : '#111'}"${vertical ? ` transform="rotate(-90 ${n(tx)} ${n(ty)})"` : ''}>${esc(text)}</text>`,
@@ -198,17 +199,18 @@ export function graphPlanSvg(l: Layout, info: LayoutDrawInfo): string {
     out.push(`<text x="${n(mx)}" y="${n(my + (vertical ? 0 : 5))}" text-anchor="middle" ${FONT} font-size="15" font-weight="700" fill="#111"${vertical ? ` transform="rotate(-90 ${n(mx)} ${n(my)})"` : ''}>${esc(label)}</text>`);
   };
   for (const g of l.addOnGeom) {
-    if (g.faces.length <= 2) continue;
-    // Past the far wall (and its label): each bay from wall face to wall face.
-    for (let i = 0; i + 1 < g.faces.length; i += 2) {
-      const p = g.at(g.faces[i], g.depth);
-      const q = g.at(g.faces[i + 1], g.depth);
-      dimString(p, q, g.out.x, g.out.y, 52, dim(g.faces[i + 1] - g.faces[i]));
-    }
-    const mid = g.at((g.faces[0] + g.faces[g.faces.length - 1]) / 2, g.depth);
-    const vertical = Math.abs(g.dir.x) < Math.abs(g.dir.y);
-    const lx = Number(X(mid.x)) + g.out.x * 92;
-    const ly2 = Number(Y(mid.y)) + g.out.y * 92;
+    const marks = g.bays.marks;
+    if (marks.length <= 2) continue;
+    // Past the far wall (bays along the main wall) or past the end side wall (bays going out): each bay
+    // from wall face to wall face.
+    const along = g.bays.axis === 'u';
+    const pt = (k: number) => (along ? g.at(k, g.depth) : g.at(g.from + g.width, k));
+    const dir = along ? g.out : g.dir;
+    for (let i = 0; i + 1 < marks.length; i += 2) dimString(pt(marks[i]), pt(marks[i + 1]), dir.x, dir.y, 52, dim(marks[i + 1] - marks[i]));
+    const mid = pt((marks[0] + marks[marks.length - 1]) / 2);
+    const vertical = along ? Math.abs(g.dir.x) < Math.abs(g.dir.y) : Math.abs(g.out.x) < Math.abs(g.out.y);
+    const lx = Number(X(mid.x)) + dir.x * 92;
+    const ly2 = Number(Y(mid.y)) + dir.y * 92;
     out.push(`<text x="${n(lx)}" y="${n(ly2 + (vertical ? 0 : 5))}" text-anchor="middle" ${FONT} font-size="13" font-weight="700" fill="#333"${vertical ? ` transform="rotate(-90 ${n(lx)} ${n(ly2)})"` : ''}>BAYS, CLEAR (FACE TO FACE)</text>`);
   }
 
@@ -225,8 +227,8 @@ export function graphPlanSvg(l: Layout, info: LayoutDrawInfo): string {
     const big = widthPx > 220;
     // A narrow bay gets a one-line callout; the full one is on the legend's pour list.
     const small = Math.min(widthPx, heightPx) < 90;
-    const full = [`${inch(sl.thick)} SLAB · POUR ${sl.pour}`, size, `${Math.round(face.clearArea).toLocaleString()} SQ FT${yd ? ` · ${yd} YD` : ''}`].filter(Boolean);
-    const lines = small ? [`POUR ${sl.pour}`] : full;
+    const full = [`${inch(sl.thick)} SLAB ${sl.pour}`, size, `${Math.round(face.clearArea).toLocaleString()} SQ FT${yd ? ` · ${yd} YD` : ''}`].filter(Boolean);
+    const lines = small ? [`SLAB ${sl.pour}`] : full;
     lines.forEach((t, k) =>
       out.push(
         `<text x="${X(c.x)}" y="${n(Number(Y(c.y)) - ((lines.length - 1) * (big ? 22 : 17)) / 2 + k * (big ? 22 : 17) + 5)}" text-anchor="middle" ${FONT} font-size="${k === 0 ? (big ? 18 : 14) : big ? 15 : 12}" font-weight="${k === 0 ? 800 : 600}" fill="#111">${esc(t)}</text>`,
@@ -247,13 +249,13 @@ export function graphPlanSvg(l: Layout, info: LayoutDrawInfo): string {
       `${inch(spec.footing.width)} W × ${inch(spec.footing.depth)} D FOOTING UNDER EVERY WALL`,
     ]);
   }
-  legend.push([`<rect x="28" y="${n(ly + 14 + legend.length * 32)}" width="44" height="18" fill="url(#ldots)" stroke="#111" stroke-width="1"/>`, 'SLAB, EACH ITS OWN POUR · SIZES CLEAR, FACE TO FACE']);
+  legend.push([`<rect x="28" y="${n(ly + 14 + legend.length * 32)}" width="44" height="18" fill="url(#ldots)" stroke="#111" stroke-width="1"/>`, 'SLAB · SIZES CLEAR, WALL FACE TO WALL FACE']);
   for (const sl of l.slabs) {
     const rect = sl.face.rect;
     const yd = info.pourYd?.[sl.pour];
     legend.push([
       '',
-      `POUR ${sl.pour}: ${sl.name.toUpperCase()}, ${inch(sl.thick)}${rect ? ` · ${dim(rect.w)} × ${dim(rect.h)} CLEAR` : ''} · ${Math.round(sl.face.clearArea).toLocaleString()} SQ FT${yd ? ` · ${yd} YD` : ''}`,
+      `SLAB ${sl.pour}: ${sl.name.toUpperCase()}, ${inch(sl.thick)}${rect ? ` · ${dim(rect.w)} × ${dim(rect.h)} CLEAR` : ''} · ${Math.round(sl.face.clearArea).toLocaleString()} SQ FT${yd ? ` · ${yd} YD` : ''}`,
     ]);
   }
   legend.forEach(([sym, text], i) => {

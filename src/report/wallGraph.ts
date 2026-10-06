@@ -28,7 +28,8 @@ export interface Run {
   footing: { width: number; depth: number } | null;
 }
 
-export type EndKind = 'corner' | 'tee' | 'free';
+/** corner: two runs turn; tee: it stops against another; through: it carries straight on into the next run */
+export type EndKind = 'corner' | 'tee' | 'through' | 'free';
 
 export interface RunResult {
   run: Run;
@@ -37,6 +38,8 @@ export interface RunResult {
   middle: number;
   /** The footing under it, along its middle, ft (0 = no footing) */
   footingMiddle: number;
+  /** What each end meets (the corner's other run, or the run it tees into) */
+  hosts: [Run | null, Run | null];
   /** Taken off the middle at each end (a tee stops at the host's face), ft */
   trim: [number, number];
   /** Same for the footing (stops at the host footing's edge) */
@@ -73,9 +76,10 @@ function onInterior(p: Pt, r: Run): boolean {
 }
 
 /**
- * How each run's ends meet the others. Where three runs meet at a point, the first two listed make
- * the corner and later ones tee into the one they run square to (an add-on's side wall lining up
- * with the house wall tees into the house wall it meets).
+ * How each run's ends meet the others. Where runs meet at a point: two that line up carry straight
+ * through (one wall), and any square to them tee into it (a house side wall and the add-on side wall
+ * that lines up with it are one through wall; the house wall between them tees in). Otherwise the
+ * first two square to each other make the corner, and any more tee into the corner run they're square to.
  */
 function joints(runs: Run[]): { kind: EndKind; host: Run | null }[][] {
   const out = runs.map(() => [
@@ -99,6 +103,15 @@ function joints(runs: Run[]): { kind: EndKind; host: Run | null }[][] {
     const group = atNode.map((x, k) => ({ ...x, k })).filter((x) => near(x.p, first.p));
     group.forEach((x) => done.add(x.k));
     if (group.length < 2) return;
+    // Two ends from opposite sides on the same line: one wall carrying straight through.
+    const pair = group.flatMap((x, u) => group.slice(u + 1).map((y) => [x, y] as const)).find(([x, y]) => horiz(runs[x.i]) === horiz(runs[y.i]));
+    if (pair) {
+      const [x, y] = pair;
+      out[x.i][x.e] = { kind: 'through', host: runs[y.i] };
+      out[y.i][y.e] = { kind: 'through', host: runs[x.i] };
+      for (const z of group) if (z !== x && z !== y && horiz(runs[z.i]) !== horiz(runs[x.i])) out[z.i][z.e] = { kind: 'tee', host: runs[x.i] };
+      return;
+    }
     const a = group[0];
     const b = group.find((x) => horiz(runs[x.i]) !== horiz(runs[a.i]));
     if (!b) return;
@@ -130,6 +143,7 @@ export function solveGraph(runs: Run[]): GraphResult {
     return {
       run: r,
       ends: [j[i][0].kind, j[i][1].kind],
+      hosts: [j[i][0].host, j[i][1].host],
       trim,
       footTrim,
       middle: full - trim[0] - trim[1],

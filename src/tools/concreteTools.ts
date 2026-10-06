@@ -106,7 +106,8 @@ const footings: Tool = {
       options: [
         { value: 'rect', label: 'Square / rectangle' },
         { value: 'odd', label: 'Odd shape' },
-        { value: 'addon', label: 'Add-on (shares a wall)' },
+        // New add-ons are built in the job's foundation layout; this stays so saved ones still open.
+        { value: 'addon', label: 'Add-on (shares a wall)', legacy: true },
         { value: 'run', label: 'Straight run / pads' },
       ],
       default: 'rect',

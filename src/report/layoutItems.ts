@@ -30,9 +30,23 @@ const toRaw = (ft: number): RawLength => {
   return inch >= 12 ? { ft: String(whole + 1), in: '' } : { ft: String(whole), in: inch ? String(inch) : '' };
 };
 
-/** "House top 70' · House right 70' · … · Add-on inside 2 40'" */
+const ftText = (ft: number) => ftIn(ft).replace(/ 0"$/, '');
+
+/** One group's runs the way he adds them up: "4 @ 40' + 1 @ 70' = 230'" */
+export function rollUp(runs: { measured: number }[]): string {
+  const by = new Map<number, number>();
+  for (const r of runs) {
+    const k = Math.round(r.measured * 96) / 96;
+    by.set(k, (by.get(k) ?? 0) + 1);
+  }
+  const total = runs.reduce((s, r) => s + r.measured, 0);
+  return `${[...by].sort((a, b) => b[1] - a[1] || a[0] - b[0]).map(([len, n]) => `${n} @ ${ftText(len)}`).join(' + ')} = ${ftText(total)}`;
+}
+
+/** "Main 4 @ 70' = 280' · Add-on 4 @ 40' + 1 @ 70' = 230'" (walls in the bid only) */
 export function runList(l: Layout): string {
-  return l.runs.map((r) => `${r.name} ${ftIn(r.measured).replace(/ 0"$/, '')}`).join(' · ');
+  const groups = [...new Set(l.runs.filter((r) => !r.existing).map((r) => r.group))];
+  return groups.map((g) => `${g} ${rollUp(l.runs.filter((r) => r.group === g && !r.existing))}`).join(' · ');
 }
 
 /** An orthogonal outline cut into rectangles (strips between its corners), for the Slab tool's areas. */
@@ -64,14 +78,16 @@ export function layoutChildren(item: JobItem): FiguredItem[] {
   const out: FiguredItem[] = [];
   const bends = l.totals.bends;
   const list = runList(l);
-  const turns = `${l.graph.corners} corners, ${l.graph.tees} tees`;
+  const turns = `${l.totals.corners} corners, ${l.totals.tees} tees`;
   const child = (suffix: string, label: string, tool: typeof footingsTool, r: RawValues, extra: ResultRow[]): FiguredItem => {
     const res = runTool(tool, r);
     const result = res.status === 'ok' ? { ...res, result: { ...res.result, rows: [...extra, ...res.result.rows], warnings: [...(res.result.warnings ?? []), ...l.problems] } } : res;
     return { item: { ...item, id: `${item.id}:${suffix}`, toolId: tool.id, title: tool.title, label, raw: r }, tool, result, inputs: [] };
   };
 
-  // Walls: concrete and bars along the middle, an L-bar per bar at every corner and tee.
+  // Walls: concrete and bars along the middle, an L-bar per bar at every corner and tee. Walls that are
+  // already there aren't in it.
+  if (l.totals.measured > 0) {
   const wallRaw = defaultRaw(footingsTool, {
     ...(raw.wall ?? {}),
     kind: 'wall',
@@ -88,9 +104,10 @@ export function layoutChildren(item: JobItem): FiguredItem[] {
       { label: 'Along the middle', value: `${commasTrim(l.totals.middle, 1)} ft`, note: `What the concrete and bars follow · ${turns}: each wall that meets another stops at its face` },
     ]),
   );
+  }
 
-  // The footing under every wall.
-  if (spec.footing) {
+  // The footing under every new wall.
+  if (spec.footing && l.totals.footingMiddle > 0) {
     const footRaw = defaultRaw(footingsTool, {
       ...(raw.footing ?? {}),
       kind: 'footing',
@@ -108,16 +125,17 @@ export function layoutChildren(item: JobItem): FiguredItem[] {
     );
   }
 
-  // Each slab, its own pour, at the clear size inside the walls.
-  for (const s of l.slabs) {
-    const rects = s.face.rect ? [s.face.rect] : rectsOf(s.face.clear);
+  // Each slab pour (one or more areas poured together), at the clear size inside the walls.
+  for (const pour of [...new Set(l.slabs.map((s) => s.pour))].sort((a, b) => a - b)) {
+    const these = l.slabs.filter((s) => s.pour === pour);
+    const rects = these.flatMap((s) => (s.face.rect ? [s.face.rect] : rectsOf(s.face.clear)));
     const slabRaw = defaultRaw(slabTool, {
       ...(raw.slab ?? {}),
-      thick: toRaw(s.thick),
+      thick: toRaw(these[0].thick),
       areas: rects.map((r) => ({ length: toRaw(r.w), width: toRaw(r.h) })) as never,
     });
-    const size = s.face.rect ? `${ftIn(s.face.rect.w)} × ${ftIn(s.face.rect.h)}` : `${Math.round(s.face.clearArea).toLocaleString()} sq ft`;
-    out.push(child(`slab${s.pour}`, `${s.name}, pour ${s.pour}`, slabTool, slabRaw, [{ label: 'Pour', value: String(s.pour), note: `Inside the walls: ${size}` }]));
+    const size = these.map((s) => (s.face.rect ? `${ftIn(s.face.rect.w)} × ${ftIn(s.face.rect.h)}` : `${Math.round(s.face.clearArea).toLocaleString()} sq ft`)).join(' + ');
+    out.push(child(`slab${pour}`, `Slab ${pour}: ${these.map((s) => s.name).join(' + ')}`, slabTool, slabRaw, [{ label: 'Pour', value: `Slab ${pour}`, note: `Inside the walls: ${size}` }]));
   }
   return out;
 }

@@ -391,7 +391,7 @@ function FieldInput({ field, value, onChange }: { field: Field; value: RawValue;
       )}
       {field.kind === 'choice' && (
         <View style={styles.chips}>
-          {field.options.map((o) => {
+          {field.options.filter((o) => !o.legacy || o.value === value).map((o) => {
             const on = o.value === value;
             return (
               <Pressable

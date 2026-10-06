@@ -1,77 +1,111 @@
-// A foundation laid out the way you'd describe it: the house (outside length × width), add-ons that
-// share a side of it, walls inside an add-on placed by their clear distance (face to face), and slabs
-// dropped into the areas the walls close in, each its own pour. Turned into wall runs for wallGraph.
+// A foundation laid out the way you'd describe it: the main house (outside length × width), add-ons that
+// build off one of its walls, walls inside an add-on given as the bays between them (clear, wall face to
+// wall face, with one "the rest" bay), and slabs dropped into the areas the walls close in, each in a pour.
+// Turned into wall runs for wallGraph.
 //
-// Sizes are outside to outside for the house and add-ons; inside walls are placed face to face.
+// Corners of the main house are lettered clockwise from the front left: A front left, B back left,
+// C back right, D front right. On the plan the back is up.
 
 import { faceAt, Face, GraphResult, Pt, Run, solveGraph } from './wallGraph';
 
+/** Side of the main house, on the plan: top = back (B–C), right = C–D, bottom = front (D–A), left = A–B. */
 export type Side = 'top' | 'right' | 'bottom' | 'left';
 
-export interface InsideWall {
-  /** Clear distance from the face of what it's measured from, ft */
-  clear: number;
-  /** The add-on's side wall at the start of the shared side, the one at the end, or another inside wall (its index) */
-  from: 'start' | 'end' | number;
-}
+export const SIDE_NAME: Record<Side, string> = { left: 'left A–B', top: 'back B–C', right: 'right C–D', bottom: 'front D–A' };
 
 export interface AddOnSpec {
+  /** The main wall it builds off */
   side: Side;
-  /** Along the shared side, outside to outside, ft */
+  /** Along that wall, outside to outside, ft */
   width: number;
-  /** Out from the house wall's outside face to the outside of the far wall, ft */
+  /** Out from that wall's outside face to the outside of the far wall, ft */
   depth: number;
-  /** How far along the shared side it starts (from the side's first corner, clockwise), ft */
+  /** Where it starts along that wall, from the wall's first corner going clockwise (outside), ft */
   from?: number;
-  walls?: InsideWall[];
+  /** Walls inside it run out from the main wall to the far wall ('out', front to back), or across ('across', side to side) */
+  inside?: 'out' | 'across';
+  /** The bays between them, in order, clear (wall face to wall face); null = the rest. n bays = n − 1 inside walls */
+  bays?: (number | null)[];
 }
 
-export type SlabSpot = { in: 'house' } | { in: 'addon'; addOn: number; bay: number };
+export type SlabSpot = { in: 'main' } | { in: 'addon'; addOn: number; bay: number };
+
+export interface SlabSpec {
+  at: SlabSpot;
+  thick: number;
+  /** Poured with another slab (its pour number); blank = its own pour */
+  pour?: number;
+}
 
 export interface LayoutSpec {
-  /** Outside: length along the top, width down the side, ft */
+  /** Outside: length along the back and front, width along the sides, ft */
   house: { length: number; width: number };
+  /** Already there, not in this bid: its walls aren't priced, add-ons tie into it */
+  existing?: boolean;
   wall: { thick: number; height: number };
   /** Under every wall ("they follow it"); null = no footing */
   footing: { width: number; depth: number } | null;
   addOns: AddOnSpec[];
-  slabs: { at: SlabSpot; thick: number }[];
+  slabs: SlabSpec[];
   /** Top of slab below the top of the wall, in (blank: a basement slab sits on the footing, a stem wall slab at the top) */
   slabDropIn?: number;
+  /** What's in a bay with no slab ("container pad", "gravel"), by "addOn:bay" */
+  bayLabels?: Record<string, string>;
 }
+
+export type EndText = string;
 
 export interface LayoutRun {
   name: string;
+  /** "Main", "Add-on", "Add-on 2" */
+  group: string;
   measured: number;
   middle: number;
   footingMiddle: number;
+  /** Already there, not in the bid */
+  existing: boolean;
+  /** An add-on builds off it */
+  shared: boolean;
+  /** How each end meets: "corner", "tee into Main back B–C", "straight on" */
+  ends: [EndText, EndText];
 }
 
 export interface LayoutSlab {
   name: string;
-  /** 1 = first pour, 2 = second ... in the order you added them */
+  /** Pour number for this slab: 1 = the first slab pour */
   pour: number;
+  /** Index in spec.slabs */
+  index: number;
   face: Face;
   thick: number;
+  at: SlabSpot;
+}
+
+export interface BayGeom {
+  /** Wall faces along the axis, in pairs (bay i from marks[2i] to marks[2i+1]) */
+  marks: number[];
+  /** 'u' = along the main wall, 'v' = out from it */
+  axis: 'u' | 'v';
 }
 
 export interface Layout {
   spec: LayoutSpec;
   runs: LayoutRun[];
   graph: GraphResult;
-  /** Bays in each add-on, left to right along the shared side: clear width × clear depth */
-  bays: { w: number; h: number }[][];
-  /** Each add-on in plan: wall faces along the shared side (u), how deep, and where a (u, v) point lands */
-  addOnGeom: { faces: number[]; depth: number; at: (u: number, v: number) => Pt; dir: Pt; out: Pt }[];
+  /** Bays in each add-on, in order: clear width × clear depth (as the plan reads: across × out) */
+  bays: { w: number; h: number; given: boolean }[][];
+  /** Each add-on in plan */
+  addOnGeom: { bays: BayGeom; from: number; width: number; depth: number; at: (u: number, v: number) => Pt; dir: Pt; out: Pt; seeds: Pt[] }[];
   slabs: LayoutSlab[];
-  totals: { measured: number; middle: number; footingMiddle: number; bends: number };
-  /** Something that doesn't fit (inside walls too close, a slab that isn't in a closed area) */
+  /** Pours in order: footings, walls, then each slab pour */
+  pours: string[];
+  /** In the bid (existing walls left out) */
+  totals: { measured: number; middle: number; footingMiddle: number; bends: number; corners: number; tees: number };
+  /** Something that doesn't fit (bays too wide, a slab that isn't in a closed area) */
   problems: string[];
 }
 
-const SIDES: Side[] = ['top', 'right', 'bottom', 'left'];
-
-/** Origin (the side's first corner, outside), direction along the side, and outward, for a house side. */
+/** Origin (the side's first corner, outside), direction along the side, and outward, for a main wall. */
 function frame(spec: LayoutSpec, side: Side) {
   const { length: L, width: W } = spec.house;
   const f = {
@@ -85,80 +119,137 @@ function frame(spec: LayoutSpec, side: Side) {
   return { at, dir: f.dir, out };
 }
 
-/** Where each inside wall's middle sits along the shared side (u), in order of the list. */
-function insideAt(a: AddOnSpec, t: number): number[] {
-  const from = a.from ?? 0;
-  const out: number[] = [];
-  (a.walls ?? []).forEach((w) => {
-    if (w.from === 'start') out.push(from + t + w.clear + t / 2);
-    else if (w.from === 'end') out.push(from + a.width - t - w.clear - t / 2);
-    else {
-      const base = out[w.from];
-      // Measured from the face of another inside wall, on the far side of it from the start.
-      out.push(base === undefined ? NaN : base + t / 2 + w.clear + t / 2);
-    }
-  });
-  return out;
+/** Length of the main wall on a side. */
+export const sideLength = (spec: LayoutSpec, side: Side) => (side === 'top' || side === 'bottom' ? spec.house.length : spec.house.width);
+
+/**
+ * Bays filled in: the one(s) left blank share what's left. Clear room = across the add-on between its
+ * side walls (inside walls running out) or from the main wall's face to the far wall's face (across).
+ */
+export function fillBays(a: AddOnSpec, t: number): { widths: number[]; given: boolean[]; room: number; over: number } {
+  const bays = a.bays && a.bays.length ? a.bays : [null];
+  const room = (a.inside === 'across' ? a.depth - t : a.width - 2 * t) - (bays.length - 1) * t;
+  const known = bays.reduce<number>((s, b) => s + (b ?? 0), 0);
+  const blanks = bays.filter((b) => b === null).length;
+  const rest = blanks ? (room - known) / blanks : 0;
+  // With a "rest" bay anything up to the room fits; without one the bays must add up to the room exactly.
+  const over = blanks ? Math.max(0, known - room) : Math.abs(known - room) > 1 / 96 ? known - room : 0;
+  return { widths: bays.map((b) => (b === null ? rest : b)), given: bays.map((b) => b !== null), room, over };
 }
 
 export function buildLayout(spec: LayoutSpec): Layout {
   const { length: L, width: W } = spec.house;
   const t = spec.wall.thick;
   const h = spec.wall.height;
-  const problems: string[] = [];
-  const run = (name: string, a: Pt, b: Pt, measured: number): Run => ({ id: name, name, a, b, measured, thick: t, height: h, footing: spec.footing });
   const m = t / 2;
-  const runs: Run[] = [
-    run('House top', { x: m, y: m }, { x: L - m, y: m }, L),
-    run('House right', { x: L - m, y: m }, { x: L - m, y: W - m }, W),
-    run('House bottom', { x: L - m, y: W - m }, { x: m, y: W - m }, L),
-    run('House left', { x: m, y: W - m }, { x: m, y: m }, W),
-  ];
-  const seeds: Pt[][] = [];
-  const bays: { w: number; h: number }[][] = [];
+  const problems: string[] = [];
+  const existing = new Set<Run>();
+  const group = new Map<Run, string>();
+  const run = (g: string, name: string, a: Pt, b: Pt, measured: number): Run => {
+    const r: Run = { id: name, name, a, b, measured, thick: t, height: h, footing: spec.footing };
+    group.set(r, g);
+    return r;
+  };
+  // Main, clockwise from A (front left): left A–B, back B–C, right C–D, front D–A.
+  const main = {
+    left: run('Main', 'Main left A–B', { x: m, y: W - m }, { x: m, y: m }, W),
+    top: run('Main', 'Main back B–C', { x: m, y: m }, { x: L - m, y: m }, L),
+    right: run('Main', 'Main right C–D', { x: L - m, y: m }, { x: L - m, y: W - m }, W),
+    bottom: run('Main', 'Main front D–A', { x: L - m, y: W - m }, { x: m, y: W - m }, L),
+  };
+  const runs: Run[] = [main.left, main.top, main.right, main.bottom];
+  if (spec.existing) runs.forEach((r) => existing.add(r));
+  const shared = new Set<Run>();
+  const bays: Layout['bays'] = [];
   const addOnGeom: Layout['addOnGeom'] = [];
   spec.addOns.forEach((a, n) => {
     const fr = frame(spec, a.side);
     const at = fr.at;
     const from = a.from ?? 0;
     const D = a.depth;
-    const name = spec.addOns.length > 1 ? `Add-on ${n + 1}` : 'Add-on';
-    runs.push(run(`${name} side`, at(from + m, -m), at(from + m, D - m), D));
-    runs.push(run(`${name} far`, at(from + m, D - m), at(from + a.width - m, D - m), a.width));
-    runs.push(run(`${name} side 2`, at(from + a.width - m, D - m), at(from + a.width - m, -m), D));
-    const us = insideAt(a, t);
-    us.forEach((u, k) => runs.push(run(`${name} inside ${k + 1}`, at(u, -m), at(u, D - m), D)));
-    // Bays between the walls, by their faces, left to right.
-    const faces = [from + t, ...[...us].sort((x, y) => x - y).flatMap((u) => [u - m, u + m]), from + a.width - t];
-    const list: { w: number; h: number }[] = [];
-    const spots: Pt[] = [];
-    for (let i = 0; i < faces.length; i += 2) {
-      const w = faces[i + 1] - faces[i];
-      if (!(w > 0) || Number.isNaN(w)) problems.push(`${name}: the inside walls don't fit (check the clear distances).`);
-      list.push({ w, h: D - t });
-      spots.push(at((faces[i] + faces[i + 1]) / 2, (D - t) / 2));
-    }
+    const Wd = a.width;
+    const g = spec.addOns.length > 1 ? `Add-on ${n + 1}` : 'Add-on';
+    shared.add(main[a.side]);
+    if (from < -1e-6 || from + Wd > sideLength(spec, a.side) + 1e-6) problems.push(`${g} runs past the end of the main ${SIDE_NAME[a.side]} wall.`);
+    runs.push(run(g, `${g} side`, at(from + m, -m), at(from + m, D - m), D));
+    runs.push(run(g, `${g} far`, at(from + m, D - m), at(from + Wd - m, D - m), Wd));
+    runs.push(run(g, `${g} side`, at(from + Wd - m, D - m), at(from + Wd - m, -m), D));
+    const fill = fillBays(a, t);
+    if (fill.widths.some((w) => w <= 0) || fill.over > 0) problems.push(`${g}: the bays add up to more than fits. Clear room is ${fmt(fill.room)}.`);
+    else if (fill.over < 0) problems.push(`${g}: the bays come to ${fmt(fill.room + fill.over)}, but the clear room is ${fmt(fill.room)}. Leave one blank for the rest.`);
+    const across = a.inside === 'across';
+    // Wall faces along the axis, from the first face to the last.
+    const start = across ? 0 : from + t;
+    const marks: number[] = [start];
+    let cur = start;
+    fill.widths.forEach((w, i) => {
+      cur += w;
+      marks.push(cur);
+      if (i < fill.widths.length - 1) {
+        const c = cur + m;
+        if (across) runs.push(run(g, `${g} inside ${i + 1}`, at(from + m, c), at(from + Wd - m, c), Wd));
+        else runs.push(run(g, `${g} inside ${i + 1}`, at(c, -m), at(c, D - m), D));
+        cur += t;
+        marks.push(cur);
+      }
+    });
+    const list = fill.widths.map((w, i) => (across ? { w: Wd - 2 * t, h: w, given: fill.given[i] } : { w, h: D - t, given: fill.given[i] }));
+    const seeds = fill.widths.map((_, i) => {
+      const mid = (marks[2 * i] + marks[2 * i + 1]) / 2;
+      return across ? at(from + Wd / 2, mid) : at(mid, (D - t) / 2);
+    });
     bays.push(list);
-    addOnGeom.push({ faces, depth: D, at, dir: fr.dir, out: fr.out });
-    seeds.push(spots);
+    addOnGeom.push({ bays: { marks, axis: across ? 'v' : 'u' }, from, width: Wd, depth: D, at, dir: fr.dir, out: fr.out, seeds });
   });
-  // Rename a single side-2 for reading: "Add-on side" twice reads fine on the list.
-  runs.forEach((r) => (r.name = r.name.replace(/ side 2$/, ' side')));
 
   const graph = solveGraph(runs);
+  // Slabs, and which pour each is in.
   const slabs: LayoutSlab[] = [];
+  const pourOf = new Map<number, number>(); // slab index → pour number
+  let nextPour = 1;
   spec.slabs.forEach((s, i) => {
-    const seed = s.at.in === 'house' ? { x: L / 2, y: W / 2 } : seeds[s.at.addOn]?.[s.at.bay];
+    const seed = s.at.in === 'main' ? { x: L / 2, y: W / 2 } : addOnGeom[s.at.addOn]?.seeds[s.at.bay];
     const k = seed ? faceAt(graph.faces, seed) : -1;
     if (k < 0) {
       problems.push('A slab is not inside a closed area.');
       return;
     }
-    const name = s.at.in === 'house' ? 'House slab' : `${spec.addOns.length > 1 ? `Add-on ${s.at.addOn + 1}` : 'Add-on'} slab${bays[s.at.addOn].length > 1 ? `, ${bayName(s.at.bay, bays[s.at.addOn].length, spec.addOns[s.at.addOn].side)}` : ''}`;
-    slabs.push({ name, pour: i + 1, face: graph.faces[k], thick: s.thick });
+    const pour = s.pour && [...pourOf.values()].includes(s.pour) ? s.pour : nextPour++;
+    pourOf.set(i, pour);
+    const name = s.at.in === 'main' ? 'Main slab' : `${spec.addOns.length > 1 ? `Add-on ${s.at.addOn + 1}` : 'Add-on'} slab${bays[s.at.addOn].length > 1 ? `, ${bayName(s.at.bay, bays[s.at.addOn].length, spec.addOns[s.at.addOn])}` : ''}`;
+    slabs.push({ name, pour, index: i, face: graph.faces[k], thick: s.thick, at: s.at });
   });
-  const list: LayoutRun[] = graph.runs.map((r) => ({ name: r.run.name, measured: r.run.measured, middle: r.middle, footingMiddle: r.footingMiddle }));
-  const sum = (f: (r: LayoutRun) => number) => list.reduce((s, r) => s + f(r), 0);
+
+  // The run list, and how each end meets.
+  const list: LayoutRun[] = graph.runs.map((r) => ({
+    name: r.run.name,
+    group: group.get(r.run) ?? '',
+    measured: r.run.measured,
+    middle: r.middle,
+    footingMiddle: r.footingMiddle,
+    existing: existing.has(r.run),
+    shared: shared.has(r.run),
+    ends: r.ends.map((kind, e) => {
+      const host = r.hosts[e];
+      if (kind === 'corner') return 'corner';
+      if (kind === 'tee' && host) return `tee into ${host.name}${existing.has(host) ? ' (existing: dowels)' : ''}`;
+      return 'straight on';
+    }) as [EndText, EndText],
+  }));
+  // In the bid: everything but existing walls. Bends: corners between two new walls, a corner against an
+  // existing wall, and every tee end of a new wall.
+  const newRuns = graph.runs.filter((r) => !existing.has(r.run));
+  let corners2 = 0;
+  let tees = 0;
+  for (const r of newRuns) {
+    r.ends.forEach((kind, e) => {
+      if (kind === 'tee') tees++;
+      if (kind === 'corner') corners2 += r.hosts[e] && existing.has(r.hosts[e]!) ? 2 : 1;
+    });
+  }
+  const corners = Math.round(corners2 / 2);
+  const sum = (f: (r: LayoutRun) => number) => list.filter((r) => !r.existing).reduce((s, r) => s + f(r), 0);
+  const pours = [...(spec.footing ? ['Footings'] : []), 'Walls', ...[...new Set(slabs.map((s) => s.pour))].sort((a, b) => a - b).map((p) => `Slab ${p}: ${slabs.filter((s) => s.pour === p).map((s) => s.name).join(' + ')}`)];
   return {
     spec,
     runs: list,
@@ -166,19 +257,26 @@ export function buildLayout(spec: LayoutSpec): Layout {
     bays,
     addOnGeom,
     slabs,
-    totals: { measured: sum((r) => r.measured), middle: sum((r) => r.middle), footingMiddle: sum((r) => r.footingMiddle), bends: graph.corners + graph.tees },
+    pours,
+    totals: { measured: sum((r) => r.measured), middle: sum((r) => r.middle), footingMiddle: sum((r) => r.footingMiddle), bends: corners + tees, corners, tees },
     problems,
   };
 }
 
+const fmt = (ft: number) => {
+  const whole = Math.floor(ft + 1e-9);
+  const inch = Math.round((ft - whole) * 12);
+  return inch === 12 ? `${whole + 1}'` : `${whole}'${inch ? ` ${inch}"` : ''}`;
+};
+
 /** "left bay", "middle bay", "right bay" (as the plan reads, for the side the add-on is on), or "bay 2" */
-export function bayName(i: number, count: number, side: Side = 'top'): string {
-  // Bays are counted along the shared side going clockwise: left to right on the top, top to bottom on
-  // the right, right to left on the bottom, bottom to top on the left.
-  const ends = { top: ['left', 'right'], right: ['top', 'bottom'], bottom: ['right', 'left'], left: ['bottom', 'top'] }[side];
+export function bayName(i: number, count: number, a: Pick<AddOnSpec, 'side' | 'inside'> = { side: 'top' }): string {
+  // Bays run along the main wall going clockwise (left to right on the back, top to bottom on the right,
+  // right to left on the front, bottom to top on the left), or out from it (nearest first).
+  const along = { top: ['left', 'right'], right: ['top', 'bottom'], bottom: ['right', 'left'], left: ['bottom', 'top'] }[a.side];
+  const out = { top: ['bottom', 'top'], right: ['left', 'right'], bottom: ['top', 'bottom'], left: ['right', 'left'] }[a.side];
+  const ends = a.inside === 'across' ? out : along;
   if (count === 2) return `${i === 0 ? ends[0] : ends[1]} bay`;
   if (count === 3) return [`${ends[0]} bay`, 'middle bay', `${ends[1]} bay`][i];
   return `bay ${i + 1}`;
 }
-
-export { SIDES };

@@ -24,6 +24,8 @@ export interface JobItem {
   label: string;
   raw: RawValues;
   at: number;
+  /** Hidden and left out of totals: the foundation layout (this item id) took its place. Restorable. */
+  replacedBy?: string;
 }
 
 /** A pour in progress: trucks counted in as they arrive. */
@@ -177,6 +179,34 @@ export const jobStore = {
   },
   editItem(jobId: string, itemId: string, patch: Partial<Pick<JobItem, 'label' | 'raw' | 'toolId' | 'title'>>) {
     update(jobId, (j) => ({ ...j, items: j.items.map((it) => (it.id === itemId ? { ...it, ...patch } : it)) }));
+  },
+  /**
+   * Saves the job's foundation layout (one item), making it if there isn't one. Items in `replace` are
+   * hidden and left out of totals (never deleted) because the layout takes their place. Returns its id.
+   */
+  saveLayout(jobId: string, raw: RawValues, replace: string[] = []): string {
+    load();
+    const job = jobs.find((j) => j.id === jobId);
+    const have = job?.items.find((it) => it.toolId === 'foundation-layout');
+    const id = have?.id ?? newId();
+    update(jobId, (j) => {
+      const items = j.items.map((it) => (replace.includes(it.id) ? { ...it, replacedBy: id } : it));
+      return {
+        ...j,
+        items: have ? items.map((it) => (it.id === id ? { ...it, raw } : it)) : [...items, { id, toolId: 'foundation-layout', title: 'Foundation layout', label: '', raw, at: Date.now() }],
+        // The layout is the foundation now: no "they go together" check.
+        together: undefined,
+      };
+    });
+    return id;
+  },
+  /** Takes the layout out and brings back what it replaced. */
+  removeLayout(jobId: string) {
+    update(jobId, (j) => {
+      const layout = j.items.find((it) => it.toolId === 'foundation-layout');
+      if (!layout) return j;
+      return { ...j, items: j.items.filter((it) => it.id !== layout.id).map((it) => (it.replacedBy === layout.id ? { ...it, replacedBy: undefined } : it)) };
+    });
   },
   removeItem(jobId: string, itemId: string) {
     update(jobId, (j) => ({ ...j, items: j.items.filter((it) => it.id !== itemId) }));
