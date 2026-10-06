@@ -6,7 +6,7 @@ import type { Settings } from '../lib/settings';
 import { commas, dec, ftIn, money } from '../tools/format';
 import { parseLength, parseNumber, RawLength, RawWallRow } from '../tools/run';
 import { DocMedia, docCss, logoHtml, noticeHtml } from './docStyle';
-import { confirmedFoundation } from './foundation';
+import { confirmedFoundation, pourCount, pourName } from './foundation';
 import { builtItems, FiguredItem, itemRebarLb, jobDrawings, jobTotals, numberIn, pieceName, steelItems } from './report';
 
 const esc = (s: string) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
@@ -64,12 +64,13 @@ export function suggestLines(items: FiguredItem[], s?: Settings, job?: Job): Omi
   };
   // Walls, footings and slab that make one foundation are bid together under its name.
   const fnd = confirmedFoundation(items, job);
-  const inFnd = (id: string) => !!fnd && [...fnd.walls, ...fnd.footings, ...(fnd.slab ? [fnd.slab] : [])].some((f) => f.item.id === id);
+  const inFnd = (id: string) => !!fnd && [...fnd.walls, ...fnd.footings, ...(fnd.slab ? [fnd.slab] : []), ...fnd.addOns.map((a) => a.item), ...fnd.pours].some((f) => f.item.id === id);
   const wallText = fnd ? `${Math.round(fnd.thickFt * 12)}" × ${ftIn(fnd.heightFt)}` : '';
   const ft = (v: unknown) => parseLength(v as RawLength) ?? 0;
   for (const { item, tool, result } of items) {
     if (result.status !== 'ok') continue;
-    const name = inFnd(item.id) ? fnd!.kind : item.label || tool.title;
+    const pour = fnd ? fnd.pours.findIndex((x) => x.item.id === item.id) : -1;
+    const name = !inFnd(item.id) ? item.label || tool.title : fnd!.addOns.some((a) => a.item.item.id === item.id) ? `${fnd!.kind} add-on` : pour >= 0 ? `${fnd!.kind}, ${pourName(pour)}` : fnd!.kind;
     const raw = item.raw;
     const rows = result.result.rows;
     const src = `item:${item.id}`;
@@ -84,7 +85,11 @@ export function suggestLines(items: FiguredItem[], s?: Settings, job?: Job): Omi
       lines.push({ desc: `${name}: form and pour ${inFnd(item.id) ? `${wallText} ` : ''}walls`, qty: dec(total, 1), unit: 'ft', price: price(p?.wallFt), src });
     } else if (tool.id === 'footings' && raw.kind === 'wall') {
       // Walls entered in Footings & Walls: billed like Wall Forms, by the foot around the outside.
-      const around = rows.some((r) => r.label === 'House, around the outside') ? rowNum(rows, 'House, around the outside') : ft(raw.length) * (Number(raw.qty) || 1);
+      const around = rows.some((r) => r.label === 'House, around the outside')
+        ? rowNum(rows, 'House, around the outside')
+        : rows.some((r) => r.label === 'As measured')
+          ? rowNum(rows, 'As measured')
+          : ft(raw.length) * (Number(raw.qty) || 1);
       lines.push({ desc: `${name}: form and pour ${inFnd(item.id) ? `${wallText} ` : ''}walls`, qty: dec(around, 1), unit: 'ft', price: price(p?.wallFt), src });
     } else if (tool.id === 'footings') {
       lines.push({
@@ -123,7 +128,7 @@ export function suggestLines(items: FiguredItem[], s?: Settings, job?: Job): Omi
     const lb = itemRebarLb(f);
     if (lb > 0) lines.push({ desc: `${pieceName(f, items, job)}: rebar, cut, bent and tied`, qty: String(Math.round(lb)), unit: 'lb', price: price(p?.rebarLb), src: `item:${f.item.id}:rebar` });
   }
-  if (job?.order?.place === 'pump') lines.push({ desc: 'Pump truck', qty: '1', unit: 'pour', price: price(p?.pumpPour), src: 'pump' });
+  if (job?.order?.place === 'pump') lines.push({ desc: 'Pump truck', qty: String(fnd ? pourCount(fnd) : 1), unit: 'pour', price: price(p?.pumpPour), src: 'pump' });
   lines.push({ desc: 'Labor', qty: '1', unit: 'job', price: price(p?.laborJob), src: 'labor' });
   return lines;
 }

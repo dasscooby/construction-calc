@@ -14,6 +14,7 @@ import { BARS, beamBars, countAlong, getBar, lapIn, LB_PER_TON, sticksToCut, wei
 import { commas, commasTrim, cuYd, dec, ftIn, inches, lb, money, sqFt, tons } from './format';
 import { Field, Inputs, ResultRow, Tool, WallRow } from './types';
 import { cornersAfter } from '../report/geometry';
+import { addonLayout } from './addon';
 
 import { concreteRows, CUFT_PER_CUYD, ORDER_FIELDS } from './concreteShared';
 import { slabLayout } from './slabLayoutTool';
@@ -47,7 +48,7 @@ function steelRows(sticks: Map<number, number>, totalLb: number, stockFt: number
 }
 
 /** Footings & Walls measured around a building: outside length, the middle-of-the-wall run, and corners. */
-export function footingRun(inp: Inputs): { error?: string; outsideFt: number; centerFt: number; corners: number; ends: boolean } {
+export function footingRun(inp: Inputs): { error?: string; outsideFt: number; centerFt: number; corners: number; ends: boolean; tees?: number; addon?: string } {
   // A wall's outside is the house. A footing is entered at the house size and runs centered under the
   // wall on it, so its run follows the middle of that wall, a few inches in from the house edge.
   const footing = inp.choice('kind') === 'footing';
@@ -69,6 +70,15 @@ export function footingRun(inp: Inputs): { error?: string; outsideFt: number; ce
     const ic = Math.ceil(walls.reduce((s, w) => s + (w.ends === 'ii' ? 2 : w.ends === 'oi' ? 1 : 0), 0) / 2);
     // Each outside corner takes a thickness off the middle-of-the-wall run, each inside corner adds one.
     return { outsideFt, centerFt: outsideFt - (oc - ic) * t, corners: oc + ic, ends: false };
+  }
+  if (shape === 'addon') {
+    const k = inp.has('inWalls') ? inp.count('inWalls') : 0;
+    const W = inp.len('aWidth');
+    const D = inp.len('aDepth');
+    const a = addonLayout({ width: W, depth: D, t, w: inp.len('width'), inside: k, inFrom: inp.len('inFrom') });
+    if ('error' in a) return { error: a.error, outsideFt: 0, centerFt: 0, corners: 0, ends: false };
+    const addon = `${ftIn(D)} + ${ftIn(W)} + ${ftIn(D)} outside${k ? `, plus ${k} inside × ${ftIn(D)}` : ''}`;
+    return { outsideFt: a.asMeasuredFt, centerFt: a.centerFt, corners: a.corners, tees: a.tees, ends: false, addon };
   }
   const run = inp.len('length') * inp.count('qty');
   return { outsideFt: run, centerFt: run, corners: inp.has('corners') ? inp.count('corners') : 0, ends: true };
@@ -96,6 +106,7 @@ const footings: Tool = {
       options: [
         { value: 'rect', label: 'Square / rectangle' },
         { value: 'odd', label: 'Odd shape' },
+        { value: 'addon', label: 'Add-on (shares a wall)' },
         { value: 'run', label: 'Straight run / pads' },
       ],
       default: 'rect',
@@ -103,6 +114,38 @@ const footings: Tool = {
     { key: 'bLength', label: 'House length', kind: 'length', help: 'Outside of the wall (the house size)', showIf: ['shape=rect'] },
     { key: 'bWidth', label: 'House width', kind: 'length', help: 'Outside of the wall (the house size)', showIf: ['shape=rect'] },
     { key: 'walls', label: 'Walls', kind: 'walls', help: 'The house size: outside of the walls, one wall at a time.', showIf: ['shape=odd'] },
+    { key: 'aWidth', label: 'Add-on width', kind: 'length', help: 'Along the wall it joins, outside to outside', showIf: ['shape=addon'] },
+    { key: 'aDepth', label: 'Comes out', kind: 'length', help: 'From the outside of the existing wall to the outside of the far wall', showIf: ['shape=addon'] },
+    {
+      key: 'inWalls',
+      label: 'Walls inside it',
+      kind: 'count',
+      optional: true,
+      help: 'Running from the existing wall to the far wall, like walls for storage containers. Blank = none.',
+      showIf: ['shape=addon'],
+    },
+    {
+      key: 'inFrom',
+      label: 'In from each side',
+      kind: 'length',
+      optional: true,
+      help: 'Outside of the side wall to the middle of the first inside wall. Any more go evenly between. Blank = all evenly.',
+      showIf: ['shape=addon'],
+    },
+    {
+      key: 'side',
+      label: 'Joins the main walls on the',
+      kind: 'choice',
+      options: [
+        { value: 'ab', label: 'Top' },
+        { value: 'bc', label: 'Right' },
+        { value: 'cd', label: 'Bottom' },
+        { value: 'da', label: 'Left' },
+      ],
+      default: 'ab',
+      help: 'Side of the main plan, for the foundation drawing',
+      showIf: ['shape=addon'],
+    },
     {
       key: 'wallOn',
       label: 'Wall on it',
@@ -111,7 +154,7 @@ const footings: Tool = {
       default: '8',
       help: 'Thickness of the wall that sits centered on the footing',
       showIf: ['kind=footing'],
-      showIfAny: ['shape=rect', 'shape=odd'],
+      showIfAny: ['shape=rect', 'shape=odd', 'shape=addon'],
     },
     { key: 'length', label: 'Length', kind: 'length', showIf: ['shape=run'] },
     { key: 'qty', label: 'How many', kind: 'count', default: '1', showIf: ['shape=run'] },
@@ -133,7 +176,14 @@ const footings: Tool = {
     const run = footingRun(inp);
     if (run.error) return { error: run.error };
     const rows: ResultRow[] = [];
-    if (!run.ends) {
+    if (run.addon) {
+      rows.push({ label: 'As measured', value: `${commasTrim(run.outsideFt, 1)} ft`, note: run.addon });
+      rows.push({
+        label: 'Along the middle',
+        value: `${commasTrim(run.centerFt, 1)} ft`,
+        note: `What the concrete and bars follow · ${run.corners} corners, ${run.tees} tees: each wall that meets another stops at its ${inp.choice('kind') === 'footing' ? 'edge' : 'face'}`,
+      });
+    } else if (!run.ends) {
       rows.push({ label: 'House, around the outside', value: `${commasTrim(run.outsideFt, 1)} ft` });
       rows.push({
         label: 'Along the middle',
@@ -152,11 +202,12 @@ const footings: Tool = {
     if (2 * lapFt > stockFt) return { error: `A corner bar won’t fit in a ${stockFt}' stick.` };
     // Around a building the bars run all the way round; a straight run stops 3" short of each end.
     const barRun = run.ends && !run.corners ? Math.max(0, run.centerFt - 2 * COVER_FT) : run.centerFt;
-    const r = beamBars(barRun, lines, bar, stockFt, lapFt, run.corners);
+    const bends = run.corners + (run.tees ?? 0);
+    const r = beamBars(barRun, lines, bar, stockFt, lapFt, bends);
     rows.push({
       label: 'Bars along it',
       value: `${commasTrim(r.totalFt, 1)} ft`,
-      note: `${lines} #${bar.size} · ${commas(r.laps)} laps${run.corners ? ` · ${commas(r.cornerBars)} corner L-bars ${ftIn(r.cornerBarFt)}` : ''}`,
+      note: `${lines} #${bar.size} · ${commas(r.laps)} laps${bends ? ` · ${commas(r.cornerBars)} ${run.tees ? 'corner and tee' : 'corner'} L-bars ${ftIn(r.cornerBarFt)}` : ''}`,
     });
     let sticks = r.sticks;
     let totalLb = r.lb;

@@ -8,7 +8,7 @@ import type { Settings } from '../lib/settings';
 import { dec } from '../tools/format';
 import { parseLength, parseNumber, RawLength, RawWallRow } from '../tools/run';
 import { deliveredYd } from './billing';
-import { confirmedFoundation } from './foundation';
+import { confirmedFoundation, Foundation, pourCount, pourName } from './foundation';
 import { builtItems, FiguredItem, itemRebarLb, jobTotals, numberIn, pieceName, steelItems } from './report';
 
 export interface BidMeasure {
@@ -28,6 +28,12 @@ export interface BidSource {
   /** Price book price, by unit */
   prices: Record<string, string>;
 }
+
+/** "footings, walls, slab, second pour" */
+const pourList = (f: Foundation) =>
+  [f.footings.length || f.footingBars.length || f.addOns.some((a) => a.kind === 'footing') ? 'footings' : '', 'walls', f.slab ? 'slab' : '', ...f.pours.map((_, i) => pourName(i))]
+    .filter(Boolean)
+    .join(', ');
 
 export const UNITS = ['sq ft', 'ft', 'yd', 'lb', 'tons', 'ea', 'set', 'job', 'pour', 'hr', 'day', 'lump sum'];
 
@@ -69,9 +75,12 @@ export function bidOptions(items: FiguredItem[], s: Settings, job?: Job): BidSou
       }
       out.push({ src, what: `${name}: pour and finish`, group: 'Slabs', measures: [...ms, ...conc], prices: { 'sq ft': price(p.slabSqFt) } });
     } else if (tool === 'wall-forms' || (tool === 'footings' && raw.kind === 'wall')) {
-      const around = tool === 'wall-forms' ? ((raw.walls as RawWallRow[]) ?? []).reduce((a, w) => a + ft(w.length), 0) : val(f0, 'House, around the outside') || ft(raw.length) * (Number(raw.qty) || 1);
+      const around =
+        tool === 'wall-forms'
+          ? ((raw.walls as RawWallRow[]) ?? []).reduce((a, w) => a + ft(w.length), 0)
+          : val(f0, 'House, around the outside') || val(f0, 'As measured') || ft(raw.length) * (Number(raw.qty) || 1);
       const t = tool === 'wall-forms' ? (num(String(raw.thick)) || 8) / 12 : ft(raw.width);
-      const middle = Math.max(0, around - 4 * t);
+      const middle = (tool === 'footings' && val(f0, 'Along the middle')) || Math.max(0, around - 4 * t);
       const h = fnd?.walls.some((w) => w.item.id === f.item.id) && fnd.runs ? fnd.runs.reduce((s2, r) => s2 + r.length * r.height, 0) / Math.max(1, around) : tool === 'wall-forms' ? ft(raw.height1) + ft(raw.height2) : ft(raw.depth);
       const concreteYd = tool === 'wall-forms' ? val(f, 'Concrete in the wall') : concrete;
       out.push({
@@ -79,7 +88,7 @@ export function bidOptions(items: FiguredItem[], s: Settings, job?: Job): BidSou
         what: `${name}: form and pour`,
         group: 'Walls',
         measures: [
-          { id: 'around', label: `Around the outside (${dec(around, 1)} ft)`, qty: around, unit: 'ft' },
+          { id: 'around', label: `${raw.shape === 'addon' ? 'As measured' : 'Around the outside'} (${dec(around, 1)} ft)`, qty: around, unit: 'ft' },
           { id: 'middle', label: `Along the middle (${dec(middle, 1)} ft)`, qty: middle, unit: 'ft' },
           { id: 'face', label: `Wall face, both sides (${Math.round(around * h * 2).toLocaleString()} sq ft)`, qty: around * h * 2, unit: 'sq ft' },
           ...(concreteYd ? [{ id: 'concrete', label: `Concrete in it (${dec(concreteYd, 2)} yd)`, qty: concreteYd, unit: 'yd' }] : []),
@@ -168,7 +177,17 @@ export function bidOptions(items: FiguredItem[], s: Settings, job?: Job): BidSou
       prices: { yd: perYd },
     });
   }
-  out.push({ src: 'pump', what: 'Pump truck', group: 'Concrete and pump', measures: [{ id: 'pour', label: 'One pour', qty: 1, unit: 'pour' }], prices: { pour: price(p.pumpPour) } });
+  const pours = fnd ? pourCount(fnd) : 1;
+  out.push({
+    src: 'pump',
+    what: 'Pump truck',
+    group: 'Concrete and pump',
+    measures: [
+      { id: 'pour', label: 'One pour', qty: 1, unit: 'pour' },
+      ...(pours > 1 ? [{ id: 'pours', label: `Each pour (${pours}: ${pourList(fnd!)})`, qty: pours, unit: 'pour' }] : []),
+    ],
+    prices: { pour: price(p.pumpPour) },
+  });
   out.push({
     src: 'labor',
     what: 'Labor',

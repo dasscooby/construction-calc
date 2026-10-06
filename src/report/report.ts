@@ -16,10 +16,10 @@ import { insetOutline, Pt, wallOutline } from './geometry';
 import { layoutIsoSvg, layoutPlanSvg } from './layoutDraw';
 import { DocMedia, docCss, logoHtml, noticeHtml } from './docStyle';
 import { buildLayout, matBars } from './layoutGeom';
-import { confirmedFoundation, Foundation, foundationLines } from './foundation';
+import { confirmedFoundation, Foundation, foundationLines, pourName } from './foundation';
 import { daylightWall, splitOutline, WallSteel } from './heightRuns';
 import { concreteResult } from '../lib/concrete';
-import { FoundationDraw, foundationIsoSvg, foundationPlanSvg, foundationSectionSvg } from './foundationDraw';
+import { AddOnDraw, FoundationDraw, foundationIsoSvg, foundationPlanSvg, foundationSectionSvg } from './foundationDraw';
 import { slabBarPlan } from '../tools/slabLayoutTool';
 import { slabBarsAdvice } from '../lib/rebar';
 
@@ -299,6 +299,8 @@ export function footingDrawings(raw: RawValues, title = 'Footings & Walls', date
       section,
     };
   }
+  // An add-on is drawn with the house on the job's foundation plan; on its own, the cross-section.
+  if (raw.shape === 'addon') return { section };
   const L = parseLength(raw.length as never) ?? 0;
   if (!(L > 0)) return null;
   return {
@@ -512,6 +514,28 @@ export function toolDrawings(toolId: string, raw: RawValues, title: string): Dra
   return null;
 }
 
+/** Each add-on's walls with the footing under them (matched by side) and the slab poured in it. */
+function addOnDraws(f: Foundation): AddOnDraw[] {
+  const len = (v: unknown) => parseLength(v as never) ?? 0;
+  const walls = f.addOns.filter((a) => a.kind === 'wall');
+  return walls.map((a, i) => {
+    const ft = f.addOns.find((x) => x.kind === 'footing' && x.side === a.side);
+    const pour = f.pours[i];
+    const area = pour?.result.status === 'ok' ? pour.result.result.rows.find((r) => r.label === 'Slab area') : undefined;
+    const order = pour?.result.status === 'ok' ? pour.result.result.rows.find((r) => r.label === 'Order') : undefined;
+    return {
+      side: a.side,
+      width: a.width,
+      depth: a.depth,
+      inside: a.inside,
+      inFrom: a.inFrom,
+      wallFt: len(a.item.item.raw.depth) || f.heightFt,
+      footing: ft ? { widthIn: len(ft.item.item.raw.width) * 12, depthIn: len(ft.item.item.raw.depth) * 12 } : null,
+      pour: pour ? { thickIn: len(pour.item.raw.thick) * 12 || 4, sqFt: area ? numberIn(area.value) : 0, label: order ? `${order.value.toUpperCase()} ORDERED` : '' } : null,
+    };
+  });
+}
+
 /**
  * Walls, footings and slab you put together, drawn the way an engineer does: foundation plan,
  * 3D, and a typical section through the wall.
@@ -564,6 +588,7 @@ export function foundationDrawings(job: Job, items: FiguredItem[], company = '')
     slab,
     vaporBarrier: items.some((x) => x.tool.id === 'vapor-barrier'),
     runs: f.runs && !f.runsOver ? splitOutline(f.outline, f.runs) : undefined,
+    addOns: addOnDraws(f),
     title: job.name,
     job: job.name,
     company,
@@ -583,6 +608,10 @@ export function pieceName(f: FiguredItem, items: FiguredItem[], job?: Job): stri
     if (fnd.footings.some((x) => x.item.id === f.item.id)) return `${fnd.kind} footings`;
     if (fnd.footingBars.some((x) => x.item.id === f.item.id)) return `${fnd.kind} footing bars`;
     if (fnd.slab?.item.id === f.item.id) return `${fnd.kind} slab`;
+    const a = fnd.addOns.find((x) => x.item.item.id === f.item.id);
+    if (a) return `${fnd.kind} add-on ${a.kind === 'wall' ? 'walls' : 'footings'}`;
+    const pour = fnd.pours.findIndex((x) => x.item.id === f.item.id);
+    if (pour >= 0) return `${fnd.kind} slab, ${pourName(pour)}`;
   }
   return f.item.label || f.tool.title;
 }

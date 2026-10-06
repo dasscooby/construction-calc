@@ -9,6 +9,7 @@
 import { ftIn } from '../tools/format';
 import { barSpots } from './footingDraw';
 import { bounds, insetOutline, Pt } from './geometry';
+import { addonLayout, Rect } from '../tools/addon';
 
 const n = (v: number) => Math.round(v * 10) / 10;
 const esc = (s: string) => s.replace(/&/g, '+').replace(/</g, '‹').replace(/>/g, '›');
@@ -31,11 +32,86 @@ export interface FoundationDraw {
   vaporBarrier: boolean;
   /** Walls that change height: pieces of the outline, each at its height (from corner A clockwise) */
   runs?: { a: Pt; b: Pt; height: number; run: number }[];
+  /** Add-ons sharing a wall with the house */
+  addOns?: AddOnDraw[];
   title: string;
   job: string;
   company: string;
   date: string;
   kind: string;
+}
+
+
+// ---------------------------------------------------------------------------------------------
+// Add-ons: walls built off one side of the house (sharing its wall), with walls inside them.
+
+export interface AddOnDraw {
+  /** Side of the outline it joins (from corner A, clockwise) */
+  side: number;
+  width: number;
+  depth: number;
+  inside: number;
+  inFrom: number;
+  wallFt: number;
+  footing: { widthIn: number; depthIn: number } | null;
+  /** A slab poured on its own in the add-on (in the widest bay) */
+  pour: { thickIn: number; label: string; sqFt: number } | null;
+}
+
+interface PlacedAddOn {
+  a: AddOnDraw;
+  /** Local (u along the side, v out from the house) to plan */
+  at: (u: number, v: number) => Pt;
+  dir: Pt;
+  out: Pt;
+  walls: Pt[][];
+  footings: Pt[][];
+  pour: Pt[] | null;
+  /** Outside corners of the add-on */
+  box: Pt[];
+  insideAt: number[];
+}
+
+/** Clockwise (y down): positive shoelace. */
+const clockwise = (pts: Pt[]) => {
+  let a = 0;
+  pts.forEach((p, i) => {
+    const q = pts[(i + 1) % pts.length];
+    a += p.x * q.y - q.x * p.y;
+  });
+  return a >= 0 ? pts : [...pts].reverse();
+};
+
+function placeAddOns(d: FoundationDraw): PlacedAddOn[] {
+  const t = d.wallIn / 12;
+  const out: PlacedAddOn[] = [];
+  for (const a of d.addOns ?? []) {
+    const P = d.outline[a.side];
+    const Q = d.outline[(a.side + 1) % d.outline.length];
+    if (!P || !Q) continue;
+    const len = Math.hypot(Q.x - P.x, Q.y - P.y) || 1;
+    const dir = { x: (Q.x - P.x) / len, y: (Q.y - P.y) / len };
+    const o = { x: dir.y, y: -dir.x }; // outward from a clockwise walk
+    const at = (u: number, v: number) => ({ x: P.x + dir.x * u + o.x * v, y: P.y + dir.y * u + o.y * v });
+    const rect = (r: Rect) => clockwise([at(r.u0, r.v0), at(r.u1, r.v0), at(r.u1, r.v1), at(r.u0, r.v1)]);
+    const lay = (w: number) => addonLayout({ width: a.width, depth: a.depth, t, w, inside: a.inside, inFrom: a.inFrom });
+    const wl = lay(t);
+    if ('error' in wl) continue;
+    const fl = a.footing ? lay(a.footing.widthIn / 12) : null;
+    const widest = [...wl.bays].sort((x, y) => y.u1 - y.u0 - (x.u1 - x.u0))[0];
+    out.push({
+      a,
+      at,
+      dir,
+      out: o,
+      walls: wl.pieces.map(rect),
+      footings: fl && !('error' in fl) ? fl.pieces.map(rect) : [],
+      pour: a.pour && widest ? rect({ u0: widest.u0, v0: 0, u1: widest.u1, v1: a.depth - t }) : null,
+      box: [at(0, 0), at(a.width, 0), at(a.width, a.depth), at(0, a.depth)],
+      insideAt: wl.insideAt,
+    });
+  }
+  return out;
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -46,9 +122,10 @@ export function foundationPlanSvg(d: FoundationDraw): string {
   const fw = d.footing ? d.footing.widthIn / 12 : 0;
   const outer = d.outline;
   const inner = insetOutline(outer, t);
-  const b = bounds(outer);
+  const adds = placeAddOns(d);
+  const b = bounds([...outer, ...adds.flatMap((x) => x.box)]);
   const W = 760;
-  const pad = 95;
+  const pad = adds.length ? 120 : 95;
   const legendH = 150;
   const titleH = 76;
   const spanX = Math.max(b.maxX - b.minX, 1);
@@ -78,6 +155,13 @@ export function foundationPlanSvg(d: FoundationDraw): string {
   }
   // Walls: hatched, heavy outline.
   out.push(`<path d="${path(outer)} ${path([...inner].reverse())}" fill="url(#hatch)" fill-rule="evenodd" stroke="#111" stroke-width="2.6"/>`);
+
+  // Add-ons: the slab poured on its own, footings (hidden lines), then the walls, hatched.
+  for (const x of adds) {
+    if (x.pour) out.push(`<path d="${path(x.pour)}" fill="url(#dots)" stroke="#111" stroke-width="1" stroke-dasharray="3 4"/>`);
+    for (const p of x.footings) out.push(`<path d="${path(p)}" fill="none" stroke="#111" stroke-width="1.6" stroke-dasharray="12 7"/>`);
+    for (const p of x.walls) out.push(`<path d="${path(p)}" fill="url(#hatch)" stroke="#111" stroke-width="2.6"/>`);
+  }
 
   // Walls that change height: each run labeled inside the wall line, a heavy tick where it changes.
   if (d.runs?.length) {
@@ -115,12 +199,14 @@ export function foundationPlanSvg(d: FoundationDraw): string {
   }
 
   // Dimension strings outside each side: extension lines, dimension line, tick marks, size.
-  const cx = (b.minX + b.maxX) / 2;
-  const cy = (b.minY + b.maxY) / 2;
+  // The house itself (not its add-ons): dimension strings point away from it, the slab callout sits in it.
+  const hb = bounds(outer);
+  const cx = (hb.minX + hb.maxX) / 2;
+  const cy = (hb.minY + hb.maxY) / 2;
   outer.forEach((p, i) => {
     const q = outer[(i + 1) % outer.length];
     const len = Math.hypot(q.x - p.x, q.y - p.y);
-    if (len < 0.5) return;
+    if (len < 0.5 || adds.some((x) => x.a.side === i)) return;
     let nx = (q.y - p.y) / len;
     let ny = -(q.x - p.x) / len;
     // Point the string away from the middle of the building.
@@ -144,10 +230,40 @@ export function foundationPlanSvg(d: FoundationDraw): string {
     );
   });
 
-  // Section cut through the first wall, a third of the way along, looking along the wall.
+  // Add-on sizes: how far it comes out (along its first side wall), and the bays along the far wall.
+  const dimString = (p: Pt, q: Pt, nx: number, ny: number, offPx: number, label: string) => {
+    const a = { x: p.x + (nx * offPx) / s, y: p.y + (ny * offPx) / s };
+    const c = { x: q.x + (nx * offPx) / s, y: q.y + (ny * offPx) / s };
+    for (const pt of [p, q]) out.push(`<line x1="${n(Number(X(pt.x)) + nx * 6)}" y1="${n(Number(Y(pt.y)) + ny * 6)}" x2="${n(Number(X(pt.x)) + nx * (offPx + 8))}" y2="${n(Number(Y(pt.y)) + ny * (offPx + 8))}" stroke="#111" stroke-width="0.9"/>`);
+    out.push(`<line x1="${X(a.x)}" y1="${Y(a.y)}" x2="${X(c.x)}" y2="${Y(c.y)}" stroke="#111" stroke-width="1"/>`);
+    for (const e of [a, c]) out.push(`<line x1="${n(Number(X(e.x)) - 6)}" y1="${n(Number(Y(e.y)) + 6)}" x2="${n(Number(X(e.x)) + 6)}" y2="${n(Number(Y(e.y)) - 6)}" stroke="#111" stroke-width="2"/>`);
+    const mx = Number(X((a.x + c.x) / 2)) + nx * 14;
+    const my = Number(Y((a.y + c.y) / 2)) + ny * 14;
+    const vertical = Math.abs(q.x - p.x) < Math.abs(q.y - p.y);
+    out.push(`<text x="${n(mx)}" y="${n(my + (vertical ? 0 : 6))}" text-anchor="middle" ${FONT} font-size="17" font-weight="700" fill="#111"${vertical ? ` transform="rotate(-90 ${n(mx)} ${n(my)})"` : ''}>${esc(label)}</text>`);
+  };
+  for (const x of adds) {
+    const { a } = x;
+    // Out from the house, beside the first side wall.
+    dimString(x.at(0, 0), x.at(0, a.depth), -x.dir.x, -x.dir.y, 40, dim(a.depth));
+    // Along the far wall: side to inside wall to inside wall ... to side, then the whole width.
+    const marks = [0, ...x.insideAt, a.width];
+    for (let i = 1; i < marks.length; i++) dimString(x.at(marks[i - 1], a.depth), x.at(marks[i], a.depth), x.out.x, x.out.y, 34, dim(marks[i] - marks[i - 1]));
+    if (marks.length > 2) dimString(x.at(0, a.depth), x.at(a.width, a.depth), x.out.x, x.out.y, 72, dim(a.width));
+    if (x.pour && a.pour) {
+      const c = x.at(a.width / 2, a.depth / 2);
+      const lines = [`${inch(a.pour.thickIn)} SLAB, 2ND POUR`, `${Math.round(a.pour.sqFt).toLocaleString()} SQ FT`, a.pour.label];
+      lines.filter(Boolean).forEach((l, i) =>
+        out.push(`<text x="${X(c.x)}" y="${n(Number(Y(c.y)) - 14 + i * 21)}" text-anchor="middle" ${FONT} font-size="${i === 0 ? 17 : 14}" font-weight="${i === 0 ? 800 : 600}" fill="#111">${esc(l)}</text>`),
+      );
+    }
+  }
+
+  // Section cut a third of the way along the first wall (across from the add-on, if there is one).
   {
-    const p = outer[0];
-    const q = outer[1];
+    const si = adds.length ? (adds[0].a.side + 2) % outer.length : 0;
+    const p = outer[si];
+    const q = outer[(si + 1) % outer.length];
     const len = Math.hypot(q.x - p.x, q.y - p.y) || 1;
     const ux = (q.x - p.x) / len;
     const uy = (q.y - p.y) / len;
@@ -354,7 +470,8 @@ export function foundationIsoSvg(d: FoundationDraw): string {
   const proj = (x: number, y: number, h: number) => ({ x: (x - y) * C30, y: (x + y) * 0.5 - h });
   const fo = d.footing ? insetOutline(outer, t / 2 - fw / 2) : outer;
   const fi = d.footing ? insetOutline(outer, t / 2 + fw / 2) : inner;
-  const all = [...fo.flatMap((p) => [proj(p.x, p.y, 0), proj(p.x, p.y, top)])];
+  const adds = placeAddOns(d);
+  const all = [...fo, ...adds.flatMap((x) => x.box)].flatMap((p) => [proj(p.x, p.y, 0), proj(p.x, p.y, top)]);
   const minX = Math.min(...all.map((p) => p.x));
   const maxX = Math.max(...all.map((p) => p.x));
   const minY = Math.min(...all.map((p) => p.y));
@@ -378,6 +495,22 @@ export function foundationIsoSvg(d: FoundationDraw): string {
   // Outline walked clockwise (y down): outward normal (dy, −dx) faces the viewer when dy − dx > 0.
   const facing = (e: { p: Pt; q: Pt }) => e.q.y - e.p.y - (e.q.x - e.p.x) > 1e-9;
   const shade = (e: { p: Pt; q: Pt }, light: string, dark: string) => (e.q.y - e.p.y >= -(e.q.x - e.p.x) ? light : dark);
+
+  // Add-ons: footings, the slab poured on its own, then the walls, nearest last. Drawn before the house
+  // when they're behind it, after it when they're in front.
+  const prism = (poly: Pt[], z0: number, z1: number, topFill: string, light: string, dark: string) => {
+    for (const e of edges(poly).filter(facing).sort((a, b) => depth(a) - depth(b))) out.push(face(e.p, e.q, z0, z1, shade(e, light, dark)));
+    out.push(`<polygon points="${poly.map((p) => pt(p.x, p.y, z1)).join(' ')}" fill="${topFill}" stroke="#55514b" stroke-width="0.9"/>`);
+  };
+  const mid = (ps: Pt[]) => ps.reduce((sum, p) => sum + p.x + p.y, 0) / ps.length;
+  const drawAdd = (x: PlacedAddOn) => {
+    const hf = x.a.footing ? (x.a.footing.depthIn / 12) * z : Hf;
+    for (const p of [...x.footings].sort((u, v) => mid(u) - mid(v))) prism(p, Hf - hf, Hf, '#cfcac1', '#b9b5ad', '#9a958d');
+    if (x.pour && x.a.pour) out.push(`<polygon points="${x.pour.map((p) => pt(p.x, p.y, Hf + x.a.wallFt * z - ((d.slab?.dropIn ?? 0) / 12) * z)).join(' ')}" fill="#dedad2" stroke="#55514b" stroke-width="0.9"/>`);
+    for (const p of [...x.walls].sort((u, v) => mid(u) - mid(v))) prism(p, Hf, Hf + x.a.wallFt * z, '#ece9e3', '#c9c5bd', '#a9a49b');
+  };
+  const house = mid(outer);
+  for (const x of adds) if (mid(x.box) < house) drawAdd(x);
 
   // 1. Footing: outside faces toward the viewer, then its top.
   if (d.footing) {
@@ -425,6 +558,7 @@ export function foundationIsoSvg(d: FoundationDraw): string {
     out.push(ring(outer, inner, top, '#ece9e3'));
     for (const e of edges(outer).filter(facing).sort((a, b) => depth(a) - depth(b))) out.push(face(e.p, e.q, Hf, top, shade(e, '#c9c5bd', '#a9a49b')));
   }
+  for (const x of adds) if (mid(x.box) >= house) drawAdd(x);
   if (z > 1.5) out.push(`<text x="${W - 14}" y="${H - 10}" text-anchor="end" ${FONT} font-size="12" fill="#666">Height stretched to show the footing, wall and slab</text>`);
   return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${W} ${H}" width="100%" role="img" aria-label="3D view">${out.join('')}</svg>`;
 }

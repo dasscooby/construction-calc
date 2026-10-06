@@ -7,6 +7,9 @@
 //     middle of the wall, a few inches in from the house edge.
 //   - A slab measured to the house size is poured inside the walls: an 8" wall takes 16" off each way.
 //     The concrete order uses the inside; the bid can use either.
+//   - An add-on (Footings & Walls set to Add-on) shares a wall with the house: its width matches a
+//     side of the house. Its walls inside tee into the walls they meet. A slab that fits in the add-on
+//     is its own pour.
 
 import type { Job } from '../lib/jobs';
 import { ftIn } from '../tools/format';
@@ -25,6 +28,17 @@ const close = (a: number, b: number, abs: number, pct: number) => Math.abs(a - b
 
 export type FoundationKind = 'Basement' | 'Daylight basement' | 'Stem wall and slab' | 'Crawlspace';
 
+export interface AddOn {
+  item: FiguredItem;
+  kind: 'wall' | 'footing';
+  /** Side of the house outline it joins (0 = from corner A) */
+  side: number;
+  width: number;
+  depth: number;
+  inside: number;
+  inFrom: number;
+}
+
 export interface Foundation {
   kind: FoundationKind;
   /** Wall items (more than one when walls step down, like a daylight basement) */
@@ -33,6 +47,10 @@ export interface Foundation {
   /** Beam & Footing Bars items whose run matches the walls */
   footingBars: FiguredItem[];
   slab: FiguredItem | null;
+  /** Add-ons that share a wall with the house (walls and their footings) */
+  addOns: AddOn[];
+  /** Slabs poured on their own inside an add-on (second pour, third ...) */
+  pours: FiguredItem[];
   /** Every item that goes together */
   ids: string[];
   /** You checked "They go together" (for these exact items) */
@@ -131,7 +149,7 @@ export function findFoundation(items: FiguredItem[], job?: Job): Foundation | nu
     const run = runOf(f);
     return (run > 0 && (close(run, centerFt, 2, 3) || close(run, outsideFt, 2, 3))) || close(houseOf(f), outsideFt, 1, 0.5);
   };
-  const footings = items.filter((f) => f.tool.id === 'footings' && f.item.raw.kind !== 'wall' && ok(f) && underWalls(f));
+  const footings = items.filter((f) => f.tool.id === 'footings' && f.item.raw.kind !== 'wall' && f.item.raw.shape !== 'addon' && ok(f) && underWalls(f));
   const footingBars = items.filter((f) => f.tool.id === 'beam-bars' && ok(f) && underWalls(f));
 
   // A slab the size of the house (measured to the outside of the walls), or of the inside.
@@ -154,6 +172,35 @@ export function findFoundation(items: FiguredItem[], job?: Job): Foundation | nu
     }
   }
 
+  // Add-ons whose width matches a side of the house (the side you picked, or the first that matches).
+  const addOns: AddOn[] = [];
+  if (main) {
+    const sides = main.pts.map((p, i) => Math.hypot(main!.pts[(i + 1) % main!.pts.length].x - p.x, main!.pts[(i + 1) % main!.pts.length].y - p.y));
+    for (const f of items) {
+      const r = f.item.raw;
+      if (f.tool.id !== 'footings' || r.shape !== 'addon' || !ok(f)) continue;
+      const width = parseLength(r.aWidth as RawLength) ?? 0;
+      const picked = Math.max(0, ['ab', 'bc', 'cd', 'da'].indexOf(String(r.side)));
+      const fits = (i: number) => i < sides.length && close(sides[i], width, 1, 0);
+      const side = fits(picked) ? picked : sides.findIndex((_, i) => fits(i));
+      if (side < 0) continue;
+      addOns.push({
+        item: f,
+        kind: r.kind === 'wall' ? 'wall' : 'footing',
+        side,
+        width,
+        depth: parseLength(r.aDepth as RawLength) ?? 0,
+        inside: parseNumber(String(r.inWalls ?? '')) ?? 0,
+        inFrom: parseLength(r.inFrom as RawLength) ?? 0,
+      });
+    }
+  }
+  // Other slabs that fit inside an add-on: poured on their own.
+  const room = addOns.filter((a) => a.kind === 'wall').reduce((s, a) => s + a.width * a.depth, 0);
+  const pours = room
+    ? items.filter((f) => f !== slab && ok(f) && f.tool.id === 'slab' && !!row(f, 'Slab area') && firstNumber(row(f, 'Slab area')!.value) <= room + 4)
+    : [];
+
   // Walls alone aren't a foundation: something has to line up with them.
   if (!footings.length && !footingBars.length && !slab) return null;
 
@@ -167,7 +214,7 @@ export function findFoundation(items: FiguredItem[], job?: Job): Foundation | nu
     slabOrder = { asMeasured, inside: Math.ceil(Math.max(0, withWaste - less) * 4 - 1e-9) / 4 };
   }
 
-  const ids = [...walls, ...footings, ...footingBars, ...(slab ? [slab] : [])].map((f) => f.item.id);
+  const ids = [...walls, ...footings, ...footingBars, ...(slab ? [slab] : []), ...addOns.map((a) => a.item), ...pours].map((f) => f.item.id);
   const saved = job?.together?.ids ?? [];
   const confirmed = saved.length === ids.length && ids.every((id) => saved.includes(id));
   // Heights that change around the house (daylight basement), from corner A clockwise.
@@ -200,6 +247,8 @@ export function findFoundation(items: FiguredItem[], job?: Job): Foundation | nu
     footings,
     footingBars,
     slab,
+    addOns,
+    pours,
     ids,
     confirmed,
     thickFt: t,
@@ -224,6 +273,14 @@ export const confirmedFoundation = (items: FiguredItem[], job?: Job): Foundation
   return f?.confirmed ? f : null;
 };
 
+const SIDE_NAMES = ['top', 'right', 'bottom', 'left'];
+/** "second pour", "third pour" ... (the first is the main slab) */
+export const pourName = (i: number) => `${['second', 'third', 'fourth', 'fifth'][i] ?? `pour ${i + 2}`} pour`;
+
+/** How many pours: footings, walls, the main slab and each slab poured on its own. */
+export const pourCount = (f: Foundation) =>
+  (f.footings.length || f.footingBars.length || f.addOns.some((a) => a.kind === 'footing') ? 1 : 0) + 1 + (f.slab ? 1 : 0) + f.pours.length;
+
 /** What each piece is and its size, for the "do these go together?" check. */
 export function foundationParts(f: Foundation): string[] {
   const t = Math.round(f.thickFt * 12);
@@ -232,6 +289,8 @@ export function foundationParts(f: Foundation): string[] {
   for (const x of f.footings) parts.push(`Footing: ${x.item.label || 'Footings & Walls'} (runs ${ftIn(f.centerFt)} under the walls)`);
   for (const x of f.footingBars) parts.push(`Footing bars: ${x.item.label || 'Beam & Footing Bars'}`);
   if (f.slab) parts.push(`Slab: ${f.slab.item.label || f.slab.tool.title}, ${Math.round(f.slabAtOutside ? f.outsideArea : f.insideArea).toLocaleString()} sq ft (${f.slabAtOutside ? 'house size' : 'inside the walls'})`);
+  for (const a of f.addOns) parts.push(`Add-on ${a.kind === 'wall' ? 'walls' : 'footing'}: ${ftIn(a.width)} × ${ftIn(a.depth)} on the ${SIDE_NAMES[a.side] ?? 'side'}${a.inside ? `, ${a.inside} inside wall${a.inside > 1 ? 's' : ''}` : ''}`);
+  f.pours.forEach((p, i) => parts.push(`Slab, ${pourName(i)}: ${p.item.label || p.tool.title}, ${Math.round(firstNumber(row(p, 'Slab area')?.value ?? '0')).toLocaleString()} sq ft`));
   return parts;
 }
 
@@ -262,5 +321,15 @@ export function foundationLines(f: Foundation, job?: Job): string[] {
     if (f.slabDropIn > 0) lines.push(`Top of slab ${f.slabDropIn}" below the top of the wall`);
     if (job && f.slabAtOutside) lines.push(`Bid the slab at the ${job.slabBid === 'inside' ? 'inside (what you pour)' : 'house size (as measured)'}`);
   }
+  for (const a of f.addOns) {
+    const along = firstNumber(row(a.item, 'Along the middle')?.value ?? '0');
+    lines.push(
+      `Add-on ${a.kind === 'wall' ? 'walls' : 'footing'} on the ${SIDE_NAMES[a.side] ?? 'side'}: ${ftIn(a.width)} wide, out ${ftIn(a.depth)}${a.inside ? `, ${a.inside} wall${a.inside > 1 ? 's' : ''} inside` : ''}. Shares the house wall; ${ftIn(along)} along the middle, stopping where each wall tees in.`,
+    );
+  }
+  f.pours.forEach((p, i) => {
+    const order = row(p, 'Order')?.value;
+    lines.push(`Slab, ${pourName(i)}: ${Math.round(firstNumber(row(p, 'Slab area')?.value ?? '0')).toLocaleString()} sq ft in the add-on${order ? `, ${order} ordered on its own` : ''}`);
+  });
   return lines;
 }
