@@ -218,6 +218,7 @@ export const jobStore = {
     update(jobId, (j) => ({ ...j, items: j.items.filter((it) => it.id !== itemId) }));
   },
   startPour(jobId: string, totalYd: number, truckYd: number) {
+    if (!(truckYd > 0)) truckYd = 10;
     const trucks = Math.max(1, Math.ceil(totalYd / truckYd - 1e-9));
     update(jobId, (j) => ({ ...j, pour: { startedAt: Date.now(), trucksIn: 0, trucks, totalYd, truckYd, done: false } }));
   },

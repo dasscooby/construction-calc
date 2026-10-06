@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Image, Platform, Pressable, ScrollView, Share, Text, TextInput, View } from 'react-native';
 
+import { liveUri } from '../lib/docPath';
 import { feel } from '../lib/feel';
 import { dayLabel, timeLabel } from '../lib/history';
 import { Job, JobItem, jobStore, PriceLine, useJobs, yardsIn } from '../lib/jobs';
@@ -219,7 +220,7 @@ function JobDetail({ job, onBack, onOpenItem }: { job: Job; onBack: () => void; 
 
         <OrderCard job={job} yd={totals.concreteOrderYd} />
         <WeatherCard job={job} />
-        <PourCard job={job} orderYd={totals.concreteOrderYd} truckYd={Number(prefs.defaults.truck) || 10} />
+        <PourCard job={job} orderYd={totals.concreteOrderYd} truckYd={Number(prefs.defaults.truck) > 0 ? Number(prefs.defaults.truck) : 10} />
 
         <Text style={styles.section}>In this job</Text>
         {figured.length === 0 ? (
@@ -305,7 +306,7 @@ function JobDetail({ job, onBack, onOpenItem }: { job: Job; onBack: () => void; 
                     accessibilityLabel={`Delete plan page ${i + 1}`}
                     style={styles.scanThumb}
                   >
-                    <Image source={{ uri }} style={styles.scanImg} resizeMode="cover" />
+                    <Image source={{ uri: liveUri(uri) }} style={styles.scanImg} resizeMode="cover" />
                     <Text style={styles.scanLabel}>Page {i + 1} · tap to delete</Text>
                   </Pressable>
                 ))}
@@ -336,7 +337,7 @@ function JobDetail({ job, onBack, onOpenItem }: { job: Job; onBack: () => void; 
                     accessibilityLabel={`Delete photo ${i + 1}`}
                     style={styles.scanThumb}
                   >
-                    <Image source={{ uri }} style={styles.photoImg} resizeMode="cover" />
+                    <Image source={{ uri: liveUri(uri) }} style={styles.photoImg} resizeMode="cover" />
                     <Text style={styles.scanLabel}>Tap to delete</Text>
                   </Pressable>
                 ))}

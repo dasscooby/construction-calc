@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { BackHandler, Image, Platform, Pressable, ScrollView, Text, TextInput, View } from 'react-native';
 
+import { liveUri } from '../lib/docPath';
 import type { Job } from '../lib/jobs';
 import { companyLine, Settings, settings, TabId, useSettings } from '../lib/settings';
 import { buildBid, buildBill } from '../report/billing';
@@ -212,7 +213,7 @@ export default function SettingsScreen({ onClose }: { onClose: () => void }) {
         <Text style={styles.sectionHelp}>How your bids, bills and crew sheets look.</Text>
         <View style={styles.card}>
           <Text style={styles.label}>Logo</Text>
-          {s.docs.logo ? <Image source={{ uri: s.docs.logo }} style={styles.logo} resizeMode="contain" accessibilityLabel="Your logo" /> : null}
+          {s.docs.logo ? <Image source={{ uri: liveUri(s.docs.logo) }} style={styles.logo} resizeMode="contain" accessibilityLabel="Your logo" /> : null}
           {canLogo ? (
             <View style={styles.chips}>
               <Pressable onPress={() => void addLogo()} style={styles.chip} accessibilityRole="button">

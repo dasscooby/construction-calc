@@ -4,6 +4,8 @@
 
 import { Platform } from 'react-native';
 
+import { liveUri } from './docPath';
+
 type FS = typeof import('expo-file-system');
 type IP = typeof import('expo-image-picker');
 
@@ -39,7 +41,7 @@ export function deleteFile(uri: string): void {
   if (!uri || uri.startsWith('data:')) return;
   try {
     const { File } = require('expo-file-system') as FS;
-    const f = new File(uri);
+    const f = new File(liveUri(uri));
     if (f.exists) f.delete();
   } catch {
     // already gone
@@ -103,7 +105,7 @@ export async function asDataUris(uris: string[]): Promise<string[]> {
     }
     try {
       const { File } = require('expo-file-system') as FS;
-      const f = new File(uri);
+      const f = new File(liveUri(uri));
       if (f.exists) out.push(`data:image/jpeg;base64,${await f.base64()}`);
     } catch {
       // gone or unreadable

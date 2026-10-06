@@ -6,6 +6,7 @@ import { AppState, Platform, Pressable, Text } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { colors } from '../theme';
+import { flushSaves } from './savedList';
 
 type U = typeof import('expo-updates');
 
@@ -49,7 +50,11 @@ export function UpdateBar() {
   if (!ready) return null;
   return (
     <Pressable
-      onPress={() => void updates()?.reloadAsync().catch(() => {})}
+      onPress={() => {
+        // Save anything still waiting before the app restarts on the new version.
+        flushSaves();
+        void updates()?.reloadAsync().catch(() => {});
+      }}
       accessibilityRole="button"
       style={{
         position: 'absolute',

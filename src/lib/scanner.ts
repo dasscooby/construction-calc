@@ -4,6 +4,8 @@
 
 import { Platform } from 'react-native';
 
+import { liveUri } from './docPath';
+
 type FS = typeof import('expo-file-system');
 
 export const scannerAvailable = (): boolean => {
@@ -41,7 +43,7 @@ export async function scanPages(jobId: string): Promise<string[]> {
 export function deleteScanFile(uri: string): void {
   try {
     const { File } = require('expo-file-system') as FS;
-    const f = new File(uri);
+    const f = new File(liveUri(uri));
     if (f.exists) f.delete();
   } catch {
     // already gone
@@ -66,7 +68,7 @@ export async function scansForReport(uris: string[]): Promise<string[]> {
     const { File } = require('expo-file-system') as FS;
     const out: string[] = [];
     for (const uri of uris) {
-      const f = new File(uri);
+      const f = new File(liveUri(uri));
       if (f.exists) out.push(`data:image/jpeg;base64,${await f.base64()}`);
     }
     return out;
