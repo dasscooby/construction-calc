@@ -25,6 +25,7 @@ import { buildLayout } from '../report/foundationLayout';
 import { LayoutRaw, runList } from '../report/layoutItems';
 import { fmtFtIn, Start, startFromJob } from '../lib/layoutEdit';
 import { mergeSummary, pickBackup, shareBackup } from '../lib/backup';
+import { nav } from '../lib/nav';
 import LayoutEditor from './LayoutEditor';
 import DrawingView from './DrawingView';
 import HeightRuns from './HeightRuns';
@@ -42,6 +43,15 @@ export default function JobsScreen({ onOpenItem }: Props) {
   const jobs = useJobs();
   const [openId, setOpenId] = useState<string | null>(null);
   const [newName, setNewName] = useState('');
+  // Asked from a tool to lay out a job's foundation: open that job (it opens its layout).
+  useEffect(() => {
+    const open = () => {
+      const id = nav.peekLayout();
+      if (id) setOpenId(id);
+    };
+    open();
+    return nav.subscribe(open);
+  }, []);
   const job = jobs.find((j) => j.id === openId);
 
   if (job) return <JobDetail job={job} onBack={() => setOpenId(null)} onOpenItem={(it) => onOpenItem(job, it)} />;
@@ -140,6 +150,17 @@ function JobDetail({ job, onBack, onOpenItem }: { job: Job; onBack: () => void; 
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [layoutOpen, setLayoutOpen] = useState<{ start: Start | null; preset?: 'barn' } | null>(null);
   const figured = useMemo(() => figureItems(job), [job]);
+  // Sent here from a tool's "Lay out the whole foundation": open the editor (from the house in the job, if any).
+  useEffect(() => {
+    const open = () => {
+      if (nav.peekLayout() !== job.id) return;
+      nav.takeLayout();
+      setLayoutOpen({ start: job.items.some((it) => it.toolId === 'foundation-layout') ? null : startFromJob(figured, job) });
+    };
+    open();
+    return nav.subscribe(open);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [job.id]);
   const report = useMemo(() => buildReport(job, prefs, { crew: true }), [job, prefs]);
   const totals = useMemo(() => jobTotals(figured, job), [figured, job]);
   const [scanning, setScanning] = useState(false);

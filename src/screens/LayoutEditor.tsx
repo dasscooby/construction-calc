@@ -231,6 +231,7 @@ export default function LayoutEditor({ job, start, preset, onClose }: { job: Job
     footD: String(Math.round((raw.layout.footing?.depth ?? 10 / 12) * 12)),
     footing: !!raw.layout.footing,
     existing: !!raw.layout.existing,
+    slab: hasHouse ? raw.layout.slabs.some((x) => x.at.in === 'main') : true,
   }));
   const mainSpec = (): LayoutSpec | null => {
     const L = parseFtIn(main.length);
@@ -244,7 +245,12 @@ export default function LayoutEditor({ job, start, preset, onClose }: { job: Job
       wall: { thick: t, height: h },
       footing: main.footing ? { width: (Number(main.footW) || 16) / 12, depth: (Number(main.footD) || 10) / 12 } : null,
       existing: main.existing || undefined,
-      slabs: raw.layout.slabs.length || hasHouse ? raw.layout.slabs : [{ at: { in: 'main' }, thick: 4 / 12 }],
+      // The main slab, one piece, on or off; slabs in add-on bays stay as they are.
+      slabs: main.slab
+        ? raw.layout.slabs.some((x) => x.at.in === 'main')
+          ? raw.layout.slabs
+          : [{ at: { in: 'main' }, thick: raw.layout.slabs[0]?.thick ?? 4 / 12 }, ...raw.layout.slabs]
+        : raw.layout.slabs.filter((x) => x.at.in !== 'main'),
     };
   };
   const mainIssue = (() => {
@@ -377,6 +383,10 @@ export default function LayoutEditor({ job, start, preset, onClose }: { job: Job
                 <NumBox label="Footing deep" unit="in" value={main.footD} onChange={(footD) => setMain({ ...main, footD })} />
               </View>
             ) : null}
+            <View style={styles.chips}>
+              {chip('Slab in the house', main.slab, () => setMain({ ...main, slab: true }))}
+              {chip('No slab', !main.slab, () => setMain({ ...main, slab: false }))}
+            </View>
             <View style={styles.chips}>
               {chip('In this bid', !main.existing, () => setMain({ ...main, existing: false }))}
               {chip('Already there (not in bid)', main.existing, () => setMain({ ...main, existing: true }))}
@@ -511,16 +521,34 @@ export default function LayoutEditor({ job, start, preset, onClose }: { job: Job
         {mode === 'slab' && layout ? (
           <View style={styles.panel}>
             <Text style={styles.panelTitle}>Slab & pours</Text>
+            {/* Slab 1: the main slab, one piece. */}
+            <Text style={styles.sub}>Main slab (one piece, inside the house walls)</Text>
             <View style={styles.chips}>
-              {chip('Main house', spec.slabs.some((s) => s.at.in === 'main'), () => toggleSlabAt({ in: 'main' }), 'Slab in the main house')}
-              {layout.bays.flatMap((bs, ai) =>
-                bs.map((_, bi) => {
-                  const on = spec.slabs.some((s) => s.at.in === 'addon' && s.at.addOn === ai && s.at.bay === bi);
-                  const name = cap(`${addOnsHere.length > 1 ? `Add-on ${ai + 1} ` : ''}${bs.length > 1 ? bayName(bi, bs.length, addOnsHere[ai]) : 'add-on'}`);
-                  return chip(name, on, () => toggleSlabAt({ in: 'addon', addOn: ai, bay: bi }), `Slab in the ${name}`);
-                }),
-              )}
+              {chip('Main slab: yes', spec.slabs.some((s) => s.at.in === 'main'), () => !spec.slabs.some((s) => s.at.in === 'main') && toggleSlabAt({ in: 'main' }), 'Main slab in the house')}
+              {chip('No main slab', !spec.slabs.some((s) => s.at.in === 'main'), () => spec.slabs.some((s) => s.at.in === 'main') && toggleSlabAt({ in: 'main' }), 'No main slab')}
             </View>
+            {/* A second (third ...) slab goes in an add-on bay, its own pour unless you say otherwise. */}
+            {layout.bays.length ? (
+              <>
+                <Text style={styles.sub}>+ Second slab: tap where it goes (on the plan, or here). It's its own pour.</Text>
+                <View style={styles.chips}>
+                  {layout.bays.flatMap((bs, ai) =>
+                    bs.map((_, bi) => {
+                      const on = spec.slabs.some((s) => s.at.in === 'addon' && s.at.addOn === ai && s.at.bay === bi);
+                      const name = cap(`${addOnsHere.length > 1 ? `Add-on ${ai + 1} ` : ''}${bs.length > 1 ? bayName(bi, bs.length, addOnsHere[ai]) : 'add-on'}`);
+                      return chip(`${on ? '✓ ' : '+ '}${name}`, on, () => toggleSlabAt({ in: 'addon', addOn: ai, bay: bi }), `Slab in the ${name}`);
+                    }),
+                  )}
+                </View>
+              </>
+            ) : (
+              <View style={styles.listRow}>
+                <Text style={styles.help}>A second slab goes in an add-on. Add one, then come back here.</Text>
+                <Pressable onPress={() => setMode('addon-pick')} style={styles.small} accessibilityRole="button">
+                  <Text style={styles.smallText}>+ Add-on</Text>
+                </Pressable>
+              </View>
+            )}
             {layout.slabs.map((sl) => {
               const yd = yards[sl.pour];
               const r = sl.face.rect;

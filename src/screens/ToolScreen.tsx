@@ -39,6 +39,7 @@ import { jobStore, useJobs } from '../lib/jobs';
 import { companyLine, userDefaults, useSettings } from '../lib/settings';
 import { layoutSketchSvg } from '../report/layoutDraw';
 import { toolDrawings } from '../report/report';
+import LayoutLink, { LAYOUT_FROM_TOOLS } from './LayoutLink';
 import DrawingView from './DrawingView';
 import PadInput from './PadInput';
 import { shareText } from '../tools/share';
@@ -125,6 +126,7 @@ export default function ToolScreen({ tool, raw, onChange, onBack, active, jobLin
         keyboardShouldPersistTaps="handled"
         keyboardDismissMode="on-drag"
       >
+        {LAYOUT_FROM_TOOLS.includes(tool.id) ? <LayoutLink jobLink={jobLink} /> : null}
         {tool.fields
           .filter((f) => isShown(f, raw))
           .map((f) => (

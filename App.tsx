@@ -16,6 +16,7 @@ import JobsScreen from './src/screens/JobsScreen';
 import SettingsScreen from './src/screens/SettingsScreen';
 import ToolsTab, { OpenRequest } from './src/screens/ToolsTab';
 import { UpdateBar } from './src/lib/appUpdate';
+import { nav } from './src/lib/nav';
 import { SaveProblemBar } from './src/lib/saveBar';
 import { startPlanQueue } from './src/lib/planReader';
 import { TABS } from './src/tabs';
@@ -76,6 +77,17 @@ export default function App() {
     setOverlay(null);
   };
   const openEntry = (e: HistoryEntry) => openTool(e.toolId, e.raw);
+
+  // "Lay out the whole foundation" from a tool: over to Jobs, where the job and its layout open.
+  useEffect(
+    () =>
+      nav.subscribe(() => {
+        picked.current = true;
+        setOverlay(null);
+        setTab('jobs');
+      }),
+    [],
+  );
 
   // Home screen shortcuts (long-press the app icon): Calculator, Slab Layout, Slab, Jobs.
   useEffect(() => {
