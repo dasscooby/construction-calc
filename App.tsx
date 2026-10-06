@@ -178,6 +178,9 @@ export default function App() {
                 <Text
                   style={[styles.tabText, SHOW_ICONS && styles.tabTextSmall, active && styles.tabTextActive]}
                   numberOfLines={1}
+                  // Shrink a bit rather than cut off ("Concr…") on narrow phones
+                  adjustsFontSizeToFit
+                  minimumFontScale={0.75}
                   maxFontSizeMultiplier={1.15}
                 >
                   {TABS[id].name}
