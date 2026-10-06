@@ -155,6 +155,12 @@ export interface StockRow {
   qty: number | null;
 }
 
+/** Extra facts from the job a tool can use (not boxes on its screen). */
+export interface ToolContext {
+  /** Wall heights that change around the house (daylight basement): ft along the outside from corner A, clockwise */
+  heightRuns?: { length: number; height: number }[];
+}
+
 /** What compute() reads. Required fields are always filled in and valid before compute() runs. */
 export interface Inputs {
   /** Length field, in feet (0 if an optional field is blank). */
@@ -212,7 +218,7 @@ export interface Tool {
   /** One short line for the menu */
   blurb: string;
   fields: Field[];
-  compute(inp: Inputs): ComputeOutput;
+  compute(inp: Inputs, ctx?: ToolContext): ComputeOutput;
   /** Assumptions / how it works, shown under the results */
   notes?: string[];
 }

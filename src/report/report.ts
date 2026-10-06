@@ -116,8 +116,11 @@ function daylightItem(wall: FiguredItem, f: Foundation): FiguredItem | null {
   const stockFt = num(raw.stockLength, 20);
   const lap = String(raw.lap ?? '').trim() ? num(raw.lap, 20) : undefined;
   const d = daylightWall(f.outline, f.runs, f.thickFt, f.centerFt, f.outsideFt, steel, stockFt, lap);
-  const drop = /^(Concrete in the wall|Cubic yards|Cubic feet|Order|Concrete cost|Trucks|Before waste|Horizontal bars|Vertical bars|Bars along it|Verticals|Rebar weight|Wall height|#\d+ sticks|.* lb bags)$/;
-  const rows: ResultRow[] = wall.result.result.rows.filter((r) => !drop.test(r.label));
+  // Wall Forms counts its panels, fillers and corners column by column at each stretch's height.
+  const stepped = isForms ? runTool(wall.tool, raw, { heightRuns: f.runs }) : null;
+  const base = stepped?.status === 'ok' ? stepped.result : wall.result.result;
+  const drop = /^(Concrete in the wall|Cubic yards|Cubic feet|Order|Concrete cost|Trucks|Before waste|Horizontal bars|Vertical bars|Bars along it|Verticals|Rebar weight|#\d+ sticks|.* lb bags)$/;
+  const rows: ResultRow[] = base.rows.filter((r) => !drop.test(r.label) && !(r.label === 'Wall height' && !isForms));
   const heights = d.byHeight.map((h) => `${ftIn(h.length)} at ${ftIn(h.height)}`).join(', ');
   const steelRows: ResultRow[] = [];
   if (d.horizFt) steelRows.push({ label: 'Horizontal bars', value: `${commas(Math.round(d.horizFt * 10) / 10, 1)} ft`, note: `More rows where the wall is taller · ${commas(d.horizLaps)} laps · ${commas(d.cornerBars)} corner L-bars` });
@@ -132,8 +135,7 @@ function daylightItem(wall: FiguredItem, f: Foundation): FiguredItem | null {
     concrete.push({ label: 'Cubic yards', value: dec(c.cuYd, 2), big: true, note: 'Figured run by run, with waste' });
     concrete.push({ label: 'Order', value: `${c.orderCuYd.toFixed(2)} yd`, big: true, note: 'Rounded up to the next ¼ yard' });
   }
-  const warnings = [...(wall.result.result.warnings ?? [])];
-  if (isForms) warnings.push('Panels and fillers are counted at the full height. The shorter runs need fewer.');
+  const warnings = [...(base.warnings ?? [])];
   return {
     ...wall,
     result: {
@@ -191,8 +193,15 @@ function rawTotals(items: FiguredItem[]): Totals {
         if (parts.length) parts.forEach((m) => add(t.panels, `${heights.label.replace(' panels', '')} × ${m[2]} panels`, numberIn(m[1])));
         else add(t.panels, `${heights.label.replace(' panels', '')} × ${row('Wall height')!.value} panels`, numberIn(heights.value));
       }
-      const each = rows.find((r) => r.label === 'Fillers')?.note === 'of each height' ? 'of each height' : '';
-      for (const r of rows) if (r.label.endsWith(' fillers')) add(t.fillers, `${r.label}${each ? ' (each height)' : ''}`, numberIn(r.value));
+      const fillerNote = rows.find((r) => r.label === 'Fillers')?.note;
+      const each = fillerNote === 'of each height' ? 'of each height' : '';
+      for (const r of rows) {
+        if (!r.label.endsWith(' fillers')) continue;
+        // Walls that change height: "12 × 4' + 6 × 4'" by panel height.
+        const parts = fillerNote === 'by height' ? [...(r.note?.split('\n')[0] ?? '').matchAll(/([\d,]+) × ([^ +]+)/g)] : [];
+        if (parts.length) parts.forEach((m) => add(t.fillers, `${r.label.replace(' fillers', '')} × ${m[2]} fillers`, numberIn(m[1])));
+        else add(t.fillers, `${r.label}${each ? ' (each height)' : ''}`, numberIn(r.value));
+      }
       t.insideCorners += numberIn(row('Inside corners (4×4)')?.value ?? '0');
       t.ties += numberIn(row('Ties')?.value ?? '0');
     }

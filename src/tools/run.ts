@@ -1,7 +1,7 @@
 // Reads the text in a tool's boxes, checks it, and runs compute().
 // The screen and the tests both use runTool().
 
-import { BarRow, ComputeOutput, EdgeKind, Field, Inputs, OutlineRow, PadValue, Rect, StockRow, Tool, ToolResult, WallEnds, WallRow } from './types';
+import { BarRow, ComputeOutput, EdgeKind, Field, Inputs, OutlineRow, PadValue, Rect, StockRow, Tool, ToolContext, ToolResult, WallEnds, WallRow } from './types';
 
 export type RawLength = { ft: string; in: string };
 export type RawArea = { length: RawLength; width: RawLength };
@@ -220,7 +220,7 @@ export function isShown(f: Field, raw: RawValues): boolean {
   return (!f.showIf || f.showIf.every((k) => condition(k, raw))) && (!f.showIfAny || f.showIfAny.some((k) => condition(k, raw)));
 }
 
-export function runTool(tool: Tool, values: Record<string, LooseValue | boolean>): RunResult {
+export function runTool(tool: Tool, values: Record<string, LooseValue | boolean>, ctx?: ToolContext): RunResult {
   const raw: RawValues = { ...defaultRaw(tool) };
   for (const f of tool.fields) {
     const v = normalize(f, values[f.key]);
@@ -383,7 +383,7 @@ export function runTool(tool: Tool, values: Record<string, LooseValue | boolean>
     on: (k) => get(k) === 'on',
   };
 
-  const out: ComputeOutput = tool.compute(inputs);
+  const out: ComputeOutput = tool.compute(inputs, ctx);
   if ('error' in out) return { status: 'invalid', message: out.error };
   return { status: 'ok', result: out };
 }

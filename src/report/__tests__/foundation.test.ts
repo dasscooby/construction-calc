@@ -172,6 +172,44 @@ describe('daylight basement: walls that change height', () => {
     expect(row('Vertical bars')).toBeDefined();
   });
 
+  test('Wall Forms counts panels, fillers and corners at each stretch height', () => {
+    // 8" walls, 4' + 4' panels, 2' wide. Each 30' wall: 30' − 2' = 28' = 14 columns a face (28 both faces);
+    // each 40' wall: 40' − 2' = 38' = 19 a face (38 both faces). 132 columns in all.
+    // Walls 1 and 2 (8'): 66 columns × 2 panels = 132. Walls 3 and 4 (4'): 66 columns × 1 panel = 66. Total 198 (264 at 8' all the way).
+    const { builtItems } = require('../report') as typeof import('../report');
+    const job = day(heights);
+    const wall = builtItems(figureItems(job), job).items.find((x) => x.item.id === 'w')!;
+    if (wall.result.status !== 'ok') throw new Error('wall did not run');
+    const rows = wall.result.result.rows;
+    const row = (l: string) => rows.find((r) => r.label === l);
+    expect(row('Wall height')?.value).toBe(`8' / 4'`);
+    expect(row(`2' panels`)?.value).toBe('198');
+    expect(row(`2' panels`)?.note?.split('\n')[0]).toBe(`132 × 4' + 66 × 4'`);
+    expect(row(`2' panels`)?.note).toContain(`66 columns at 8' (4' + 4') · 66 columns at 4' (4')`);
+    // 1' outside-corner pieces: 4 on the 8' walls × 2 high + 4 on the 4' walls × 1 high = 12 (16 at 8').
+    expect(row(`1' fillers`)?.value).toBe('12');
+    // Corners: after wall 1 (8'), after wall 2 (8'/4' step: the taller), after wall 3 (4'), corner A (4'/8': the taller) = 2 + 2 + 1 + 2.
+    expect(row('Inside corners (4×4)')?.value).toBe('7');
+    expect(row(`Wall 3: 30' 0"`)?.note).toContain(`Columns: 28 at 4'`);
+    expect(wall.result.result.warnings ?? []).not.toContainEqual(expect.stringContaining('full height'));
+    // Fewer ties where the wall is shorter.
+    const full = figureItems(basement).find((x) => x.item.id === 'w')!;
+    const ties = (r: import('../../tools/run').RunResult) => (r.status === 'ok' ? Number(r.result.rows.find((x) => x.label === 'Ties')!.value.replace(/\D/g, '')) : 0);
+    expect(ties(wall.result)).toBeLessThan(ties(full.result));
+    // The job's load list adds them up by panel height.
+    const t = jobTotals(figureItems(job), job);
+    expect(t.panels.get(`2' × 4' panels`)).toBe(198);
+    expect(t.fillers.get(`1' × 4' fillers`)).toBe(12);
+    expect(t.insideCorners).toBe(7);
+  });
+
+  test('a job with no height changes counts the same as before', () => {
+    const t = jobTotals(figureItems(basement), basement);
+    expect(t.panels.get(`2' × 4' panels`)).toBe(264);
+    expect(t.fillers.get(`1' fillers (each height)`)).toBe(16); // 8 corner pieces, both heights
+    expect(t.insideCorners).toBe(8);
+  });
+
   test('heights that run past the walls are caught', () => {
     const tooLong = { ...heights, heights: { runs: [{ length: len('150'), height: len('8') }], rest: len('4') } };
     expect(findFoundation(figureItems(day(tooLong)), day(tooLong))!.runsOver).toBe(10);

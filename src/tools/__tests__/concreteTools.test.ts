@@ -1,4 +1,4 @@
-import { fillerSet, layoutFace } from '../concreteTools';
+import { fillerSet, layoutFace, stackFor } from '../concreteTools';
 import { belledPierCuFt, bellHeightFt, perimeterBeamCenterline, truckLoads } from '../../lib/concrete';
 import { CONCRETE_TOOLS } from '../concreteTools';
 import { migrateItem } from '..';
@@ -511,4 +511,17 @@ test('a 70 × 70 footing is entered at the house size and runs centered under th
   expect(rowValue(r, 'House, around the outside')).toBe('280 ft');
   expect(rowValue(r, 'Along the middle')).toBe('277.3 ft');
   expect(rowValue(r, 'Before waste')).toBe('14.27 cu yd');
+});
+
+test('a shorter stretch of wall uses the shortest stack of your panels that reaches it', () => {
+  // 4' + 4' setup
+  expect(stackFor(96, [48, 48])).toEqual({ stack: [0, 1], short: false });
+  expect(stackFor(48, [48, 48])).toEqual({ stack: [0], short: false });
+  expect(stackFor(30, [48, 48])).toEqual({ stack: [0], short: false });
+  // 5' + 3' setup: 3' wall on the 3', 4' on the 5', 6' needs both
+  expect(stackFor(36, [60, 36])).toEqual({ stack: [1], short: false });
+  expect(stackFor(48, [60, 36])).toEqual({ stack: [0], short: false });
+  expect(stackFor(72, [60, 36])).toEqual({ stack: [0, 1], short: false });
+  // Taller than the panels reach
+  expect(stackFor(108, [60, 36])).toEqual({ stack: [0, 1], short: true });
 });

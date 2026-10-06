@@ -12,7 +12,8 @@ import {
 } from '../lib/concrete';
 import { BARS, beamBars, countAlong, getBar, lapIn, LB_PER_TON, sticksToCut, weightLb } from '../lib/rebar';
 import { commas, commasTrim, cuYd, dec, ftIn, inches, lb, money, sqFt, tons } from './format';
-import { Field, Inputs, ResultRow, Tool } from './types';
+import { Field, Inputs, ResultRow, Tool, WallRow } from './types';
+import { cornersAfter } from '../report/geometry';
 
 import { concreteRows, CUFT_PER_CUYD, ORDER_FIELDS } from './concreteShared';
 import { slabLayout } from './slabLayoutTool';
@@ -417,6 +418,203 @@ function haveNote(need: number, have: number | null | undefined, each: string): 
   return { note: short ? `Short ${commas(short)}${each}. You have ${commas(have)}.` : `You have ${commas(have)}${each}`, short };
 }
 
+// ---- Walls whose height changes around the house (daylight basement) ----
+// The panel and filler layout along each wall stays the same; each column is stacked only as tall as
+// the wall where it stands. Where a column straddles a height change it takes the taller height.
+
+/** Rows of the panel setup a column uses: index 0 = Panel height, 1 = Stacked on top. */
+type Stack = number[];
+
+/** The shortest stack of your panel heights that reaches this height (fewest pieces on a tie). */
+export function stackFor(heightIn: number, heightsIn: number[]): { stack: Stack; short: boolean } {
+  const options: Stack[] = heightsIn.length > 1 ? [[0], [1], [0, 1]] : [[0]];
+  const tall = (s: Stack) => s.reduce((sum, r) => sum + heightsIn[r], 0);
+  const fits = options.filter((s) => tall(s) >= heightIn - 0.5).sort((a, b) => tall(a) - tall(b) || a.length - b.length);
+  return fits.length ? { stack: fits[0], short: false } : { stack: heightsIn.map((_, i) => i), short: true };
+}
+
+export interface SteppedForms {
+  /** Panels by setup row (0 = Panel height, 1 = Stacked on top) */
+  panelsByRow: number[];
+  /** Panel columns by how tall they stand (in) */
+  columnsByHeight: Map<number, { columns: number; stack: Stack }>;
+  /** Filler pieces: size → count by setup row */
+  fillers: Map<number, number[]>;
+  cornersByRow: number[];
+  woodPieces: number;
+  ties: number;
+  /** A line for each wall's note (empty if it's all at the full height) */
+  wallNotes: string[];
+  /** Wall heights taller than your panels reach, in */
+  tooTall: number[];
+  heightsIn: number[];
+}
+
+export function steppedForms(
+  walls: WallRow[],
+  laid: { oc: number; out: FaceLayout; inside: FaceLayout }[],
+  t: number,
+  panelIn: number,
+  heightsIn: number[],
+  runs: { length: number; height: number }[],
+): SteppedForms {
+  // Runs along the outside, inches from corner A.
+  const spans: { from: number; to: number; heightIn: number }[] = [];
+  let at = 0;
+  for (const r of runs) {
+    spans.push({ from: at, to: at + r.length * 12, heightIn: Math.round(r.height * 12) });
+    at += r.length * 12;
+  }
+  const fullIn = heightsIn.reduce((x, y) => x + y, 0);
+  // Corner A is both the start and the end of the walk, so look past it both ways.
+  const heightOver = (a: number, b: number) => {
+    let h = 0;
+    for (const shift of [-at, 0, at])
+      for (const s of spans) if (s.to + shift > a + 0.01 && s.from + shift < b - 0.01) h = Math.max(h, s.heightIn);
+    return h || fullIn;
+  };
+  const tooTall = new Set<number>();
+  const stackAt = (a: number, b: number) => {
+    const h = heightOver(a, b);
+    const s = stackFor(h, heightsIn);
+    if (s.short) tooTall.add(h);
+    return s.stack;
+  };
+  const tallOf = (s: Stack) => s.reduce((sum, r) => sum + heightsIn[r], 0);
+
+  const panelsByRow = heightsIn.map(() => 0);
+  const cornersByRow = heightsIn.map(() => 0);
+  const fillers = new Map<number, number[]>();
+  const columnsByHeight = new Map<number, { columns: number; stack: Stack }>();
+  let woodPieces = 0;
+  let ties = 0;
+
+  // Which end of each wall is the outside corner ('oi' walls can go either way round).
+  const after = cornersAfter(walls.map((w) => w.ends));
+  const n = walls.length;
+  const wallNotes: string[] = [];
+  let start = 0;
+  for (const [i, w] of walls.entries()) {
+    const L = w.length * 12;
+    const { oc, out, inside } = laid[i];
+    const startO = after ? after[(i - 1 + n) % n] === 'o' : w.ends !== 'ii';
+    const wallCols = new Map<number, number>();
+    // One face, piece by piece from the start of the wall.
+    const face = (from: number, f: FaceLayout, lead: number[], trail: number[], outside: boolean) => {
+      let x = from;
+      if (outside) ties += tiesPerJoint(tallOf(stackAt(start + x, start + x + 1)));
+      const piece = (width: number, kind: 'panel' | 'filler' | 'wood') => {
+        const s = stackAt(start + x, start + x + width);
+        if (kind === 'panel') {
+          s.forEach((r) => panelsByRow[r]++);
+          const h = tallOf(s);
+          const c = columnsByHeight.get(h) ?? { columns: 0, stack: s };
+          c.columns++;
+          columnsByHeight.set(h, c);
+          wallCols.set(h, (wallCols.get(h) ?? 0) + 1);
+        } else if (kind === 'filler') {
+          const byRow = fillers.get(width) ?? heightsIn.map(() => 0);
+          s.forEach((r) => byRow[r]++);
+          fillers.set(width, byRow);
+        } else woodPieces += s.length;
+        if (outside && kind !== 'wood') ties += tiesPerJoint(tallOf(s));
+        x += width;
+      };
+      lead.forEach((p) => piece(p, 'filler'));
+      for (let k = 0; k < f.panels; k++) piece(panelIn, 'panel');
+      f.fillers.forEach((p) => piece(p, 'filler'));
+      if (f.woodIn) piece(f.woodIn, 'wood');
+      trail.forEach((p) => piece(p, 'filler'));
+    };
+    const lead = startO && oc ? [OC_PIECE_IN] : [];
+    const trail = Array<number>(oc - lead.length).fill(OC_PIECE_IN);
+    face(startO ? 0 : INSIDE_CORNER_IN, out, lead, trail, true);
+    face(startO ? t + INSIDE_CORNER_IN : INSIDE_CORNER_IN, inside, [], [], false);
+    // The corner at the end of this wall stands as tall as the taller wall on either side of it.
+    stackAt(start + L - 1, start + L + 1).forEach((r) => cornersByRow[r]++);
+    const hs = [...wallCols.entries()].sort((a, b) => b[0] - a[0]);
+    wallNotes.push(hs.some(([h]) => h !== fullIn) ? `Columns: ${hs.map(([h, c]) => `${c} at ${heightText(h)}`).join(', ')}` : '');
+    start += L;
+  }
+  return { panelsByRow, columnsByHeight, fillers, cornersByRow, woodPieces, ties, wallNotes, tooTall: [...tooTall], heightsIn };
+}
+
+/** "12 × 4' + 6 × 4'" by setup row (rows with none left out). */
+const byRowText = (byRow: number[], heightsIn: number[]) =>
+  byRow
+    .map((k, r) => (k ? `${commas(k)} × ${heightText(heightsIn[r])}` : ''))
+    .filter(Boolean)
+    .join(' + ');
+
+/** Load-list rows for walls that change height: panels, fillers and corners counted piece by piece. */
+export function steppedRows(
+  s: SteppedForms,
+  o: {
+    panelText: string;
+    pieces: number;
+    panelsOwned: number | null;
+    cornersOwned: number | null;
+    owned: FillerStock;
+    ocCorners: number;
+    icCorners: number;
+    shortages: string[];
+  },
+): ResultRow[] {
+  const sum = (a: number[]) => a.reduce((x, y) => x + y, 0);
+  const each = o.pieces > 1 ? ' of each height' : '';
+  // What you own is "of each height": check each setup row on its own.
+  const shortOf = (byRow: number[], have: number | null | undefined) =>
+    have === null || have === undefined || have === Infinity ? 0 : Math.max(0, ...byRow.map((k) => k - have));
+  const haveText = (byRow: number[], have: number | null | undefined) => {
+    if (have === null || have === undefined || have === Infinity) return '';
+    const short = shortOf(byRow, have);
+    return short ? `Short ${commas(short)}${each}. You have ${commas(have)}.` : `You have ${commas(have)}${each}`;
+  };
+  const heights = [...s.columnsByHeight.entries()].sort((a, b) => b[0] - a[0]);
+  const rows: ResultRow[] = [
+    { label: 'Wall height', value: heights.map(([h]) => heightText(h)).join(' / '), note: 'Changes around the house: each column is only as tall as the wall where it stands' },
+  ];
+  const panelShort = shortOf(s.panelsByRow, o.panelsOwned);
+  if (panelShort) o.shortages.push(`${commas(panelShort)} panels`);
+  rows.push({
+    label: `${o.panelText} panels`,
+    value: commas(sum(s.panelsByRow)),
+    big: true,
+    note: [
+      byRowText(s.panelsByRow, s.heightsIn),
+      heights
+        .map(([h, c]) => `${commas(c.columns)} columns at ${heightText(h)}${o.pieces > 1 ? ` (${c.stack.map((r) => heightText(s.heightsIn[r])).join(' + ')})` : ''}`)
+        .join(' · '),
+      haveText(s.panelsByRow, o.panelsOwned),
+    ]
+      .filter(Boolean)
+      .join('\n'),
+  });
+  const fillers = [...s.fillers.entries()].sort((a, b) => b[0] - a[0]);
+  rows.push({ label: 'Fillers', value: commas(sum(fillers.flatMap(([, r]) => r))), big: true, note: 'by height' });
+  for (const [size, byRow] of fillers) {
+    const short = shortOf(byRow, o.owned.get(size));
+    if (short) o.shortages.push(`${commas(short)} × ${fillerText(size)}`);
+    rows.push({
+      label: `${fillerText(size)} fillers`,
+      value: commas(sum(byRow)),
+      note: [byRowText(byRow, s.heightsIn), haveText(byRow, o.owned.get(size))].filter(Boolean).join('\n'),
+    });
+  }
+  const cornerShort = shortOf(s.cornersByRow, o.cornersOwned);
+  if (cornerShort) o.shortages.push(`${commas(cornerShort)} inside corners`);
+  rows.push({
+    label: 'Inside corners (4×4)',
+    value: commas(sum(s.cornersByRow)),
+    note: [byRowText(s.cornersByRow, s.heightsIn), `${o.ocCorners} outside + ${o.icCorners} inside corners on the foundation`, haveText(s.cornersByRow, o.cornersOwned)]
+      .filter(Boolean)
+      .join('\n'),
+  });
+  if (s.woodPieces) rows.push({ label: 'Wood strips', value: commas(s.woodPieces), note: '1" where a face comes out to an odd inch' });
+  rows.push({ label: 'Ties', value: `about ${commas(s.ties)}`, note: 'One every 16" up each joint, fewer where the wall is shorter' });
+  return rows;
+}
+
 const wallForms: Tool = {
   id: 'wall-forms',
   title: 'Wall Forms (Aluminum)',
@@ -451,7 +649,7 @@ const wallForms: Tool = {
     lapField(['wallRebar']),
     { key: 'cornersOwned', label: 'Inside corners you own', kind: 'count', optional: true, sticky: true, help: 'Of each height. Blank = plenty.' },
   ],
-  compute: (inp) => {
+  compute: (inp, ctx) => {
     const walls = inp.walls('walls');
     const t = inp.num('thick');
     const panelIn = inp.num('panel');
@@ -489,6 +687,7 @@ const wallForms: Tool = {
     const count = (list: number[]) => list.forEach((f) => used.set(f, (used.get(f) ?? 0) + 1));
 
     const wallRows: ResultRow[] = [];
+    const laid: { oc: number; out: FaceLayout; inside: FaceLayout }[] = [];
     for (const [i, w] of walls.entries()) {
       const L = w.length * 12;
       const oc = w.ends === 'oo' ? 2 : w.ends === 'oi' ? 1 : 0;
@@ -504,6 +703,7 @@ const wallForms: Tool = {
       const inside = lay(inRun);
       panels += out.panels + inside.panels;
       count([...ocPieces, ...out.fillers, ...inside.fillers]);
+      laid.push({ oc, out, inside });
       woodStrips += (out.woodIn ? 1 : 0) + (inside.woodIn ? 1 : 0);
       joints += out.panels + out.fillers.length + oc + 1;
       wallRows.push({
@@ -519,35 +719,55 @@ const wallForms: Tool = {
     const corners = ocCorners + icCorners;
     const shortages: string[] = [];
 
+    // Walls that change height around the house (daylight basement): count column by column.
+    const stepped = ctx?.heightRuns?.length ? steppedForms(walls, laid, t, panelIn, heightsIn, ctx.heightRuns) : null;
+
     // ---- Load list ----
-    const panelHave = haveNote(panels, inp.has('panelsOwned') ? inp.count('panelsOwned') : null, each);
-    if (panelHave.short) shortages.push(`${commas(panelHave.short)} panels`);
-    const rows: ResultRow[] = [
-      { label: 'Wall height', value: heightText(wallIn) },
-      {
-        label: `${panelText} panels`,
-        value: commas(panels * pieces),
-        big: true,
-        note: [pieces > 1 ? heightsIn.map((h) => `${commas(panels)} × ${heightText(h)}`).join(' + ') : '', inp.has('panelsOwned') ? panelHave.note ?? '' : '']
-          .filter(Boolean)
-          .join('\n') || undefined,
-      },
-      { label: 'Fillers', value: commas([...used.values()].reduce((s, n) => s + n, 0) * pieces), big: true, note: each ? each.trim() : undefined },
-    ];
-    for (const [size, n] of [...used.entries()].sort((x, y) => y[0] - x[0])) {
-      const have = haveNote(n, owned.get(size), each);
-      if (have.short) shortages.push(`${commas(have.short)} × ${fillerText(size)}`);
-      rows.push({ label: `${fillerText(size)} fillers`, value: commas(n * pieces), note: have.note });
+    let rows: ResultRow[];
+    if (stepped) {
+      rows = steppedRows(stepped, {
+        panelText,
+        pieces,
+        panelsOwned: inp.has('panelsOwned') ? inp.count('panelsOwned') : null,
+        cornersOwned: inp.has('cornersOwned') ? inp.count('cornersOwned') : null,
+        owned,
+        ocCorners,
+        icCorners,
+        shortages,
+      });
+      stepped.wallNotes.forEach((line, i) => {
+        if (line) wallRows[i] = { ...wallRows[i], note: `${wallRows[i].note}\n${line}` };
+      });
+    } else {
+      const panelHave = haveNote(panels, inp.has('panelsOwned') ? inp.count('panelsOwned') : null, each);
+      if (panelHave.short) shortages.push(`${commas(panelHave.short)} panels`);
+      rows = [
+        { label: 'Wall height', value: heightText(wallIn) },
+        {
+          label: `${panelText} panels`,
+          value: commas(panels * pieces),
+          big: true,
+          note: [pieces > 1 ? heightsIn.map((h) => `${commas(panels)} × ${heightText(h)}`).join(' + ') : '', inp.has('panelsOwned') ? panelHave.note ?? '' : '']
+            .filter(Boolean)
+            .join('\n') || undefined,
+        },
+        { label: 'Fillers', value: commas([...used.values()].reduce((s, n) => s + n, 0) * pieces), big: true, note: each ? each.trim() : undefined },
+      ];
+      for (const [size, n] of [...used.entries()].sort((x, y) => y[0] - x[0])) {
+        const have = haveNote(n, owned.get(size), each);
+        if (have.short) shortages.push(`${commas(have.short)} × ${fillerText(size)}`);
+        rows.push({ label: `${fillerText(size)} fillers`, value: commas(n * pieces), note: have.note });
+      }
+      const cornerHave = haveNote(corners, inp.has('cornersOwned') ? inp.count('cornersOwned') : null, each);
+      if (cornerHave.short) shortages.push(`${commas(cornerHave.short)} inside corners`);
+      rows.push({
+        label: 'Inside corners (4×4)',
+        value: commas(corners * pieces),
+        note: [`${ocCorners} outside + ${icCorners} inside corners on the foundation`, cornerHave.note ?? ''].filter(Boolean).join('\n'),
+      });
+      if (woodStrips) rows.push({ label: 'Wood strips', value: commas(woodStrips * pieces), note: '1" where a face comes out to an odd inch' });
+      rows.push({ label: 'Ties', value: `about ${commas(joints * ties)}`, note: `${ties} per joint (one every 16")` });
     }
-    const cornerHave = haveNote(corners, inp.has('cornersOwned') ? inp.count('cornersOwned') : null, each);
-    if (cornerHave.short) shortages.push(`${commas(cornerHave.short)} inside corners`);
-    rows.push({
-      label: 'Inside corners (4×4)',
-      value: commas(corners * pieces),
-      note: [`${ocCorners} outside + ${icCorners} inside corners on the foundation`, cornerHave.note ?? ''].filter(Boolean).join('\n'),
-    });
-    if (woodStrips) rows.push({ label: 'Wood strips', value: commas(woodStrips * pieces), note: '1" where a face comes out to an odd inch' });
-    rows.push({ label: 'Ties', value: `about ${commas(joints * ties)}`, note: `${ties} per joint (one every 16")` });
     // Concrete: each outside corner shortens the centerline by the thickness, each inside corner adds it.
     const centerFt = walls.reduce((sum, w) => sum + w.length, 0) - ((ocCorners - icCorners) * t) / 12;
     const heightFt = wallIn / 12;
@@ -582,6 +802,7 @@ const wallForms: Tool = {
 
     const warnings: string[] = [];
     if (shortages.length) warnings.push(`Short${each}: ${shortages.join(', ')}.`);
+    if (stepped?.tooTall.length) warnings.push(`Your panels don't reach ${stepped.tooTall.map(heightText).join(' / ')}. Counted at your full setup there.`);
     if (walls.length >= 4 && ocCorners - icCorners !== 4) {
       warnings.push('Check the corners: a closed foundation has 4 more outside corners than inside corners.');
     }
