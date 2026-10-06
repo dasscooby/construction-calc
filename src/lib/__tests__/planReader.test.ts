@@ -1,5 +1,6 @@
 jest.mock('@react-native-async-storage/async-storage', () => require('@react-native-async-storage/async-storage/jest/async-storage-mock'));
-jest.mock('../scanner', () => ({ scansForReport: async (uris: string[]) => uris.map(() => 'data:image/jpeg;base64,AAAA') }));
+const deleted: string[] = [];
+jest.mock('../scanner', () => ({ scansForReport: async (uris: string[]) => uris.map(() => 'data:image/jpeg;base64,AAAA'), deleteScanFile: (uri: string) => deleted.push(uri) }));
 
 import { allJobs, jobStore } from '../jobs';
 import { rowValue, runTool } from '../../tools/run';
@@ -49,6 +50,8 @@ test('no signal: the plan waits in the job, then gets read when signal is back',
   expect(job().planQueue).toHaveLength(0);
   expect(job().planFound?.slabs[0].name).toBe('Patio');
   expect(job().planFound?.notes).toEqual(['6 mil vapor barrier']);
+  // The copy picked from Files is deleted once it's read (it isn't one of the job's scanned pages).
+  expect(deleted).toEqual(['file:///plan-1.jpg']);
 });
 
 test('everything on a plan becomes a working tool: walls, footings + bars, piers, steps', () => {
