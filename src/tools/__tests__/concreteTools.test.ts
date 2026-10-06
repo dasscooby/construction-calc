@@ -249,6 +249,23 @@ describe('steps', () => {
     expect(rowValue(runTool(tool('steps'), base), 'Before waste')).toBe('0.48 cu yd');
     expect(rowValue(runTool(tool('steps'), { ...base, landing: 3 }), 'Before waste')).toBe('1.25 cu yd');
   });
+
+  // Front steps: 4 steps, 7-1/2" rise, 11" run, 5 ft wide.
+  //   steps   5 × 11/12 × 7.5/12 × (1 + 2 + 3 + 4 = 10) = 28.65 cu ft = 1.06 yd
+  //   +10%    31.51 cu ft = 1.17 yd → order 1.25 yd; 31.51 ÷ 0.6 = 52.5 → 53 80-lb bags
+  //   4 ft landing at the top, 4 rises tall: 4 × 5 × 2.5 = 50 cu ft → 78.65 cu ft = 2.91 yd; +10% = 3.20 → order 3.25
+  test('front steps with and without a landing', () => {
+    const front = { steps: 4, rise: { ft: '', in: '7 1/2' }, run: { ft: '', in: '11' }, width: 5 };
+    const r = runTool(tool('steps'), front);
+    expect(rowValue(r, 'Before waste')).toBe('1.06 cu yd');
+    expect(rowValue(r, 'Order')).toBe('1.25 yd');
+    expect(rowValue(r, '80 lb bags')).toBe('53');
+    const l = runTool(tool('steps'), { ...front, landing: 4 });
+    expect(rowValue(l, 'Before waste')).toBe('2.91 cu yd');
+    expect(rowValue(l, 'Cubic yards')).toBe('3.2');
+    expect(rowValue(l, 'Order')).toBe('3.25 yd');
+    expect(rowValue(l, '80 lb bags')).toBeUndefined(); // over 2 yd: order a truck
+  });
 });
 
 describe('trucks', () => {
