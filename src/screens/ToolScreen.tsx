@@ -51,6 +51,12 @@ const SHARE_LABEL = Platform.OS === 'ios' ? 'Share or save to Notes' : 'Share th
 // iPhone keyboard with numbers plus space, "/", "-" and "." so 6 1/2 and -0.35 can be typed.
 const NUM_KEYBOARD = Platform.OS === 'ios' ? 'numbers-and-punctuation' : 'default';
 
+// Remove and ✕ buttons look small; this makes them easier to hit with a thumb (or a glove).
+// Remove grows up and sideways only: the boxes right under it must never catch a Remove.
+const SMALL_BTN_SLOP = { top: 10, bottom: 0, left: 10, right: 10 };
+// The ✕ sits right next to the how-many box: grow it up, down and right only, never over the box.
+const STOCK_X_SLOP = { top: 8, bottom: 8, left: 0, right: 12 };
+
 interface Props {
   tool: Tool;
   raw: RawValues;
@@ -492,6 +498,7 @@ function AreasInput({ value, onChange }: { value: RawArea[]; onChange: (v: RawAr
               <Pressable
                 onPress={() => onChange(value.filter((_, j) => j !== i))}
                 style={styles.removeBtn}
+                hitSlop={SMALL_BTN_SLOP}
                 accessibilityRole="button"
                 accessibilityLabel={`Remove area ${i + 1}`}
               >
@@ -529,6 +536,7 @@ function BarListInput({ field, value, onChange }: { field: BarListField; value: 
               <Pressable
                 onPress={() => onChange(value.filter((_, j) => j !== i))}
                 style={styles.removeBtn}
+                hitSlop={SMALL_BTN_SLOP}
                 accessibilityRole="button"
                 accessibilityLabel={`Remove mark ${i + 1}`}
               >
@@ -583,6 +591,7 @@ function WallsInput({ value, onChange }: { value: RawWallRow[]; onChange: (v: Ra
               <Pressable
                 onPress={() => onChange(value.filter((_, j) => j !== i))}
                 style={styles.removeBtn}
+                hitSlop={SMALL_BTN_SLOP}
                 accessibilityRole="button"
                 accessibilityLabel={`Remove wall ${i + 1}`}
               >
@@ -658,6 +667,7 @@ function OutlineInput({ value, onChange }: { value: RawOutlineRow[]; onChange: (
               <Pressable
                 onPress={() => onChange(value.filter((_, j) => j !== i))}
                 style={styles.removeBtn}
+                hitSlop={SMALL_BTN_SLOP}
                 accessibilityRole="button"
                 accessibilityLabel={`Remove side ${i + 1}`}
               >
@@ -746,6 +756,7 @@ function StockInput({ value, onChange, label }: { value: RawStockRow[]; onChange
           <Pressable
             onPress={() => onChange(value.filter((_, j) => j !== i))}
             style={styles.stockRemove}
+            hitSlop={STOCK_X_SLOP}
             accessibilityRole="button"
             accessibilityLabel={`Remove ${label} row ${i + 1}`}
           >
