@@ -63,7 +63,7 @@ export function bidOptions(items: FiguredItem[], s: Settings, job?: Job): BidSou
   const ft = (v: unknown) => parseLength(v as RawLength) ?? 0;
 
   for (const f0 of items) {
-    if (f0.result.status !== 'ok') continue;
+    if (f0.result.status !== 'ok' || f0.item.id.endsWith(':forms')) continue;
     const f = built.find((b) => b.item.id === f0.item.id) ?? f0;
     const name = pieceName(f0, items, job);
     const src = `item:${f.item.id}`;

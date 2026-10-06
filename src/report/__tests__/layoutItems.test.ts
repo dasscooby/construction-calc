@@ -35,6 +35,7 @@ test('one layout becomes walls, footings and a slab for each pour', () => {
   expect(figureItems(job).map((f) => [f.item.id, f.tool.id, f.item.label])).toEqual([
     ['L:walls', 'footings', 'Walls'],
     ['L:footings', 'footings', 'Footings'],
+    ['L:forms', 'wall-forms', 'Wall forms'],
     ['L:slab1', 'slab', 'Slab 1: Main slab'],
     ['L:slab2', 'slab', 'Slab 2: Add-on slab, middle bay'],
   ]);
@@ -71,6 +72,13 @@ test('bill, bid and rebar schedule read it like any other walls, footings and sl
   const walls = bidOptions(fi, DEFAULT_SETTINGS, job).find((s) => s.src === 'item:L:walls')!;
   expect(walls.measures.slice(0, 2).map((m) => m.qty)).toEqual([510, 504.7]);
   expect(rebarSchedule(fi, job).length).toBeGreaterThan(0);
+});
+
+test("the wall forms go on the job's load list, not the bill", () => {
+  const t = jobTotals(figureItems(job), job);
+  expect(t.panels.get(`2' × 4' panels`)).toBeGreaterThan(0);
+  expect(t.insideCorners).toBe(16);
+  expect(suggestLines(figureItems(job), DEFAULT_SETTINGS, job).some((l) => /forms/i.test(l.desc))).toBe(false);
 });
 
 test('an L-shaped area is cut into rectangles for the slab', () => {

@@ -69,6 +69,8 @@ export function suggestLines(items: FiguredItem[], s?: Settings, job?: Job): Omi
   const ft = (v: unknown) => parseLength(v as RawLength) ?? 0;
   for (const { item, tool, result } of items) {
     if (result.status !== 'ok') continue;
+    // A layout's wall forms are the load list; the walls themselves are billed.
+    if (item.id.endsWith(':forms')) continue;
     const pour = fnd ? fnd.pours.findIndex((x) => x.item.id === item.id) : -1;
     const name = !inFnd(item.id) ? item.label || tool.title : fnd!.addOns.some((a) => a.item.item.id === item.id) ? `${fnd!.kind} add-on` : pour >= 0 ? `${fnd!.kind}, ${pourName(pour)}` : fnd!.kind;
     const raw = item.raw;

@@ -9,6 +9,7 @@ import { commasTrim, ftIn } from '../tools/format';
 import { defaultRaw, RawLength, RawValues, runTool } from '../tools/run';
 import type { ResultRow } from '../tools/types';
 import { buildLayout, Layout, LayoutSpec } from './foundationLayout';
+import { DEFAULT_FORMS, formsRows, FormsSetup, layoutForms } from './layoutForms';
 import type { FiguredItem } from './report';
 import type { Pt } from './wallGraph';
 
@@ -22,6 +23,8 @@ export interface LayoutRaw {
   footing?: RawValues;
   /** Slab boxes (rebar, waste, price ...) for every slab */
   slab?: RawValues;
+  /** Aluminum wall forms (panel width, heights, fillers); false = the walls aren't formed with panels */
+  forms?: FormsSetup | false;
 }
 
 const toRaw = (ft: number): RawLength => {
@@ -123,6 +126,14 @@ export function layoutChildren(item: JobItem): FiguredItem[] {
         { label: 'Along the middle', value: `${commasTrim(l.totals.footingMiddle, 1)} ft`, note: `Centered under the walls · ${turns}: each footing that meets another stops at its edge` },
       ]),
     );
+  }
+
+  // Wall forms: panels, fillers and corners for every face (the job's load list reads these).
+  if (raw.forms !== false && l.totals.measured > 0) {
+    const setup = raw.forms || DEFAULT_FORMS;
+    const f = layoutForms(l, setup);
+    const formsTool = ALL_TOOLS.find((x) => x.id === 'wall-forms')!;
+    if (f) out.push({ item: { ...item, id: `${item.id}:forms`, toolId: formsTool.id, title: formsTool.title, label: 'Wall forms', raw: {} }, tool: formsTool, result: { status: 'ok', result: { rows: formsRows(f, setup) } }, inputs: [] });
   }
 
   // Each slab pour (one or more areas poured together), at the clear size inside the walls.

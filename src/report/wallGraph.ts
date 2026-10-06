@@ -63,6 +63,8 @@ export interface GraphResult {
   corners: number;
   tees: number;
   faces: Face[];
+  /** The outside faces of the walls all the way around the building, clockwise (null if they don't close) */
+  outside: Pt[] | null;
 }
 
 const EPS = 1e-6;
@@ -152,7 +154,8 @@ export function solveGraph(runs: Run[]): GraphResult {
       footingMiddle: r.footing ? full - footTrim[0] - footTrim[1] : 0,
     };
   });
-  return { runs: results, corners: Math.round(corners), tees, faces: findFaces(runs) };
+  const found = findFaces(runs);
+  return { runs: results, corners: Math.round(corners), tees, faces: found.faces, outside: found.outside };
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -165,7 +168,9 @@ interface HalfEdge {
   used: boolean;
 }
 
-function findFaces(runs: Run[]): Face[] {
+function findFaces(runs: Run[]): { faces: Face[]; outside: Pt[] | null } {
+  let outside: Pt[] | null = null;
+  let outsideArea = 0;
   const nodes: Pt[] = [];
   const nodeOf = (p: Pt) => {
     const k = nodes.findIndex((q) => near(p, q));
@@ -213,12 +218,21 @@ function findFaces(runs: Run[]): Face[] {
     }
     if (loop.length < 3 || loop[loop.length - 1].to !== loop[0].from) continue;
     const middle = loop.map((e) => nodes[e.from]);
-    if (signedArea(middle) <= 0) continue; // the outside of everything
+    if (signedArea(middle) <= 0) {
+      // The loop around the outside of everything: walked this way the outside of the building is on
+      // the right, so moving its edges right by half a wall gives the outside faces.
+      const face = offsetIn(loop.map((e) => ({ a: nodes[e.from], b: nodes[e.to], d: e.run.thick / 2 })));
+      if (Math.abs(signedArea(middle)) > outsideArea) {
+        outsideArea = Math.abs(signedArea(middle));
+        outside = [...face].reverse();
+      }
+      continue;
+    }
     const clear = offsetIn(loop.map((e) => ({ a: nodes[e.from], b: nodes[e.to], d: e.run.thick / 2 })));
     const outer = offsetIn(loop.map((e) => ({ a: nodes[e.from], b: nodes[e.to], d: -e.run.thick / 2 })));
     faces.push({ middle, clear, clearArea: Math.abs(signedArea(clear)), outerArea: Math.abs(signedArea(outer)), rect: rectOf(clear) });
   }
-  return faces;
+  return { faces, outside };
 }
 
 /** Positive for clockwise with y down. */
