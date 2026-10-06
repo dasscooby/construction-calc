@@ -102,4 +102,9 @@ describe('runTool', () => {
     expect(runTool(box, { l: 4, n: '2.5' })).toEqual({ status: 'invalid', message: 'Quantity must be a whole number' });
     expect(runTool(box, { l: 200 })).toEqual({ status: 'invalid', message: 'Too long' });
   });
+
+  test('an area with a 0 side asks for a real size instead of adding nothing', () => {
+    expect(runTool(box, { l: 4, areas: [[10, 10], [12, 0]] })).toEqual({ status: 'invalid', message: 'Area 2: length and width must be more than 0' });
+    expect(runTool(box, { l: 4, areas: [[0, 10]] }).status).toBe('invalid');
+  });
 });

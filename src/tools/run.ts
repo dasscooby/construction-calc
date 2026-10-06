@@ -282,6 +282,7 @@ export function runTool(tool: Tool, values: Record<string, LooseValue | boolean>
           const w = parseLength(a.width);
           if (l === null || w === null) return { status: 'missing', message: `Enter both sides of area ${i + 1}` };
           if (Number.isNaN(l) || Number.isNaN(w)) return { status: 'invalid', message: `Check area ${i + 1}` };
+          if (l <= 0 || w <= 0) return { status: 'invalid', message: `Area ${i + 1}: length and width must be more than 0` };
           rects.push({ length: l, width: w });
         }
         if (rects.length) value = rects;
