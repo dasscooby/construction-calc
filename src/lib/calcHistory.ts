@@ -1,7 +1,8 @@
 // The calculator's tape, kept on the phone across days (the tape itself only lasts while the app is open).
 
-import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useSyncExternalStore } from 'react';
+
+import { readSavedList, saver } from './savedList';
 
 import type { TapeLine } from './cm';
 
@@ -31,24 +32,25 @@ let lines: CalcHistoryLine[] = [];
 let loaded = false;
 const listeners = new Set<() => void>();
 
+const store = saver(SAVE_KEY);
+
 function set(next: CalcHistoryLine[]) {
   lines = next;
   listeners.forEach((l) => l());
-  AsyncStorage.setItem(SAVE_KEY, JSON.stringify(lines)).catch(() => {});
+  store.save(lines);
 }
 
 function load() {
   if (loaded) return;
   loaded = true;
-  AsyncStorage.getItem(SAVE_KEY)
-    .then((text) => {
-      const saved = text ? (JSON.parse(text) as CalcHistoryLine[]) : [];
-      if (!Array.isArray(saved)) return;
+  readSavedList(SAVE_KEY).then((saved) => {
+    if (saved) {
       // Anything added before loading finished goes after what was saved.
-      lines = appendLines(saved, lines);
+      lines = appendLines((saved as CalcHistoryLine[]).filter((s) => s && typeof s === 'object'), lines);
       listeners.forEach((l) => l());
-    })
-    .catch(() => {});
+    }
+    store.loaded(saved ? lines : null);
+  });
 }
 
 export const calcHistory = {

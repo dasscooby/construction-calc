@@ -1,7 +1,8 @@
 // Saved calculations from the tool screens. Kept on the phone, newest first, shared by every tab.
 
-import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useSyncExternalStore } from 'react';
+
+import { readSavedList, saver } from './savedList';
 
 import type { RawValues } from '../tools/run';
 
@@ -62,24 +63,26 @@ let entries: HistoryEntry[] = [];
 let loaded = false;
 const listeners = new Set<() => void>();
 
+const store = saver(SAVE_KEY);
+
 function set(next: HistoryEntry[]) {
   entries = next;
   listeners.forEach((l) => l());
-  AsyncStorage.setItem(SAVE_KEY, JSON.stringify(entries)).catch(() => {});
+  store.save(entries);
 }
 
 function load() {
   if (loaded) return;
   loaded = true;
-  AsyncStorage.getItem(SAVE_KEY)
-    .then((text) => {
-      const saved = text ? (JSON.parse(text) as HistoryEntry[]) : [];
-      if (!Array.isArray(saved)) return;
+  readSavedList(SAVE_KEY).then((list) => {
+    if (list) {
+      const saved = (list as HistoryEntry[]).filter((s) => s && typeof s === 'object' && s.id);
       // Anything saved before loading finished goes on top of what was on the phone.
       entries = [...entries, ...saved.filter((s) => !entries.some((e) => e.id === s.id))].slice(0, MAX_ENTRIES);
       listeners.forEach((l) => l());
-    })
-    .catch(() => {});
+    }
+    store.loaded(list ? entries : null);
+  });
 }
 
 export const history = {

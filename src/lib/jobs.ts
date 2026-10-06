@@ -1,8 +1,9 @@
 // Jobs: a name, an address, and the calculations added to it (slab, rebar, wall forms ...).
 // Each item keeps the numbers typed in, so the report always figures them fresh.
 
-import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useSyncExternalStore } from 'react';
+
+import { readSavedList, saver } from './savedList';
 
 import type { RawLength, RawValues } from '../tools/run';
 import type { PlanRead } from './planReader';
@@ -138,23 +139,28 @@ let jobs: Job[] = [];
 let loaded = false;
 const listeners = new Set<() => void>();
 
+const store = saver(SAVE_KEY);
+
 function set(next: Job[]) {
   jobs = next;
   listeners.forEach((l) => l());
-  AsyncStorage.setItem(SAVE_KEY, JSON.stringify(jobs)).catch(() => {});
+  store.save(jobs);
 }
+
+/** A saved job with every list it needs (a partial or older one can't crash the screens). */
+const tidy = (s: Job): Job => ({ ...s, name: s.name ?? 'Job', address: s.address ?? '', notes: s.notes ?? '', items: Array.isArray(s.items) ? s.items.filter((it) => it && typeof it === 'object') : [] });
 
 function load() {
   if (loaded) return;
   loaded = true;
-  AsyncStorage.getItem(SAVE_KEY)
-    .then((text) => {
-      const saved = text ? (JSON.parse(text) as Job[]) : [];
-      if (!Array.isArray(saved)) return;
-      jobs = [...jobs, ...saved.filter((s) => s?.id && !jobs.some((j) => j.id === s.id))];
+  readSavedList(SAVE_KEY).then((saved) => {
+    if (saved) {
+      const keep = (saved as Job[]).filter((s) => s && typeof s === 'object' && s.id && !jobs.some((j) => j.id === s.id)).map(tidy);
+      jobs = [...jobs, ...keep];
       listeners.forEach((l) => l());
-    })
-    .catch(() => {});
+    }
+    store.loaded(saved ? jobs : null);
+  });
 }
 
 const update = (id: string, fn: (j: Job) => Job) => set(jobs.map((j) => (j.id === id ? { ...fn(j), touchedAt: Date.now() } : j)));
