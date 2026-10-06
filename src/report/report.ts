@@ -21,6 +21,7 @@ import { daylightWall, splitOutline, WallSteel } from './heightRuns';
 import { concreteResult } from '../lib/concrete';
 import { AddOnDraw, FoundationDraw, foundationIsoSvg, foundationPlanSvg, foundationSectionSvg } from './foundationDraw';
 import { slabBarPlan } from '../tools/slabLayoutTool';
+import { LAYOUT_TOOL_ID, layoutChildren } from './layoutItems';
 import { slabBarsAdvice } from '../lib/rebar';
 
 export interface FiguredItem {
@@ -53,6 +54,11 @@ const add = (m: Map<string, number>, k: string, n: number) => m.set(k, (m.get(k)
 export function figureItems(job: Job): FiguredItem[] {
   const out: FiguredItem[] = [];
   for (const item of job.items) {
+    // A foundation layout is figured as its pieces: walls, footing, and each slab.
+    if (item.toolId === LAYOUT_TOOL_ID) {
+      out.push(...layoutChildren(item));
+      continue;
+    }
     const m = migrateItem(item.toolId, item.raw);
     const tool = ALL_TOOLS.find((t) => t.id === m.toolId);
     if (!tool) continue; // a tool that was removed in an update
