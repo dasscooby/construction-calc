@@ -115,6 +115,8 @@ const excavation: Tool = {
   ],
   compute: (inp) => {
     const overDigFt = inp.num('overDig') / 12;
+    if (inp.len('length') <= 0 || inp.len('width') <= 0 || inp.len('depth') <= 0) return { error: 'Length, width and depth must be more than 0.' };
+    if (inp.count('qty') < 1) return { error: 'How many must be at least 1.' };
     const bank = excavationBankCuYd(inp.len('length'), inp.len('width'), inp.len('depth'), inp.count('qty'), overDigFt);
     const loose = looseFromBank(bank, inp.num('swell'));
     const rows: ResultRow[] = [];
@@ -145,6 +147,8 @@ const fillBaseTool: Tool = {
   ],
   compute: (inp) => {
     const area = inp.areas('areas').reduce((sum, r) => sum + r.length * r.width, 0);
+    if (inp.len('depth') <= 0) return { error: 'Compacted depth must be more than 0.' };
+    if (inp.num('density') <= 0) return { error: 'Tons per yard must be more than 0. Ask your supplier (rock is about 1.4).' };
     const r = fillBase(area, inp.len('depth'), inp.num('allowance'), inp.num('density'));
     const rows: ResultRow[] = [
       { label: 'Area', value: sqFt(area) },

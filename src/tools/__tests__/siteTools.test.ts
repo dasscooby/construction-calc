@@ -91,6 +91,24 @@ describe('excavation', () => {
     expect(loadsNeeded(20.1, 10)).toBe(3);
     expect(loadsNeeded(0, 10)).toBe(0);
   });
+
+  test('footing trench 120 ft × 24" × 18" = 360 cu ft = 13.33 yd, 16.67 loose, 2 loads', () => {
+    const r = runTool(tool('excavation'), { length: 120, width: 2, depth: 1.5 });
+    expect(rowValue(r, 'In the ground')).toBe('13.33 cu yd');
+    expect(rowValue(r, 'Loose (to haul)')).toBe('16.67 cu yd');
+    expect(rowValue(r, 'Truck loads')).toBe('2');
+  });
+
+  test('4 pier holes 3 × 3 × 4 ft = 144 cu ft = 5.33 yd', () => {
+    const r = runTool(tool('excavation'), { length: 3, width: 3, depth: 4, qty: 4 });
+    expect(rowValue(r, 'In the ground')).toBe('5.33 cu yd');
+    expect(rowValue(r, 'Loose (to haul)')).toBe('6.67 cu yd');
+  });
+
+  test('a 0 size or 0 holes gets a note, not 0 yards', () => {
+    expect(runTool(tool('excavation'), { length: 40, width: 30, depth: 0 })).toEqual({ status: 'invalid', message: 'Length, width and depth must be more than 0.' });
+    expect(runTool(tool('excavation'), { length: 40, width: 30, depth: 3, qty: 0 })).toEqual({ status: 'invalid', message: 'How many must be at least 1.' });
+  });
 });
 
 describe('fill & base rock', () => {
@@ -102,5 +120,20 @@ describe('fill & base rock', () => {
     expect(rowValue(r, 'Order (loose)')).toBe('17.78 cu yd');
     expect(rowValue(r, 'Tons')).toBe('24.9 tons');
     expect(rowValue(r, 'Truck loads')).toBe('2');
+  });
+
+  // 24 × 24 garage + 12 × 10 apron = 696 sq ft at 6": 348 cu ft = 12.89 yd; +20% = 15.47; × 1.4 = 21.65 tons
+  test('6" of rock under a garage and apron', () => {
+    const r = runTool(tool('fill-base'), { areas: [[24, 24], [12, 10]], depth: 0.5 });
+    expect(rowValue(r, 'Area')).toBe('696 sq ft');
+    expect(rowValue(r, 'Compacted')).toBe('12.89 cu yd');
+    expect(rowValue(r, 'Order (loose)')).toBe('15.47 cu yd');
+    expect(rowValue(r, 'Tons')).toBe('21.7 tons');
+    expect(rowValue(r, 'Truck loads')).toBe('2');
+  });
+
+  test('0 depth or 0 tons per yard gets a note, not 0 tons', () => {
+    expect(runTool(tool('fill-base'), { areas: [[40, 30]], depth: 0 }).status).toBe('invalid');
+    expect(runTool(tool('fill-base'), { areas: [[40, 30]], density: 0 }).status).toBe('invalid');
   });
 });
