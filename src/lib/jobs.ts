@@ -214,6 +214,13 @@ export const jobStore = {
     if (!r.problem && (r.added || r.copies)) set(r.jobs);
     return r;
   },
+  /** The foundation layout already counts this piece: hide it and leave it out of totals and the bid. */
+  coveredByLayout(jobId: string, itemId: string) {
+    update(jobId, (j) => {
+      const layout = j.items.find((it) => it.toolId === 'foundation-layout');
+      return layout ? { ...j, items: j.items.map((it) => (it.id === itemId ? { ...it, replacedBy: layout.id } : it)) } : j;
+    });
+  },
   /** Takes the layout out and brings back what it replaced. */
   removeLayout(jobId: string) {
     update(jobId, (j) => {

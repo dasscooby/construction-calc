@@ -7,6 +7,8 @@ import { commas, dec, ftIn, money } from '../tools/format';
 import { parseLength, parseNumber, RawLength, RawWallRow } from '../tools/run';
 import { DocMedia, docCss, logoHtml, noticeHtml } from './docStyle';
 import { confirmedFoundation, pourCount, pourName } from './foundation';
+import { bidOptions, refreshLines, remapLines } from './bidOptions';
+import { buildLayout, LayoutRun, LayoutSpec } from './foundationLayout';
 import { builtItems, FiguredItem, itemRebarLb, jobDrawings, jobTotals, numberIn, pieceName, steelItems } from './report';
 
 const esc = (s: string) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
@@ -190,7 +192,9 @@ const STYLE = `
   .sign svg { display: block; height: 60px; max-width: 100%; }
   .sign .filled { font-size: 15px; padding-bottom: 4px; }
   .co-sum { width: 340px; margin-left: auto; margin-top: 10px; }
-  .draw { border: 1px solid #ccc; border-radius: 10px; overflow: hidden; margin-top: 10px; break-inside: avoid; }
+  .draw { border: 1px solid #ccc; border-radius: 10px; overflow: hidden; margin-top: 10px; break-inside: avoid; page-break-inside: avoid; }
+  h3.page { break-before: page; page-break-before: always; }
+  .draw svg { max-height: 92vh; }
   h3 { font-size: 13px; text-transform: uppercase; letter-spacing: .08em; color: #333; margin: 26px 0 6px; border-bottom: 2px solid #111; padding-bottom: 4px; }
   .scope { margin: 0; padding: 0; list-style: none; }
   .scope li { font-size: 14px; padding: 6px 0; border-bottom: 1px solid #e5e5e5; display: flex; gap: 12px; }
@@ -246,16 +250,43 @@ export function scopeOfWork(items: FiguredItem[], job: Job): [string, string][] 
     if (parts.length) out.push([name, parts.join(' · ')]);
   }
   const pours = items.filter((x) => /:(footings|walls|slab\d+)$/.test(x.item.id)).length;
+  // A foundation layout: the walls by where they are, and their size.
+  const layoutItem = job.items.find((it) => it.toolId === 'foundation-layout');
+  const spec = (layoutItem?.raw as { layout?: LayoutSpec } | undefined)?.layout;
+  if (spec?.house?.length) {
+    const l = buildLayout(spec);
+    const sum = (ok: (r: LayoutRun) => boolean) => l.runs.filter((r) => !r.existing && ok(r)).reduce((t, r) => t + r.measured, 0);
+    const parts = [
+      ['Main', sum((r) => r.group === 'Main')],
+      ['add-on outside walls', sum((r) => r.group !== 'Main' && !/inside/.test(r.name))],
+      ['inside walls', sum((r) => /inside/.test(r.name))],
+    ].filter(([, v]) => (v as number) > 0);
+    const at = out.findIndex(([k]) => k === 'Walls');
+    const line: [string, string] = [
+      'Wall breakdown',
+      `${parts.map(([k, v]) => `${k} ${ftIn(v as number).replace(/ 0"$/, '')}`).join(' · ')} · ${Math.round(spec.wall.thick * 12)}" thick × ${ftIn(spec.wall.height).replace(/ 0"$/, '')} tall${spec.footing ? ` on a ${Math.round(spec.footing.width * 12)}" × ${Math.round(spec.footing.depth * 12)}" footing` : ''}`,
+    ];
+    if (at >= 0) out.splice(at + 1, 0, line);
+    else out.push(line);
+  }
   if (yards) out.push(['Concrete', `${dec(yards, 2)} yd${pours > 1 ? ` in ${pours} pours` : ''}`]);
-  if (rebar) out.push(['Rebar', `${commas(Math.round(rebar))} lb, cut, bent and tied`]);
+  if (rebar) {
+    const by = items
+      .filter((f) => f.result.status === 'ok' && itemRebarLb(f) > 0 && !f.item.id.endsWith(':forms'))
+      .map((f) => `${f.item.label || f.tool.title} ${commas(Math.round(itemRebarLb(f)))} lb`);
+    out.push(['Rebar', `${commas(Math.round(rebar))} lb, cut, bent and tied${by.length > 1 ? ` (${by.join(' · ')})` : ''}`]);
+  }
   if (job.order?.place === 'pump') out.push(['Pump truck', `${pours > 1 ? `${pours} pours` : 'for the pour'}`]);
   return out;
 }
 
 function moneyDoc(kind: 'bid' | 'bill', job: Job, s: Settings, items: FiguredItem[], now: Date, media: DocMedia): { html: string; text: string } {
   const c = s.company;
+  // Lines made before the foundation layout took over a piece bill as the layout's piece (never the hidden one).
+  const sources = bidOptions(items, s, job);
+  const current = refreshLines(remapLines(job.lines ?? [], job, sources), sources);
   // The bill adds any change orders after the bid's lines.
-  const lines = [...(job.lines ?? []), ...(kind === 'bill' ? changeLines(job) : [])].filter((l) => l.desc.trim() || num(l.price));
+  const lines = [...current, ...(kind === 'bill' ? changeLines(job) : [])].filter((l) => l.desc.trim() || num(l.price));
   const m = priceTotals({ ...job, lines, changes: [] });
   const title = kind === 'bid' ? 'BID' : 'INVOICE';
   const date = now.toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' });
@@ -291,9 +322,9 @@ ${lines.map((l) => `<tr><td>${esc(l.desc)}</td><td class="r">${esc(qtyText(l))}<
 <table class="sum">${sumRows.map(([k, v, cls]) => `<tr class="${cls ?? ''}"><td>${k}</td><td class="r">${v}</td></tr>`).join('')}</table>
 ${scope.length ? `<h3>Scope of work</h3><ul class="scope">${scope.map(([k, v]) => `<li><b>${esc(k)}</b><span>${esc(v)}</span></li>`).join('')}</ul>` : ''}
 ${kind === 'bid' ? signBlock('Accepted by', job.signature) : ''}
-${drawings?.plan ? `<h3>Plan</h3><div class="draw">${drawings.plan}</div>` : ''}
-${drawings?.iso ? `<h3>3D view</h3><div class="draw">${drawings.iso}</div>` : ''}
-${drawings?.section ? `<h3>Typical section</h3><div class="draw">${drawings.section}</div>` : ''}
+${drawings?.plan ? `<h3 class="page">Plan</h3><div class="draw">${drawings.plan}</div>` : ''}
+${drawings?.iso ? `<h3 class="page">3D view</h3><div class="draw">${drawings.iso}</div>` : ''}
+${drawings?.section ? `<h3 class="page">Typical section</h3><div class="draw">${drawings.section}</div>` : ''}
 ${noticeHtml(kind, s.docs)}
 <button class="print" onclick="window.print()">Save as PDF / Print</button>
 </body></html>`;

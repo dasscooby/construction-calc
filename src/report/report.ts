@@ -623,6 +623,8 @@ export function pieceName(f: FiguredItem, items: FiguredItem[], job?: Job): stri
     const pour = fnd.pours.findIndex((x) => x.item.id === f.item.id);
     if (pour >= 0) return `${fnd.kind} slab, ${pourName(pour)}`;
   }
+  // Footings & Walls without a name: say which it is, so a footing doesn't read like walls.
+  if (!f.item.label && f.tool.id === 'footings') return f.item.raw.kind === 'wall' ? 'Walls' : 'Footings';
   return f.item.label || f.tool.title;
 }
 
@@ -840,7 +842,9 @@ export function buildReport(job: Job, s: Settings, opts: { now?: Date; crew?: bo
   .item { border: 1px solid #ccc; border-radius: 10px; padding: 12px 14px; margin: 0 0 12px; break-inside: avoid; }
   .inputs { display: flex; flex-wrap: wrap; gap: 4px 14px; font-size: 12.5px; color: #444; margin-bottom: 8px; }
   .warn { background: #fff4dc; border: 1px solid #e0a000; border-radius: 6px; padding: 6px 8px; font-size: 13px; margin-bottom: 6px; }
-  .draw { border: 1px solid #ccc; border-radius: 10px; overflow: hidden; margin-bottom: 12px; break-inside: avoid; }
+  .draw { border: 1px solid #ccc; border-radius: 10px; overflow: hidden; margin-bottom: 12px; break-inside: avoid; page-break-inside: avoid; }
+  h2.page { break-before: page; page-break-before: always; }
+  .draw svg { max-height: 92vh; }
   .notes { white-space: pre-wrap; font-size: 14px; }
   .fnd { margin: 0; padding-left: 18px; font-size: 14px; line-height: 1.5; }
   table.rebar th { text-align: left; font-size: 12px; text-transform: uppercase; letter-spacing: .05em; color: #555; border-bottom: 2px solid #111; padding: 6px 4px; }
@@ -860,9 +864,9 @@ ${sum.length ? `<h2>${crew ? 'Load list' : 'Order summary'}</h2><table class="su
 ${schedule.length ? `<h2>Rebar schedule</h2><table class="rebar"><tr><th>Where</th><th>Bars</th><th class="v">How many / long</th></tr>${schedule
       .map((r) => `<tr><td>${esc(r.where)}</td><td>${esc(r.what)}${r.note ? `<div class="note">${esc(r.note)}</div>` : ''}</td><td class="v">${esc(r.amount)}</td></tr>`)
       .join('')}${steelTotals.map(([k, v]) => `<tr class="tot"><td colspan="2">${esc(k)}</td><td class="v">${esc(v)}</td></tr>`).join('')}</table>` : ''}
-${drawings?.plan ? `<h2>${foundation ? 'Foundation plan' : 'Plan'}</h2><div class="draw">${drawings.plan}</div>` : ''}${drawings?.iso ? `<h2>3D view</h2><div class="draw">${drawings.iso}</div>` : ''}
-${drawings?.section ? `<h2>${foundation ? 'Typical section' : 'Edge detail'}</h2><div class="draw">${drawings.section}</div>` : ''}
-${drawings?.house ? `<h2>At the house</h2><div class="draw">${drawings.house}</div>` : ''}
+${drawings?.plan ? `<h2 class="page">${foundation ? 'Foundation plan' : 'Plan'}</h2><div class="draw">${drawings.plan}</div>` : ''}${drawings?.iso ? `<h2 class="page">3D view</h2><div class="draw">${drawings.iso}</div>` : ''}
+${drawings?.section ? `<h2 class="page">${foundation ? 'Typical section' : 'Edge detail'}</h2><div class="draw">${drawings.section}</div>` : ''}
+${drawings?.house ? `<h2 class="page">At the house</h2><div class="draw">${drawings.house}</div>` : ''}
 ${opts.photos?.length ? `<h2>Photos</h2><div class="photos">${opts.photos.map((src, i) => `<img src="${src}" alt="Photo ${i + 1}">`).join('')}</div>` : ''}
 ${foundation ? `<h2>Foundation: ${esc(foundation.kind)}</h2><div class="item"><ul class="fnd">${foundationLines(foundation, job).map((l) => `<li>${esc(l)}</li>`).join('')}</ul></div>` : ''}
 ${items.length ? `<h2>Details</h2>${itemHtml}` : '<p>Nothing added to this job yet.</p>'}

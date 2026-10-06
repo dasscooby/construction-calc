@@ -206,15 +206,17 @@ export function buildLayout(spec: LayoutSpec): Layout {
   // Slabs, and which pour each is in.
   const slabs: LayoutSlab[] = [];
   const pourOf = new Map<number, number>(); // slab index → pour number
-  let nextPour = 1;
-  spec.slabs.forEach((s, i) => {
+  // Slab 1 is always the main slab (the house); slabs in add-ons are numbered from 2 in the order added.
+  let nextAddOn = 2;
+  const order = spec.slabs.map((s, i) => ({ s, i })).sort((a, b) => (a.s.at.in === 'main' ? 0 : 1) - (b.s.at.in === 'main' ? 0 : 1) || a.i - b.i);
+  order.forEach(({ s, i }) => {
     const seed = s.at.in === 'main' ? { x: L / 2, y: W / 2 } : addOnGeom[s.at.addOn]?.seeds[s.at.bay];
     const k = seed ? faceAt(graph.faces, seed) : -1;
     if (k < 0) {
       problems.push('A slab is not inside a closed area.');
       return;
     }
-    const pour = s.pour && [...pourOf.values()].includes(s.pour) ? s.pour : nextPour++;
+    const pour = s.at.in === 'main' ? 1 : s.pour && [...pourOf.values()].includes(s.pour) ? s.pour : nextAddOn++;
     pourOf.set(i, pour);
     const name = s.at.in === 'main' ? 'Main slab' : `${spec.addOns.length > 1 ? `Add-on ${s.at.addOn + 1}` : 'Add-on'} slab${bays[s.at.addOn].length > 1 ? `, ${bayName(s.at.bay, bays[s.at.addOn].length, spec.addOns[s.at.addOn])}` : ''}`;
     slabs.push({ name, pour, index: i, face: graph.faces[k], thick: s.thick, at: s.at });

@@ -14,13 +14,13 @@ import { dec } from '../tools/format';
 import { liveActivitiesSupported } from '../widgets/bridge';
 import { openReport } from '../report/open';
 import { buildBid, buildBill, buildChange, lineAmount, priceTotals } from '../report/billing';
-import { bidOptions, lineFor, missingLines, refreshLines, UNITS } from '../report/bidOptions';
+import { bidOptions, lineFor, missingLines, refreshLines, remapLines, UNITS } from '../report/bidOptions';
 import PickSheet from './PickSheet';
 import SignaturePad from './SignaturePad';
 import { orderText, PLACE_TEXT, sendOrder } from '../lib/order';
 import { dayName, fetchForecast, pourWarnings } from '../lib/weather';
 import type { ConcreteOrder } from '../lib/jobs';
-import { buildReport, figureItems, FiguredItem, foundationDrawings, jobTotals, layoutItemDrawings } from '../report/report';
+import { buildReport, figureItems, FiguredItem, foundationDrawings, jobTotals, layoutItemDrawings, pieceName } from '../report/report';
 import { buildLayout } from '../report/foundationLayout';
 import { LayoutRaw, runList } from '../report/layoutItems';
 import { fmtFtIn, Start, startFromJob } from '../lib/layoutEdit';
@@ -747,6 +747,8 @@ function LayoutCard({ job, figured, onEdit, replacedCount }: { job: Job; figured
   const raw = job.items.find((it) => it.toolId === 'foundation-layout')!.raw as unknown as LayoutRaw;
   const l = useMemo(() => (raw?.layout?.house?.length ? buildLayout(raw.layout) : null), [raw]);
   const drawings = useMemo(() => layoutItemDrawings(job, figured, prefs.company.name), [job, figured, prefs.company.name]);
+  // Walls, footings or slabs still in the job on their own: likely the same ones the layout has.
+  const overlap = figured.filter((f) => !f.item.id.includes(':') && ['footings', 'wall-forms', 'slab', 'slab-layout', 'beam-bars'].includes(f.tool.id));
   return (
     <View style={styles.card}>
       <Text style={styles.label}>Foundation layout</Text>
@@ -771,6 +773,20 @@ function LayoutCard({ job, figured, onEdit, replacedCount }: { job: Job; figured
       {drawings ? (
         <View style={styles.lineGap}>
           <DrawingView drawings={drawings} />
+        </View>
+      ) : null}
+      {overlap.length ? (
+        <View style={[styles.overlap, styles.lineGap]}>
+          <Text style={styles.label}>Also in this job</Text>
+          <Text style={styles.help}>These are counted on their own too. If the layout already has them, take them out of the bid so they aren't counted twice.</Text>
+          {overlap.map((f) => (
+            <View key={f.item.id} style={styles.sumRow}>
+              <Text style={styles.sumLabel}>{pieceName(f, figured, job)}</Text>
+              <Pressable onPress={() => (feel.tap(), jobStore.coveredByLayout(job.id, f.item.id))} style={styles.smallBtn} accessibilityRole="button" accessibilityLabel={`The layout covers ${pieceName(f, figured, job)}`}>
+                <Text style={styles.smallBtnText}>The layout covers it</Text>
+              </Pressable>
+            </View>
+          ))}
         </View>
       ) : null}
       <Pressable onPress={() => (feel.tap(), onEdit())} style={[styles.primary, styles.wide]} accessibilityRole="button">
@@ -984,7 +1000,8 @@ function Prices({ job, figured }: { job: Job; figured: FiguredItem[] }) {
   const sources = useMemo(() => bidOptions(figured, prefs, job), [figured, prefs, job]);
   const missing = useMemo(() => missingLines(sources, job.lines ?? []), [sources, job.lines]);
   useEffect(() => {
-    const next = refreshLines(lines, sources);
+    // Lines made before the layout took over a piece move to the layout's piece; then today's numbers.
+    const next = refreshLines(remapLines(lines, job, sources), sources);
     if (next.some((l, i) => l !== lines[i])) jobStore.setLines(job.id, next);
   }, [sources]);
   const [picking, setPicking] = useState<{ kind: 'what' | 'measure' | 'unit'; line: number | 'new' } | null>(null);
@@ -1295,6 +1312,7 @@ const getStyles = themed(() => ({
   secondaryText: { fontSize: 17, fontWeight: '700', color: colors.accent },
   secondarySub: { fontSize: 14, color: colors.subtext, marginTop: 2, textAlign: 'center', paddingHorizontal: 12 },
   danger: { color: colors.danger },
+  overlap: { backgroundColor: colors.warningBg, borderRadius: 12, padding: 12 },
   disabled: { opacity: 0.4 },
   card: { backgroundColor: colors.panel, borderRadius: 16, padding: 14, marginBottom: 10 },
   pressed: { backgroundColor: colors.panel2 },
