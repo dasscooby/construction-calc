@@ -153,8 +153,8 @@ const fillBaseTool: Tool = {
     const rows: ResultRow[] = [
       { label: 'Area', value: sqFt(area) },
       { label: 'Compacted', value: `${dec(r.compactedCuYd, 2)} cu yd` },
-      { label: 'Order (loose)', value: `${dec(r.looseCuYd, 2)} cu yd`, big: true },
-      { label: 'Tons', value: `${dec(r.tons, 1)} tons`, big: true },
+      { label: 'Order (loose)', value: `${dec(r.looseCuYd, 2)} cu yd`, big: true, note: `With ${dec(inp.num('allowance'), 1)}% extra for compaction` },
+      { label: 'Tons', value: `${dec(r.tons, 1)} tons`, big: true, note: `At ${dec(inp.num('density'), 2)} tons per yard` },
     ];
     const truck = inp.num('truckTons');
     if (truck > 0) rows.push({ label: 'Truck loads', value: commas(loadsNeeded(r.tons, truck)) });

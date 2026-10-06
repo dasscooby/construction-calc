@@ -130,6 +130,9 @@ describe('fill & base rock', () => {
     expect(rowValue(r, 'Order (loose)')).toBe('15.47 cu yd');
     expect(rowValue(r, 'Tons')).toBe('21.7 tons');
     expect(rowValue(r, 'Truck loads')).toBe('2');
+    const note = (label: string) => (r.status === 'ok' ? r.result.rows.find((x) => x.label === label)?.note : undefined);
+    expect(note('Order (loose)')).toBe('With 20% extra for compaction');
+    expect(note('Tons')).toBe('At 1.4 tons per yard');
   });
 
   test('0 depth or 0 tons per yard gets a note, not 0 tons', () => {
