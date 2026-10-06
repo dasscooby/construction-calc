@@ -87,3 +87,41 @@ test('an L-shaped area is cut into rectangles for the slab', () => {
     { w: 4, h: 7 },
   ]);
 });
+
+describe('drawings of a layout', () => {
+  const { layoutItemDrawings, jobDrawings } = require('../report') as typeof import('../report');
+  const { buildLayout, bayName } = require('../foundationLayout') as typeof import('../foundationLayout');
+  const { hitLayout, planFrame } = require('../layoutPlanDraw') as typeof import('../layoutPlanDraw');
+
+  test('the plan labels every run, the bays face to face, and each pour', () => {
+    const d = layoutItemDrawings(job, figureItems(job), 'Gaitan Concrete')!;
+    for (const t of [`HOUSE TOP 70'-0"`, `ADD-ON FAR 70'-0"`, `ADD-ON SIDE 40'-0"`, `ADD-ON INSIDE 1 40'-0"`, `ADD-ON INSIDE 2 40'-0"`]) expect(d.plan).toContain(t);
+    expect(d.plan).toContain(`47'-4"`);
+    expect(d.plan).toContain('BAYS, CLEAR (FACE TO FACE)');
+    expect(d.plan).toContain('4" SLAB · POUR 2');
+    expect(d.plan).toContain(`POUR 2: ADD-ON SLAB, MIDDLE BAY, 4" · 47'-4" × 39'-4" CLEAR · 1,862 SQ FT · 25.5 YD`);
+    expect(d.iso).toContain('<polygon');
+    expect(d.section).toContain('TYPICAL SECTION');
+    // The crew sheet and the bid use it.
+    expect(jobDrawings(job, figureItems(job))?.plan).toBe(layoutItemDrawings(job, figureItems(job))?.plan);
+  });
+
+  test('a tap finds the run or the bay under it, and lights it up', () => {
+    const l = buildLayout(spec);
+    const f = planFrame(l);
+    const inside1 = l.runs.findIndex((r) => r.name === 'Add-on inside 1');
+    const r = l.graph.runs[inside1].run;
+    const at = (x: number, y: number) => hitLayout(l, Number(f.X(x)), Number(f.Y(y)));
+    expect(at((r.a.x + r.b.x) / 2, (r.a.y + r.b.y) / 2)).toEqual({ run: inside1 });
+    const mid = l.graph.faces.indexOf(l.slabs[1].face);
+    expect(at(35, -20)).toEqual({ face: mid }); // middle of the middle bay
+    expect(at(35, 35).face).toBe(l.graph.faces.indexOf(l.slabs[0].face));
+    expect(layoutItemDrawings(job, figureItems(job), '', { face: mid })!.plan).toContain('fill-opacity="0.22"');
+    expect(layoutItemDrawings(job, figureItems(job), '', { run: inside1 })!.plan).toContain('fill-opacity="0.75"');
+  });
+
+  test('bays are named the way the plan reads, for the side the add-on is on', () => {
+    expect([0, 1, 2].map((i) => bayName(i, 3, 'top'))).toEqual(['left bay', 'middle bay', 'right bay']);
+    expect([0, 1, 2].map((i) => bayName(i, 3, 'right'))).toEqual(['top bay', 'middle bay', 'bottom bay']);
+  });
+});

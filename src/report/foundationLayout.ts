@@ -36,6 +36,8 @@ export interface LayoutSpec {
   footing: { width: number; depth: number } | null;
   addOns: AddOnSpec[];
   slabs: { at: SlabSpot; thick: number }[];
+  /** Top of slab below the top of the wall, in (blank: a basement slab sits on the footing, a stem wall slab at the top) */
+  slabDropIn?: number;
 }
 
 export interface LayoutRun {
@@ -59,6 +61,8 @@ export interface Layout {
   graph: GraphResult;
   /** Bays in each add-on, left to right along the shared side: clear width × clear depth */
   bays: { w: number; h: number }[][];
+  /** Each add-on in plan: wall faces along the shared side (u), how deep, and where a (u, v) point lands */
+  addOnGeom: { faces: number[]; depth: number; at: (u: number, v: number) => Pt; dir: Pt; out: Pt }[];
   slabs: LayoutSlab[];
   totals: { measured: number; middle: number; footingMiddle: number; bends: number };
   /** Something that doesn't fit (inside walls too close, a slab that isn't in a closed area) */
@@ -77,7 +81,8 @@ function frame(spec: LayoutSpec, side: Side) {
     left: { P: { x: 0, y: W }, dir: { x: 0, y: -1 } },
   }[side];
   const out = { x: f.dir.y, y: -f.dir.x };
-  return (u: number, v: number): Pt => ({ x: f.P.x + f.dir.x * u + out.x * v, y: f.P.y + f.dir.y * u + out.y * v });
+  const at = (u: number, v: number): Pt => ({ x: f.P.x + f.dir.x * u + out.x * v, y: f.P.y + f.dir.y * u + out.y * v });
+  return { at, dir: f.dir, out };
 }
 
 /** Where each inside wall's middle sits along the shared side (u), in order of the list. */
@@ -111,8 +116,10 @@ export function buildLayout(spec: LayoutSpec): Layout {
   ];
   const seeds: Pt[][] = [];
   const bays: { w: number; h: number }[][] = [];
+  const addOnGeom: Layout['addOnGeom'] = [];
   spec.addOns.forEach((a, n) => {
-    const at = frame(spec, a.side);
+    const fr = frame(spec, a.side);
+    const at = fr.at;
     const from = a.from ?? 0;
     const D = a.depth;
     const name = spec.addOns.length > 1 ? `Add-on ${n + 1}` : 'Add-on';
@@ -132,6 +139,7 @@ export function buildLayout(spec: LayoutSpec): Layout {
       spots.push(at((faces[i] + faces[i + 1]) / 2, (D - t) / 2));
     }
     bays.push(list);
+    addOnGeom.push({ faces, depth: D, at, dir: fr.dir, out: fr.out });
     seeds.push(spots);
   });
   // Rename a single side-2 for reading: "Add-on side" twice reads fine on the list.
@@ -146,7 +154,7 @@ export function buildLayout(spec: LayoutSpec): Layout {
       problems.push('A slab is not inside a closed area.');
       return;
     }
-    const name = s.at.in === 'house' ? 'House slab' : `${spec.addOns.length > 1 ? `Add-on ${s.at.addOn + 1}` : 'Add-on'} slab${bays[s.at.addOn].length > 1 ? `, ${bayName(s.at.bay, bays[s.at.addOn].length)}` : ''}`;
+    const name = s.at.in === 'house' ? 'House slab' : `${spec.addOns.length > 1 ? `Add-on ${s.at.addOn + 1}` : 'Add-on'} slab${bays[s.at.addOn].length > 1 ? `, ${bayName(s.at.bay, bays[s.at.addOn].length, spec.addOns[s.at.addOn].side)}` : ''}`;
     slabs.push({ name, pour: i + 1, face: graph.faces[k], thick: s.thick });
   });
   const list: LayoutRun[] = graph.runs.map((r) => ({ name: r.run.name, measured: r.run.measured, middle: r.middle, footingMiddle: r.footingMiddle }));
@@ -156,16 +164,20 @@ export function buildLayout(spec: LayoutSpec): Layout {
     runs: list,
     graph,
     bays,
+    addOnGeom,
     slabs,
     totals: { measured: sum((r) => r.measured), middle: sum((r) => r.middle), footingMiddle: sum((r) => r.footingMiddle), bends: graph.corners + graph.tees },
     problems,
   };
 }
 
-/** "left bay", "middle bay", "right bay", or "bay 2" */
-export function bayName(i: number, count: number): string {
-  if (count === 2) return i === 0 ? 'first bay' : 'second bay';
-  if (count === 3) return ['left bay', 'middle bay', 'right bay'][i];
+/** "left bay", "middle bay", "right bay" (as the plan reads, for the side the add-on is on), or "bay 2" */
+export function bayName(i: number, count: number, side: Side = 'top'): string {
+  // Bays are counted along the shared side going clockwise: left to right on the top, top to bottom on
+  // the right, right to left on the bottom, bottom to top on the left.
+  const ends = { top: ['left', 'right'], right: ['top', 'bottom'], bottom: ['right', 'left'], left: ['bottom', 'top'] }[side];
+  if (count === 2) return `${i === 0 ? ends[0] : ends[1]} bay`;
+  if (count === 3) return [`${ends[0]} bay`, 'middle bay', `${ends[1]} bay`][i];
   return `bay ${i + 1}`;
 }
 

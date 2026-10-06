@@ -21,7 +21,9 @@ import { daylightWall, splitOutline, WallSteel } from './heightRuns';
 import { concreteResult } from '../lib/concrete';
 import { AddOnDraw, FoundationDraw, foundationIsoSvg, foundationPlanSvg, foundationSectionSvg } from './foundationDraw';
 import { slabBarPlan } from '../tools/slabLayoutTool';
-import { LAYOUT_TOOL_ID, layoutChildren } from './layoutItems';
+import { LAYOUT_TOOL_ID, layoutChildren, LayoutRaw } from './layoutItems';
+import { buildLayout as buildFoundationLayout } from './foundationLayout';
+import { graphIsoSvg, graphPlanSvg } from './layoutPlanDraw';
 import { slabBarsAdvice } from '../lib/rebar';
 
 export interface FiguredItem {
@@ -678,8 +680,50 @@ export function rebarSchedule(items: FiguredItem[], job?: Job): RebarLine[] {
   return out;
 }
 
-/** The plan and 3D view: from Wall Forms walls if the job has them, else from a one-piece slab. */
+/** A foundation layout item's plan, 3D and typical section. Null if the job has no layout. */
+export function layoutItemDrawings(job: Job, items: FiguredItem[], company = '', highlight?: { run?: number; face?: number }): Drawings | null {
+  const it = job.items.find((i) => i.toolId === LAYOUT_TOOL_ID);
+  const raw = it?.raw as unknown as LayoutRaw | undefined;
+  if (!it || !raw?.layout?.house) return null;
+  const l = buildFoundationLayout(raw.layout);
+  const pourYd: Record<number, number> = {};
+  for (const sl of l.slabs) {
+    const f = items.find((x) => x.item.id === `${it.id}:slab${sl.pour}`);
+    const order = f?.result.status === 'ok' ? f.result.result.rows.find((r) => r.label === 'Order') : undefined;
+    if (order) pourYd[sl.pour] = numberIn(order.value);
+  }
+  const date = new Date(job.createdAt).toLocaleDateString();
+  const w = raw.wall ?? {};
+  const ft = raw.footing ?? {};
+  const num = (v: unknown, d: number) => parseNumber(String(v ?? '')) ?? d;
+  const bars = w.bars === '1';
+  const d: FoundationDraw = {
+    outline: [],
+    wallIn: l.spec.wall.thick * 12,
+    wallFt: l.spec.wall.height,
+    wallSteel: bars && String(w.vSpacing ?? '').trim() ? `#${num(w.barSize, 4)} VERT. @ ${n2(num(w.vSpacing, 24))}" O.C.` : '',
+    wallVert: bars && String(w.vSpacing ?? '').trim() ? { size: num(w.barSize, 4), spacingIn: num(w.vSpacing, 24) } : null,
+    wallHoriz: bars && num(w.lines, 2) > 1 ? { size: num(w.barSize, 4), spacingIn: Math.max(6, (l.spec.wall.height * 12 - 6) / (num(w.lines, 2) - 1)) } : null,
+    footing: l.spec.footing ? { widthIn: l.spec.footing.width * 12, depthIn: l.spec.footing.depth * 12, lines: ft.bars === '1' ? num(ft.lines, 2) : 0, barSize: num(ft.barSize, 4) } : null,
+    slab: l.slabs.length ? { thickIn: l.slabs[0].thick * 12, dropIn: l.spec.slabDropIn ?? (l.spec.wall.height >= 6 ? Math.round(l.spec.wall.height * 12 - l.slabs[0].thick * 12) : 0), steel: '', bar: null } : null,
+    vaporBarrier: items.some((x) => x.tool.id === 'vapor-barrier'),
+    title: job.name,
+    job: job.name,
+    company,
+    date,
+    kind: 'Foundation',
+  };
+  return {
+    plan: graphPlanSvg(l, { title: 'Foundation layout', job: job.name, company, date, pourYd, highlight }),
+    iso: graphIsoSvg(l, highlight),
+    section: foundationSectionSvg(d),
+  };
+}
+
+/** The plan and 3D view: a foundation layout, walls that go together, Wall Forms walls, else a one-piece slab. */
 export function jobDrawings(job: Job, items: FiguredItem[], company = ''): Drawings | null {
+  const laid = layoutItemDrawings(job, items, company);
+  if (laid) return laid;
   const together = foundationDrawings(job, items, company);
   if (together) return together;
   const walls = items.find((f) => f.tool.id === 'wall-forms' && f.result.status === 'ok');

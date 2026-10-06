@@ -37,6 +37,10 @@ export interface RunResult {
   middle: number;
   /** The footing under it, along its middle, ft (0 = no footing) */
   footingMiddle: number;
+  /** Taken off the middle at each end (a tee stops at the host's face), ft */
+  trim: [number, number];
+  /** Same for the footing (stops at the host footing's edge) */
+  footTrim: [number, number];
 }
 
 export interface Face {
@@ -115,18 +119,21 @@ export function solveGraph(runs: Run[]): GraphResult {
   let corners = 0;
   let tees = 0;
   const results: RunResult[] = runs.map((r, i) => {
-    const take = (w: (h: Run) => number) =>
-      j[i].reduce((s, end) => s + (end.kind === 'tee' && end.host ? w(end.host) / 2 : 0), 0);
+    const trims = (w: (h: Run) => number) => j[i].map((end) => (end.kind === 'tee' && end.host ? w(end.host) / 2 : 0)) as [number, number];
     const full = len(r);
     j[i].forEach((end) => {
       if (end.kind === 'corner') corners += 0.5; // each corner is seen from both runs
       if (end.kind === 'tee') tees += 1;
     });
+    const trim = trims((h) => h.thick);
+    const footTrim = trims((h) => (h.footing ? h.footing.width : h.thick));
     return {
       run: r,
       ends: [j[i][0].kind, j[i][1].kind],
-      middle: full - take((h) => h.thick),
-      footingMiddle: r.footing ? full - take((h) => (h.footing ? h.footing.width : h.thick)) : 0,
+      trim,
+      footTrim,
+      middle: full - trim[0] - trim[1],
+      footingMiddle: r.footing ? full - footTrim[0] - footTrim[1] : 0,
     };
   });
   return { runs: results, corners: Math.round(corners), tees, faces: findFaces(runs) };
