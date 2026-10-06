@@ -392,3 +392,13 @@ describe('wire-mesh', () => {
     expect(runTool(mesh, { areas: [[0, 40]] }).status).toBe('invalid');
   });
 });
+
+describe('inches typed in the feet box', () => {
+  test('a 4 ft slab asks if you meant 4 inches; a 4" slab says nothing', () => {
+    expect(ok(runTool(tool('slab-rebar'), { length: 30, width: 20, thick: 4 })).warnings).toEqual([
+      'Slab thickness is 4 feet. Did you mean 4 inches? Inches go in the “in” box.',
+    ]);
+    expect(ok(runTool(tool('slab-rebar'), { length: 30, width: 20 })).warnings).toEqual([]);
+    expect(ok(runTool(tool('slab-rebar'), { length: 8, width: 4 })).warnings).toEqual([]); // edge bar only
+  });
+});

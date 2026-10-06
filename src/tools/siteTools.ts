@@ -19,6 +19,7 @@ import {
 } from '../lib/site';
 import { fixed } from '../lib/units';
 import { commas, commasTrim, dec, ftIn, inches, pct, sqFt } from './format';
+import { tooBig } from './concreteShared';
 import { ResultRow, Tool } from './types';
 
 /** Elevations and rod readings: decimal feet to the hundredth, like a grade rod. */
@@ -129,7 +130,8 @@ const excavation: Tool = {
     );
     const truck = inp.num('truck');
     if (truck > 0) rows.push({ label: 'Truck loads', value: commas(loadsNeeded(loose, truck)) });
-    return { rows };
+    const deep = tooBig('Depth', inp.len('depth'), 12);
+    return { rows, warnings: deep ? [deep] : [] };
   },
   notes: ['Swell: sand 10–15%, dirt 20–30%, clay 30–40%.'],
 };
@@ -158,7 +160,8 @@ const fillBaseTool: Tool = {
     ];
     const truck = inp.num('truckTons');
     if (truck > 0) rows.push({ label: 'Truck loads', value: commas(loadsNeeded(r.tons, truck)) });
-    return { rows };
+    const deep = tooBig('Compacted depth', inp.len('depth'), 2);
+    return { rows, warnings: deep ? [deep] : [] };
   },
   notes: ['Rock and gravel run about 1.4–1.5 tons per yard, sand about 1.3–1.4.'],
 };
