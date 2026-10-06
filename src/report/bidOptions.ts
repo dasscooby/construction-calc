@@ -217,6 +217,17 @@ export function bidOptions(items: FiguredItem[], s: Settings, job?: Job): BidSou
   return out;
 }
 
+/**
+ * A line for every part of the job that isn't on the bid yet (what you tap "+ Add every part of the job"
+ * for): each measured the usual way, a pump for each pour, labor and "something else" left out.
+ */
+export function missingLines(sources: BidSource[], lines: { src?: string }[]): Omit<PriceLine, 'id'>[] {
+  const have = new Set(lines.map((l) => l.src).filter(Boolean));
+  return sources
+    .filter((s) => s.src !== 'other' && s.src !== 'labor' && !have.has(s.src) && s.measures.length)
+    .map((s) => lineFor(s, s.src === 'pump' && s.measures.some((m) => m.id === 'pours') ? 'pours' : undefined));
+}
+
 /** A new line for a picked source and measure: wording, quantity, unit and the price book price. */
 export function lineFor(source: BidSource, measureId?: string): Omit<PriceLine, 'id'> {
   const m = source.measures.find((x) => x.id === measureId) ?? source.measures[0];

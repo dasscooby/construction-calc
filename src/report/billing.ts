@@ -190,7 +190,12 @@ const STYLE = `
   .sign svg { display: block; height: 60px; max-width: 100%; }
   .sign .filled { font-size: 15px; padding-bottom: 4px; }
   .co-sum { width: 340px; margin-left: auto; margin-top: 10px; }
-  .draw { border: 1px solid #ccc; border-radius: 10px; overflow: hidden; margin-top: 18px; break-inside: avoid; }
+  .draw { border: 1px solid #ccc; border-radius: 10px; overflow: hidden; margin-top: 10px; break-inside: avoid; }
+  h3 { font-size: 13px; text-transform: uppercase; letter-spacing: .08em; color: #333; margin: 26px 0 6px; border-bottom: 2px solid #111; padding-bottom: 4px; }
+  .scope { margin: 0; padding: 0; list-style: none; }
+  .scope li { font-size: 14px; padding: 6px 0; border-bottom: 1px solid #e5e5e5; display: flex; gap: 12px; }
+  .scope li b { min-width: 34%; }
+  .scope li span { flex: 1; color: #222; }
   .foot { margin-top: 28px; font-size: 11px; color: #888; text-align: center; }
   .print { position: fixed; right: 16px; bottom: 16px; padding: 12px 18px; border-radius: 999px; border: 0; background: #ff9f0a; color: #000; font-size: 16px; font-weight: 700; }
   @media print { .print { display: none; } body { padding: 0; } }`;
@@ -204,6 +209,49 @@ export function signBlock(who: string, sig?: Signature): string {
   return `<div class="sign"><div>${ink}<div class="line">${who}: ${esc(sig.name)}</div></div><div><div class="filled">${fmtDate(sig.at)}</div><div class="line">Date</div></div></div>`;
 }
 
+/**
+ * Every piece of the job in plain words, priced or not, so the bid shows the whole job: walls, footings,
+ * each slab and its pour, rebar, concrete and pumps, and anything else in it.
+ */
+export function scopeOfWork(items: FiguredItem[], job: Job): [string, string][] {
+  const out: [string, string][] = [];
+  const row = (f: FiguredItem, label: string) => (f.result.status === 'ok' ? f.result.result.rows.find((r) => r.label === label) : undefined);
+  let rebar = 0;
+  let yards = 0;
+  for (const f of items) {
+    if (f.result.status !== 'ok' || f.item.id.endsWith(':forms')) continue;
+    const name = f.item.label || f.tool.title;
+    const parts: string[] = [];
+    const measured = row(f, 'As measured') ?? row(f, 'House, around the outside');
+    const middle = row(f, 'Along the middle');
+    const area = row(f, 'Slab area');
+    const outside = row(f, 'To the outside of the walls');
+    if (measured) parts.push(`${measured.value} as measured`);
+    else if (middle) parts.push(`${middle.value}`);
+    if (area) parts.push(outside ? `${area.value} poured inside the walls (${outside.value} to the outside)` : area.value);
+    const order = row(f, 'Order');
+    if (order) {
+      parts.push(`${order.value} of concrete`);
+      yards += numberIn(order.value);
+    }
+    const lb = itemRebarLb(f);
+    if (lb > 0) {
+      parts.push(`${commas(Math.round(lb))} lb rebar`);
+      rebar += lb;
+    }
+    if (!parts.length) {
+      const big = f.result.result.rows.find((r) => r.big);
+      if (big) parts.push(`${big.label}: ${big.value}`);
+    }
+    if (parts.length) out.push([name, parts.join(' · ')]);
+  }
+  const pours = items.filter((x) => /:(footings|walls|slab\d+)$/.test(x.item.id)).length;
+  if (yards) out.push(['Concrete', `${dec(yards, 2)} yd${pours > 1 ? ` in ${pours} pours` : ''}`]);
+  if (rebar) out.push(['Rebar', `${commas(Math.round(rebar))} lb, cut, bent and tied`]);
+  if (job.order?.place === 'pump') out.push(['Pump truck', `${pours > 1 ? `${pours} pours` : 'for the pour'}`]);
+  return out;
+}
+
 function moneyDoc(kind: 'bid' | 'bill', job: Job, s: Settings, items: FiguredItem[], now: Date, media: DocMedia): { html: string; text: string } {
   const c = s.company;
   // The bill adds any change orders after the bid's lines.
@@ -214,7 +262,8 @@ function moneyDoc(kind: 'bid' | 'bill', job: Job, s: Settings, items: FiguredIte
   const no = docNumber(job);
   const coLines = [c.phone, c.email, c.license && `Lic #${c.license.replace(/^#/, '')}`].filter((x) => x && x.trim());
   const qtyText = (l: PriceLine) => (l.qty ? `${commas(num(l.qty), num(l.qty) % 1 ? 2 : 0)}${l.unit ? ` ${l.unit}` : ''}` : '');
-  const plan = kind === 'bid' ? jobDrawings(job, items, s.company.name)?.plan : undefined;
+  const drawings = kind === 'bid' ? jobDrawings(job, items, s.company.name) : null;
+  const scope = scopeOfWork(items, job);
 
   const sumRows: [string, string, string?][] = [['Subtotal', money(m.subtotal)]];
   if (m.tax) sumRows.push([`Tax (${dec(num(job.taxPct), 2)}%)`, money(m.tax)]);
@@ -240,8 +289,11 @@ function moneyDoc(kind: 'bid' | 'bill', job: Job, s: Settings, items: FiguredIte
 ${lines.map((l) => `<tr><td>${esc(l.desc)}</td><td class="r">${esc(qtyText(l))}</td><td class="r">${num(l.price) ? money(num(l.price)) : ''}</td><td class="r">${money(lineAmount(l))}</td></tr>`).join('')}
 </table>
 <table class="sum">${sumRows.map(([k, v, cls]) => `<tr class="${cls ?? ''}"><td>${k}</td><td class="r">${v}</td></tr>`).join('')}</table>
+${scope.length ? `<h3>Scope of work</h3><ul class="scope">${scope.map(([k, v]) => `<li><b>${esc(k)}</b><span>${esc(v)}</span></li>`).join('')}</ul>` : ''}
 ${kind === 'bid' ? signBlock('Accepted by', job.signature) : ''}
-${plan ? `<div class="draw">${plan}</div>` : ''}
+${drawings?.plan ? `<h3>Plan</h3><div class="draw">${drawings.plan}</div>` : ''}
+${drawings?.iso ? `<h3>3D view</h3><div class="draw">${drawings.iso}</div>` : ''}
+${drawings?.section ? `<h3>Typical section</h3><div class="draw">${drawings.section}</div>` : ''}
 ${noticeHtml(kind, s.docs)}
 <button class="print" onclick="window.print()">Save as PDF / Print</button>
 </body></html>`;
@@ -256,6 +308,7 @@ ${noticeHtml(kind, s.docs)}
     '',
     ...sumRows.map(([k, v]) => `${k}: ${v}`),
     '',
+    ...(scope.length ? ['Scope of work:', ...scope.map(([k, v]) => `• ${k}: ${v}`), ''] : []),
     [c.phone, c.email].filter(Boolean).join(' · '),
   ]
     .filter((l, i, a) => l !== '' || a[i - 1] !== '')

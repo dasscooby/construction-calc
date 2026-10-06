@@ -14,7 +14,7 @@ import { dec } from '../tools/format';
 import { liveActivitiesSupported } from '../widgets/bridge';
 import { openReport } from '../report/open';
 import { buildBid, buildBill, buildChange, lineAmount, priceTotals } from '../report/billing';
-import { bidOptions, lineFor, refreshLines, UNITS } from '../report/bidOptions';
+import { bidOptions, lineFor, missingLines, refreshLines, UNITS } from '../report/bidOptions';
 import PickSheet from './PickSheet';
 import SignaturePad from './SignaturePad';
 import { orderText, PLACE_TEXT, sendOrder } from '../lib/order';
@@ -961,6 +961,7 @@ function Prices({ job, figured }: { job: Job; figured: FiguredItem[] }) {
 
   // What each line can be, found in the job. Lines you tied to the job keep today's numbers.
   const sources = useMemo(() => bidOptions(figured, prefs, job), [figured, prefs, job]);
+  const missing = useMemo(() => missingLines(sources, job.lines ?? []), [sources, job.lines]);
   useEffect(() => {
     const next = refreshLines(lines, sources);
     if (next.some((l, i) => l !== lines[i])) jobStore.setLines(job.id, next);
@@ -1041,6 +1042,18 @@ function Prices({ job, figured }: { job: Job; figured: FiguredItem[] }) {
         <Pressable onPress={() => setPicking({ kind: 'what', line: 'new' })} style={styles.addLine} accessibilityRole="button">
           <Text style={styles.addLineText}>+ Add a line</Text>
         </Pressable>
+        {missing.length ? (
+          <Pressable
+            onPress={() => {
+              feel.tap();
+              jobStore.setLines(job.id, [...lines, ...missing.map((l) => ({ id: '', ...l }))]);
+            }}
+            style={styles.addLine}
+            accessibilityRole="button"
+          >
+            <Text style={styles.addLineText}>+ Add every part of the job ({missing.length})</Text>
+          </Pressable>
+        ) : null}
         <PickSheet
           visible={!!picking}
           title={picking?.kind === 'what' ? 'What is it?' : picking?.kind === 'measure' ? 'Measured by' : 'Unit'}
