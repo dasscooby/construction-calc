@@ -525,3 +525,23 @@ test('a shorter stretch of wall uses the shortest stack of your panels that reac
   // Taller than the panels reach
   expect(stackFor(108, [60, 36])).toEqual({ stack: [0, 1], short: true });
 });
+
+test('radius steps: half rounds off the main diameter, 2 treads smaller each step up', () => {
+  const t = CONCRETE_TOOLS.find((x) => x.id === 'steps')!;
+  const L = (ft: string, i = '') => ({ ft, in: i });
+  const r = runTool(t, { shape: 'radius', steps: '3', rise: L('', '7'), run: L('1'), diameter: L('10'), waste: '0' });
+  // 10', 8', 6' across.
+  expect(rowValue(r, 'Step 1 (bottom)')).toBe(`10' 0" across`);
+  expect(rowValue(r, 'Step 2')).toBe(`8' 0" across`);
+  expect(rowValue(r, 'Step 3 (top)')).toBe(`6' 0" across`);
+  // Each step solid to the ground: 7/12 × π/8 × (10² + 8² + 6²) = 45.81 cu ft = 1.70 cu yd.
+  expect(rowValue(r, 'Cubic feet')).toBe('45.8');
+  expect(rowValue(r, 'Cubic yards')).toBe('1.7');
+  // Curved form: π/2 × (10 + 8 + 6) = 37.7 ft.
+  expect(rowValue(r, 'Curved form')).toBe('37.7 ft');
+  // Too many steps for the width is caught.
+  expect(runTool(t, { shape: 'radius', steps: '6', rise: L('', '7'), run: L('1'), diameter: L('10') }).status).toBe('invalid');
+  // Square steps work as before (and an old saved one with no shape opens as square).
+  const sq = runTool(t, { steps: '4', rise: L('', '7'), run: L('', '11'), width: L('4'), waste: '10' });
+  expect(rowValue(sq, 'Before waste')).toBe('0.79 cu yd');
+});

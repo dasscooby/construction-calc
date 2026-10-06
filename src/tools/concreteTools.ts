@@ -277,22 +277,66 @@ const piers: Tool = {
   notes: ['Drilled holes are rarely perfect. Many crews use more waste on piers.'],
 };
 
+/** Half-round steps: each step's diameter, bottom first (2 treads smaller each step up). */
+export function radiusSteps(n: number, diameterFt: number, treadFt: number): { diameters: number[] } | { error: string } {
+  if (!(diameterFt > 0)) return { error: 'Put in the main diameter (the bottom step).' };
+  if (!(n >= 1)) return { error: 'Put in how many steps.' };
+  const diameters = Array.from({ length: n }, (_, k) => diameterFt - 2 * k * treadFt);
+  if (diameters[n - 1] <= 0) return { error: `${n} steps with ${ftIn(treadFt)} treads need more than ${ftIn(diameterFt)} across. Make it wider or use fewer steps.` };
+  return { diameters };
+}
+
 const steps: Tool = {
   id: 'steps',
   title: 'Steps',
   blurb: 'Solid steps, optional landing at the top',
   fields: [
+    {
+      key: 'shape',
+      label: 'Shape',
+      kind: 'choice',
+      options: [
+        { value: 'square', label: 'Square' },
+        { value: 'radius', label: 'Radius (half round)' },
+      ],
+      default: 'square',
+    },
     { key: 'steps', label: 'Number of steps', kind: 'count' },
     { key: 'rise', label: 'Rise (each step)', kind: 'length' },
-    { key: 'run', label: 'Run (each step)', kind: 'length' },
-    { key: 'width', label: 'Width', kind: 'length' },
-    { key: 'landing', label: 'Landing depth', kind: 'length', optional: true, help: 'Landing at the top' },
+    { key: 'run', label: 'Run (each step)', kind: 'length', help: 'Tread depth' },
+    { key: 'width', label: 'Width', kind: 'length', showIf: ['shape=square'] },
+    {
+      key: 'diameter',
+      label: 'Main diameter',
+      kind: 'length',
+      help: 'The bottom step, across the flat side against the house or slab. Each step up is 2 treads smaller.',
+      showIf: ['shape=radius'],
+    },
+    { key: 'landing', label: 'Landing depth', kind: 'length', optional: true, help: 'Landing at the top', showIf: ['shape=square'] },
     ...ORDER_FIELDS,
   ],
   compute: (inp) => {
     const n = inp.count('steps');
-    const stairs = stepsCuFt(n, inp.len('rise'), inp.len('run'), inp.len('width'));
-    const landing = inp.len('landing') * inp.len('width') * n * inp.len('rise');
+    const rise = inp.len('rise');
+    const run = inp.len('run');
+    if (inp.choice('shape') === 'radius') {
+      // Half rounds stacked on one center, flat side against the house: step k (1 = bottom) is
+      // D − 2 × (k − 1) × tread across, and each one is solid down to the ground.
+      const D = inp.len('diameter');
+      const r = radiusSteps(n, D, run);
+      if ('error' in r) return { error: r.error };
+      const cuFt = r.diameters.reduce((sum, d) => sum + (Math.PI * d * d) / 8, 0) * rise;
+      const rows: ResultRow[] = r.diameters.map((d, k) => ({
+        label: k === 0 ? 'Step 1 (bottom)' : k === n - 1 ? `Step ${k + 1} (top)` : `Step ${k + 1}`,
+        value: `${ftIn(d)} across`,
+        note: `Curved form ${ftIn((Math.PI * d) / 2)} × ${ftIn(rise)} high`,
+      }));
+      const formFt = r.diameters.reduce((sum, d) => sum + (Math.PI * d) / 2, 0);
+      rows.push({ label: 'Curved form', value: `${commasTrim(formFt, 1)} ft`, note: 'Bendable form board (bender board or ply strips) for each riser; the flat side is against the house' });
+      return { rows: [...rows, ...concreteRows(cuFt, inp)] };
+    }
+    const stairs = stepsCuFt(n, rise, run, inp.len('width'));
+    const landing = inp.len('landing') * inp.len('width') * n * rise;
     return { rows: concreteRows(stairs + landing, inp) };
   },
 };
