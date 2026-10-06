@@ -70,7 +70,7 @@ export async function readPlan(data: string, mediaType: string): Promise<PlanRea
   if (Platform.OS === 'web' && typeof navigator !== 'undefined' && navigator.onLine === false) throw new OfflineError('No signal');
   let res: Response;
   try {
-    res = await fetch(ENDPOINT, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ data, mediaType }) });
+    res = await fetch(ENDPOINT, { method: 'POST', headers: { 'content-type': 'application/json', 'x-calc-app': 'construction-calc/plan-reader/1' }, body: JSON.stringify({ data, mediaType }) });
   } catch {
     throw new OfflineError('No signal');
   }
