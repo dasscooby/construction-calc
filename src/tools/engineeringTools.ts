@@ -30,6 +30,7 @@ import {
   wallFootingWidthFt,
 } from '../lib/engineering';
 import { commas, dec, ftIn, inches, pct } from './format';
+import { CHECK_IT } from './concreteShared';
 import { ResultRow, Tool } from './types';
 
 const psf = (n: number) => `${commas(n)} psf`;
@@ -135,6 +136,9 @@ const cylinderBreak: Tool = {
     );
 
     const warnings: string[] = [];
+    // A 4×8 at 3,000 psi breaks near 38,000 lb. Under 1,000 is nearly always kips off the tester's screen.
+    const small = loads.find((l) => l < 1000);
+    if (small !== undefined) warnings.push(`A break load of ${dec(small)} lb is tiny. If the tester shows kips, ${dec(small)} kips = ${commas(small * 1000)} lb. ${CHECK_IT}`);
     const needed = CYLINDERS_PER_TEST[size];
     if (loads.length < needed) warnings.push(`A full test is ${needed} cylinders for ${size === '4x8' ? '4×8' : '6×12'}. You entered ${loads.length}.`);
     const range = C39_RANGE_6X12_FIELD_PCT[loads.length];

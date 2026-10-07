@@ -44,6 +44,12 @@ describe('footing size', () => {
 describe('cylinder breaks', () => {
   // 4" cylinder: area = π × 4² ÷ 4 = 12.566 sq in
   //   37,700 → 3,000.1 psi   38,200 → 3,039.9   36,900 → 2,936.4   average 2,992.1 → 2,990
+  test('loads typed in kips (37.7 for 37,700 lb) get a yellow check; the answer is left as typed', () => {
+    const r = runTool(tool('cylinder-break'), { load1: 37.7, load2: 38.2, load3: 36.9 });
+    expect(warnings(r)[0]).toBe('A break load of 37.7 lb is tiny. If the tester shows kips, 37.7 kips = 37,700 lb. Check the number.');
+    expect(rowValue(r, 'Result')).toBe('Too low');
+  });
+
   test('three 4×8 cylinders averaging just under 3,000 psi', () => {
     const r = runTool(tool('cylinder-break'), { load1: 37700, load2: 38200, load3: 36900 });
     expect(rowValue(r, 'Cylinder 1')).toBe('3,000 psi');
