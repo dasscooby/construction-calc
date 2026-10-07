@@ -92,14 +92,14 @@ describe('the plan set', () => {
   test.each(PAPERS.map((p) => [p.id]))('%s: a cover and one sheet per drawing, each with a title block, sideways at the paper size', (id) => {
     const paper = paperOf(id);
     const set = buildPlanSet(job, settings, figureItems(job), paper, new Date(2026, 9, 6));
-    expect(set.sheets.map((sh) => sh.no)).toEqual(['S0', 'S1', 'S2', 'S3']);
-    expect(set.sheets.map((sh) => sh.title)).toEqual(['Cover and notes', 'Foundation plan', '3D view', 'Typical section']);
+    expect(set.sheets.map((sh) => sh.no)).toEqual(['S0', 'S1', 'S2', 'S3', 'S4', 'S5']);
+    expect(set.sheets.map((sh) => sh.title)).toEqual(['Cover and notes', 'Foundation plan', '3D view', '3D view, pulled apart', 'Typical section', 'Footing and dowels']);
     const ps = pages(set.html);
-    expect(ps.length).toBe(4);
+    expect(ps.length).toBe(6);
     ps.forEach((p, i) => {
       expect(p).toContain('class="tb"');
       expect(p).toContain(`<b>S${i}</b>`);
-      expect(p).toContain(`Sheet ${i + 1} of 4`);
+      expect(p).toContain(`Sheet ${i + 1} of 6`);
       expect(p).toContain('Not to scale');
       expect(p).toContain('Acme Foundations');
       expect(p).toContain('<b>Test 4</b>');
@@ -108,7 +108,10 @@ describe('the plan set', () => {
     expect(ps.slice(1).every((p) => p.includes('<svg'))).toBe(true);
     // One title block per sheet: the drawing's own is taken off; the section's callout names its sheet.
     expect(set.html).not.toContain('SHEET S1');
-    expect(ps[3]).toContain('>S3</text>');
+    expect(ps[4]).toContain('>S4</text>');
+    expect(ps[1]).not.toContain('class="dframe"');
+    expect(ps[5]).toContain('#4 VERTICAL @ 24" O.C.');
+    expect(ps[3]).toContain('SLAB 1 · 4"');
     expect(set.html).toContain(`@page { size: ${paper.hIn}in ${paper.wIn}in; margin: 0; }`);
     const box = sheetBox(paper);
     expect([box.w, box.h]).toEqual([paper.hIn * 96, paper.wIn * 96]);

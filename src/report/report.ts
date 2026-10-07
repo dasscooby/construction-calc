@@ -24,6 +24,7 @@ import { AddOnDraw, FoundationDraw, foundationIsoSvg, foundationPlanSvg, foundat
 import { radiusSteps } from '../tools/concreteTools';
 import { radiusStepsSvg } from './stepsDraw';
 import { slabBarPlan } from '../tools/slabLayoutTool';
+import { footingRebarSvg } from './rebarDraw';
 import { ledgeOf, slabDropIn } from './slabLedge';
 import { LAYOUT_TOOL_ID, layoutChildren, LayoutRaw } from './layoutItems';
 import { buildLayout as buildFoundationLayout } from './foundationLayout';
@@ -249,7 +250,14 @@ export interface Drawings {
   section?: string;
   /** Where the slab meets the house */
   house?: string;
+  /** 3D pulled apart: footing, walls and slabs each lifted off the one under it */
+  apart?: string;
+  /** The footing at a corner with its bars and the vertical dowels */
+  rebar?: string;
 }
+
+/** The footing and dowels view, from a foundation's drawing data (none without a footing). */
+const rebarOf = (d: FoundationDraw, job: string) => (d.footing ? footingRebarSvg({ wallIn: d.wallIn, wallFt: d.wallFt, footing: d.footing, vert: d.wallVert, job }) : undefined);
 
 /** Plan and 3D view of a Wall Forms foundation (raw = the tool's boxes). Null until the walls close up. */
 export function wallFormsDrawings(raw: RawValues, title: string, date: string, slabThickFt = 0): Drawings | null {
@@ -613,7 +621,7 @@ export function foundationDrawings(job: Job, items: FiguredItem[], company = '')
     date: new Date(job.createdAt).toLocaleDateString(),
     kind: f.kind,
   };
-  return { plan: foundationPlanSvg(d), iso: foundationIsoSvg(d), section: foundationSectionSvg(d) };
+  return { plan: foundationPlanSvg(d), iso: foundationIsoSvg(d), section: foundationSectionSvg(d), rebar: rebarOf(d, job.name) };
 }
 
 const n2 = (v: number) => String(Math.round(v * 10) / 10);
@@ -728,7 +736,9 @@ export function layoutItemDrawings(job: Job, items: FiguredItem[], company = '',
   return {
     plan: graphPlanSvg(l, { title: 'Foundation layout', job: job.name, company, date, pourYd, highlight }),
     iso: graphIsoSvg(l, highlight),
+    apart: graphIsoSvg(l, {}, { apart: true }),
     section: foundationSectionSvg(d),
+    rebar: rebarOf(d, job.name),
   };
 }
 
@@ -873,7 +883,9 @@ ${company || opts.logo ? `<div class="co">${logoHtml(opts.logo)}${esc(company).r
   const sheetNote = `${esc(job.name)} · ${esc(date)}`;
   if (drawings?.plan) blocks.push(drawingPage(drawings.plan, foundation ? 'Foundation plan' : 'Plan', sheetNote, box));
   if (drawings?.iso) blocks.push(drawingPage(drawings.iso, '3D view', sheetNote, box));
+  if (drawings?.apart) blocks.push(drawingPage(drawings.apart, '3D view, pulled apart', sheetNote, box));
   if (drawings?.section) blocks.push(drawingPage(drawings.section, foundation ? 'Typical section' : 'Section', sheetNote, box));
+  if (drawings?.rebar) blocks.push(drawingPage(drawings.rebar, 'Footing and dowels', sheetNote, box));
   if (drawings?.house) blocks.push(drawingPage(drawings.house, 'At the house', sheetNote, box));
   (opts.photos ?? []).forEach((src, i) => blocks.push({ kind: 'block', html: `${i === 0 ? '<h2>Photos</h2>' : ''}<div class="photo"><img src="${src}" alt="Photo ${i + 1}"></div>`, h: 420 + (i === 0 ? 44 : 0), newPage: i === 0 }));
   if (foundation) {

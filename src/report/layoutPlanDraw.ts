@@ -364,7 +364,11 @@ export function paintOrder(polys: Pt[][]): number[] {
   return out;
 }
 
-export function graphIsoSvg(l: Layout, highlight: { run?: number; face?: number } = {}): string {
+/**
+ * The layout in 3D. apart: pulled apart like a kit, the walls lifted off the footing and the slabs lifted
+ * off the walls, each piece named (slabs at their poured size, out over the ledge if there is one).
+ */
+export function graphIsoSvg(l: Layout, highlight: { run?: number; face?: number } = {}, opts: { apart?: boolean } = {}): string {
   const spec = l.spec;
   const fd = spec.footing ? spec.footing.depth : 0;
   const walls = l.graph.runs.map((r) => clockwise(wallRect(r)));
@@ -376,17 +380,22 @@ export function graphIsoSvg(l: Layout, highlight: { run?: number; face?: number 
   const top = Hf + spec.wall.height * z;
   const slabT = l.slabs[0]?.thick ?? 4 / 12;
   const drop = spec.slabDropIn !== undefined ? spec.slabDropIn / 12 : spec.wall.height >= 6 ? spec.wall.height - slabT : 0;
-  const slabTop = top - drop * z;
+  // Pulled apart: each piece lifted clear of the one under it.
+  const gap = opts.apart ? Math.max(fd + spec.wall.height, 1) * z * 0.9 : 0;
+  const wallLift = gap;
+  const slabLift = 2 * gap + (opts.apart ? slabT * z : 0);
+  const slabTop = top - drop * z + slabLift;
+  const ledge = ledgeOf(l);
   const proj = (x: number, y: number, h: number) => ({ x: (x - y) * C30, y: (x + y) * 0.5 - h });
-  const ps = all.flatMap((p) => [proj(p.x, p.y, 0), proj(p.x, p.y, top)]);
+  const ps = all.flatMap((p) => [proj(p.x, p.y, 0), proj(p.x, p.y, top + wallLift), proj(p.x, p.y, Math.max(top + wallLift, slabTop))]);
   const minX = Math.min(...ps.map((p) => p.x));
   const maxX = Math.max(...ps.map((p) => p.x));
   const minY = Math.min(...ps.map((p) => p.y));
   const maxY = Math.max(...ps.map((p) => p.y));
   const W = 760;
   const pad = 34;
-  const k = Math.min((W - 2 * pad) / (maxX - minX || 1), 440 / (maxY - minY || 1));
-  const H = Math.round((maxY - minY) * k + 2 * pad + 20);
+  const k = Math.min((W - 2 * pad) / (maxX - minX || 1), (opts.apart ? 520 : 440) / (maxY - minY || 1));
+  const H = Math.round((maxY - minY) * k + 2 * pad + 20 + (opts.apart ? 30 : 0));
   const lx = (W - (maxX - minX) * k) / 2;
   const pt = (x: number, y: number, h: number) => {
     const q = proj(x, y, h);
@@ -408,13 +417,43 @@ export function graphIsoSvg(l: Layout, highlight: { run?: number; face?: number 
     const fs = foots.filter((x): x is Pt[] => !!x);
     for (const k of paintOrder(fs)) prism(fs[k], 0, Hf, '#cfcac1', '#b9b5ad', '#9a958d');
   }
-  for (const sl of l.slabs) {
-    const i = l.graph.faces.indexOf(sl.face);
-    out.push(`<polygon points="${clockwise(sl.face.clear).map((p) => pt(p.x, p.y, slabTop)).join(' ')}" fill="${highlight.face === i ? '#ffc58a' : '#dedad2'}" stroke="#55514b" stroke-width="0.9"/>`);
-  }
+  const slabPoly = (sl: (typeof l.slabs)[number]) => clockwise(opts.apart ? ledge?.slabs.find((x) => x.slab === l.slabs.indexOf(sl))?.poured ?? sl.face.clear : sl.face.clear);
+  if (!opts.apart)
+    for (const sl of l.slabs) {
+      const i = l.graph.faces.indexOf(sl.face);
+      out.push(`<polygon points="${slabPoly(sl).map((p) => pt(p.x, p.y, slabTop)).join(' ')}" fill="${highlight.face === i ? '#ffc58a' : '#dedad2'}" stroke="#55514b" stroke-width="0.9"/>`);
+    }
   for (const i of paintOrder(walls)) {
-    if (highlight.run === i) prism(walls[i], Hf, top, '#ffb366', '#ff9a40', '#e5822a');
-    else prism(walls[i], Hf, top, '#ece9e3', '#c9c5bd', '#a9a49b');
+    if (highlight.run === i) prism(walls[i], Hf + wallLift, top + wallLift, '#ffb366', '#ff9a40', '#e5822a');
+    else prism(walls[i], Hf + wallLift, top + wallLift, '#ece9e3', '#c9c5bd', '#a9a49b');
+  }
+  if (opts.apart) {
+    // Slabs over the walls, then each piece named, beside its front corner.
+    const polys = l.slabs.map(slabPoly);
+    for (const k2 of paintOrder(polys)) prism(polys[k2], slabTop - slabT * z, slabTop, '#dedad2', '#c9c5bd', '#a9a49b');
+    const front = (poly: Pt[]) => poly.reduce((b, p) => (p.x + p.y > b.x + b.y ? p : b), poly[0]);
+    const right = (poly: Pt[]) => poly.reduce((b, p) => (p.x - p.y > b.x - b.y ? p : b), poly[0]);
+    const label = (at: string, text: string) => {
+      const [x, y] = at.split(',').map(Number);
+      // (A box behind it rather than a text halo: the phone's drawing engine has no paint-order.)
+      // Kept inside the drawing: if it won't fit to the right of the point, it moves left.
+      const w = text.length * 15 * 0.66 + 8;
+      const bx = Math.max(8, Math.min(x + 8, W - 8 - w));
+      out.push(`<rect x="${n(bx)}" y="${n(y - 11)}" width="${n(w)}" height="22" rx="4" fill="#ffffff" fill-opacity="0.9" stroke="#111" stroke-width="0.8"/>`);
+      out.push(`<text x="${n(bx + 4)}" y="${n(y + 5)}" ${FONT} font-size="15" font-weight="900" fill="#111">${esc(text)}</text>`);
+    };
+    const allFoot = foots.filter((f): f is Pt[] => !!f).flat();
+    if (allFoot.length) {
+      const p = right(allFoot);
+      label(pt(p.x, p.y, Hf / 2), `FOOTING ${inch(spec.footing!.width)} × ${inch(spec.footing!.depth)}`);
+    }
+    const wp = right(walls.flat());
+    label(pt(wp.x, wp.y, Hf + wallLift + (top - Hf) / 2), `WALLS ${inch(spec.wall.thick)} × ${dim(spec.wall.height)}`);
+    l.slabs.forEach((sl, i) => {
+      const p = front(polys[i]);
+      label(pt(p.x, p.y, slabTop - (slabT * z) / 2), `SLAB ${sl.pour} · ${inch(sl.thick)}${ledge ? ` · ON ${inch(ledge.e)} LEDGE` : ''}`);
+    });
+    out.push(`<text x="14" y="${H - 10}" ${FONT} font-size="13" font-weight="700" fill="#333">PULLED APART: EACH PIECE LIFTED OFF THE ONE UNDER IT</text>`);
   }
   if (z > 1.5) out.push(`<text x="${W - 14}" y="${H - 10}" text-anchor="end" ${FONT} font-size="12" fill="#666">Height stretched to show the footing, walls and slabs</text>`);
   return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${W} ${H}" width="100%" role="img" aria-label="3D view">${out.join('')}</svg>`;

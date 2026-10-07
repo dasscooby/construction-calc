@@ -148,7 +148,7 @@ describe('the bid shows the whole job', () => {
     expect(scope.find(([k]) => k === 'Concrete')![1]).toBe('167.75 yd in 4 pours');
     expect(scope.find(([k]) => k === 'Pump truck')![1]).toBe('4 pours');
     const bid = buildBid(pumped, DEFAULT_SETTINGS, figureItems(pumped)).html;
-    for (const h of ['<h2>Scope of work</h2>', '<b>Plan</b>', '<b>3D view</b>', '<b>Typical section</b>', 'Page 1 of 5', 'Page 5 of 5']) expect(bid).toContain(h);
+    for (const h of ['<h2>Scope of work</h2>', '<b>Plan</b>', '<b>3D view</b>', '<b>3D view, pulled apart</b>', '<b>Typical section</b>', '<b>Footing and dowels</b>', 'Page 1 of 7', 'Page 7 of 7']) expect(bid).toContain(h);
   });
 
   test('"Add every part of the job" adds a line for each piece not on the bid yet', () => {

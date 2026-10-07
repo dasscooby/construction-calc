@@ -40,7 +40,9 @@ export function buildPlanSet(job: Job, s: Settings, items: FiguredItem[], paper:
   const draws: { title: string; svg: string }[] = [];
   if (d?.plan) draws.push({ title: 'Foundation plan', svg: d.plan });
   if (d?.iso) draws.push({ title: '3D view', svg: d.iso });
+  if (d?.apart) draws.push({ title: '3D view, pulled apart', svg: d.apart });
   if (d?.section) draws.push({ title: 'Typical section', svg: d.section });
+  if (d?.rebar) draws.push({ title: 'Footing and dowels', svg: d.rebar });
   if (d?.house) draws.push({ title: 'At the house', svg: d.house });
   const sheets: Sheet[] = [{ no: 'S0', title: 'Cover and notes' }, ...draws.map((x, i) => ({ no: `S${i + 1}`, title: x.title }))];
   // The plan and section call the section "1 / S1"; here it's on its own sheet.

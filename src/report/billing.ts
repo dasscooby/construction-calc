@@ -377,7 +377,9 @@ function moneyDoc(kind: 'bid' | 'bill', job: Job, s: Settings, items: FiguredIte
   const sheetNote = `${esc(job.name)} · ${esc(date)}`;
   if (drawings?.plan) blocks.push(drawingPage(drawings.plan, 'Plan', sheetNote, box));
   if (drawings?.iso) blocks.push(drawingPage(drawings.iso, '3D view', sheetNote, box));
+  if (drawings?.apart) blocks.push(drawingPage(drawings.apart, '3D view, pulled apart', sheetNote, box));
   if (drawings?.section) blocks.push(drawingPage(drawings.section, 'Typical section', sheetNote, box));
+  if (drawings?.rebar) blocks.push(drawingPage(drawings.rebar, 'Footing and dowels', sheetNote, box));
 
   const html = `<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
 <title>${esc(job.name)} – ${kind === 'bid' ? 'Bid' : 'Invoice'}</title><style>${STYLE}${docCss(s.docs)}${pageCss(box)}${drawingCss}</style></head><body>
