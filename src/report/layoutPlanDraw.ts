@@ -7,6 +7,7 @@
 
 import { ftIn } from '../tools/format';
 import type { Layout } from './foundationLayout';
+import { ledgeOf, slabDropIn } from './slabLedge';
 import { faceAt, Pt, RunResult } from './wallGraph';
 
 const n = (v: number) => Math.round(v * 10) / 10;
@@ -108,7 +109,8 @@ export function hitLayout(l: Layout, px: number, py: number): { run?: number; fa
 export function graphPlanSvg(l: Layout, info: LayoutDrawInfo): string {
   const F = planFrame(l);
   const { W, s, X, Y, planH } = F;
-  const legendH = info.compact ? 0 : 24 + 32 * (2 + (l.spec.footing ? 1 : 0) + l.slabs.length);
+  const ledge = ledgeOf(l);
+  const legendH = info.compact ? 0 : 24 + 32 * (2 + (l.spec.footing ? 1 : 0) + l.slabs.length + (l.slabs.length ? 1 : 0));
   const titleH = info.compact ? 6 : 76;
   const H = Math.round(planH + legendH + titleH);
   const path = (pts: Pt[]) => `M${pts.map((p) => `${X(p.x)} ${Y(p.y)}`).join(' L')} Z`;
@@ -141,6 +143,8 @@ export function graphPlanSvg(l: Layout, info: LayoutDrawInfo): string {
   for (const r of rects) out.push(`<path d="${path(r)}" fill="#ffffff" stroke="none"/>`);
   rects.forEach((r, i) => out.push(`<path d="${path(r)}" fill="${l.runs[i].existing ? '#d9d9d9' : 'url(#lhatch)'}" stroke="none"/>`));
   if (hl.run !== undefined && rects[hl.run]) out.push(`<path d="${path(rects[hl.run])}" fill="${HILITE}" fill-opacity="0.75" stroke="${HILITE}" stroke-width="2"/>`);
+  // Slab edges on the ledge: dashed, under the walls.
+  if (ledge && !info.compact) for (const x of ledge.slabs) out.push(`<path d="${path(x.poured)}" fill="none" stroke="#111" stroke-width="1.2" stroke-dasharray="5 4"/>`);
 
   // Run labels: name and length as measured, beside each wall, on the side away from the middle (house
   // walls: away from the middle of the house, so a shared wall's label stays in the house; inside walls
@@ -264,6 +268,13 @@ export function graphPlanSvg(l: Layout, info: LayoutDrawInfo): string {
     ]);
   }
   legend.push([`<rect x="28" y="${n(ly + 14 + legend.length * 32)}" width="44" height="18" fill="url(#ldots)" stroke="#111" stroke-width="1"/>`, 'SLAB · SIZES CLEAR, WALL FACE TO WALL FACE']);
+  if (l.slabs.length) {
+    const drop = slabDropIn(l.spec, l.slabs[0].thick);
+    legend.push([
+      ledge ? `<line x1="28" y1="${n(ly + 23 + legend.length * 32)}" x2="72" y2="${n(ly + 23 + legend.length * 32)}" stroke="#111" stroke-width="1.2" stroke-dasharray="5 4"/>` : '',
+      `TOP OF SLAB ${drop > 0 ? `${inch(drop / 12)} BELOW` : 'FLUSH WITH'} TOP OF WALL${ledge ? ` · SLAB RUNS ${inch(ledge.e)} ONTO A LEDGE IN THE WALL (DASHED)` : ''}`,
+    ]);
+  }
   for (const sl of l.slabs) {
     const rect = sl.face.rect;
     const yd = info.pourYd?.[sl.pour];

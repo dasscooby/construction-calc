@@ -49,6 +49,9 @@ export interface LayoutSpec {
   slabs: SlabSpec[];
   /** Top of slab below the top of the wall, in (blank: a basement slab sits on the footing, a stem wall slab at the top) */
   slabDropIn?: number;
+  /** Slab ledge: the wall cut back this much (in) from the bottom of the slab to the top of the wall where a slab
+   *  meets it, so the slab runs over onto it. Blank or 0 = none (layouts saved before ledges). */
+  ledgeIn?: number;
   /** What's in a bay with no slab ("container pad", "gravel"), by "addOn:bay" */
   bayLabels?: Record<string, string>;
 }

@@ -7,10 +7,11 @@ import type { JobItem } from '../lib/jobs';
 import { ALL_TOOLS } from '../tools';
 import { commasTrim, ftIn } from '../tools/format';
 import { defaultRaw, RawLength, RawValues, runTool } from '../tools/run';
-import type { ResultRow } from '../tools/types';
+import type { ResultRow, ToolContext } from '../tools/types';
 import { buildLayout, Layout, LayoutSpec } from './foundationLayout';
 import { DEFAULT_FORMS, formsRows, FormsSetup, layoutForms } from './layoutForms';
 import type { FiguredItem } from './report';
+import { ledgeOf } from './slabLedge';
 import type { Pt } from './wallGraph';
 
 export const LAYOUT_TOOL_ID = 'foundation-layout';
@@ -82,8 +83,10 @@ export function layoutChildren(item: JobItem): FiguredItem[] {
   const bends = l.totals.bends;
   const list = runList(l);
   const turns = `${l.totals.corners} corners, ${l.totals.tees} tees`;
-  const child = (suffix: string, label: string, tool: typeof footingsTool, r: RawValues, extra: ResultRow[]): FiguredItem => {
-    const res = runTool(tool, r);
+  const ledge = ledgeOf(l);
+  const inch = (ft: number) => `${commasTrim(ft * 12, 1)}"`;
+  const child = (suffix: string, label: string, tool: typeof footingsTool, r: RawValues, extra: ResultRow[], ctx?: ToolContext): FiguredItem => {
+    const res = runTool(tool, r, ctx);
     const result = res.status === 'ok' ? { ...res, result: { ...res.result, rows: [...extra, ...res.result.rows], warnings: [...(res.result.warnings ?? []), ...l.problems] } } : res;
     return { item: { ...item, id: `${item.id}:${suffix}`, toolId: tool.id, title: tool.title, label, raw: r }, tool, result, inputs: [] };
   };
@@ -105,7 +108,16 @@ export function layoutChildren(item: JobItem): FiguredItem[] {
     child('walls', 'Walls', footingsTool, wallRaw, [
       { label: 'As measured', value: `${commasTrim(l.totals.measured, 1)} ft`, note: list },
       { label: 'Along the middle', value: `${commasTrim(l.totals.middle, 1)} ft`, note: `What the concrete and bars follow · ${turns}: each wall that meets another stops at its face` },
-    ]),
+    ],
+    ledge
+      ? {
+          less: {
+            cuFt: ledge.wallLessCuFt,
+            label: 'Slab ledge',
+            note: `${inch(ledge.e)} cut back from the bottom of the slab to the top of the wall, ${commasTrim(ledge.length, 1)} ft along the slab sides`,
+          },
+        }
+      : undefined),
   );
   }
 
@@ -133,13 +145,24 @@ export function layoutChildren(item: JobItem): FiguredItem[] {
     const setup = raw.forms || DEFAULT_FORMS;
     const f = layoutForms(l, setup);
     const formsTool = ALL_TOOLS.find((x) => x.id === 'wall-forms')!;
-    if (f) out.push({ item: { ...item, id: `${item.id}:forms`, toolId: formsTool.id, title: formsTool.title, label: 'Wall forms', raw: {} }, tool: formsTool, result: { status: 'ok', result: { rows: formsRows(f, setup) } }, inputs: [] });
+    const ledgeRows: ResultRow[] = ledge
+      ? [{ label: 'Slab ledge blockout', value: `${commasTrim(ledge.length, 1)} ft`, note: `A ${inch(ledge.e)} strip on the inside forms, from the bottom of the slab to the top of the wall (${ledge.slabs.map((x) => inch(x.notchH)).filter((v, i, a) => a.indexOf(v) === i).join(', ')} tall), where a slab meets the wall` }]
+      : [];
+    if (f) out.push({ item: { ...item, id: `${item.id}:forms`, toolId: formsTool.id, title: formsTool.title, label: 'Wall forms', raw: {} }, tool: formsTool, result: { status: 'ok', result: { rows: [...formsRows(f, setup), ...ledgeRows] } }, inputs: [] });
   }
 
   // Each slab pour (one or more areas poured together), at the clear size inside the walls.
   for (const pour of [...new Set(l.slabs.map((s) => s.pour))].sort((a, b) => a - b)) {
     const these = l.slabs.filter((s) => s.pour === pour);
-    const rects = these.flatMap((s) => (s.face.rect ? [s.face.rect] : rectsOf(s.face.clear)));
+    // On a ledge it's poured out over it: a rectangle grows by the ledge each way, any other shape gets
+    // the strip as one more area (same square feet).
+    const onLedge = (s: (typeof these)[number]) => ledge?.slabs.find((x) => x.slab === l.slabs.indexOf(s));
+    const rects = these.flatMap((s) => {
+      const lg = onLedge(s);
+      const base = s.face.rect ? [s.face.rect] : rectsOf(s.face.clear);
+      if (!lg || !ledge) return base;
+      return s.face.rect ? [{ w: s.face.rect.w + 2 * ledge.e, h: s.face.rect.h + 2 * ledge.e }] : [...base, { w: lg.strip / ledge.e, h: ledge.e }];
+    });
     const slabRaw = defaultRaw(slabTool, {
       ...(raw.slab ?? {}),
       thick: toRaw(these[0].thick),
@@ -151,6 +174,15 @@ export function layoutChildren(item: JobItem): FiguredItem[] {
       child(`slab${pour}`, `Slab ${pour}: ${these.map((s) => s.name).join(' + ')}`, slabTool, slabRaw, [
         { label: 'Pour', value: `Slab ${pour}`, note: `Inside the walls: ${size}` },
         { label: 'To the outside of the walls', value: `${commasTrim(outer, 1)} sq ft`, note: 'The size it is usually bid at; yards are for what is poured inside' },
+        ...(these.some(onLedge) && ledge
+          ? [
+              {
+                label: 'On the ledge',
+                value: `${inch(ledge.e)} under the walls`,
+                note: `Clear ${size} at the top; poured ${these.map((s) => (s.face.rect ? `${ftIn(s.face.rect.w + 2 * ledge.e)} × ${ftIn(s.face.rect.h + 2 * ledge.e)}` : `${Math.round(s.face.clearArea + (onLedge(s)?.strip ?? 0)).toLocaleString()} sq ft`)).join(' + ')}`,
+              },
+            ]
+          : []),
       ]),
     );
   }

@@ -9,6 +9,7 @@ import { DocMedia, docCss, logoHtml, noticeHtml, uniqueSvgIds } from './docStyle
 import { confirmedFoundation, pourCount, pourName } from './foundation';
 import { bidOptions, refreshLines, remapLines } from './bidOptions';
 import { buildLayout, LayoutRun, LayoutSpec } from './foundationLayout';
+import { ledgeOf, slabDropIn } from './slabLedge';
 import { Block, contentWidth, drawingCss, drawingPage, footerHtml, letterPortrait, pageCss, paginate, textHeight } from './pager';
 import { builtItems, FiguredItem, itemRebarLb, jobDrawings, jobTotals, numberIn, pieceName, steelItems } from './report';
 
@@ -271,6 +272,18 @@ export function scopeOfWork(items: FiguredItem[], job: Job): [string, string][] 
     ];
     if (at >= 0) out.splice(at + 1, 0, line);
     else out.push(line);
+    // Where the slabs sit in the walls.
+    if (l.slabs.length) {
+      const drop = slabDropIn(spec, l.slabs[0].thick);
+      const ledge = ledgeOf(l);
+      const lastSlab = out.reduce((k, [name], i) => (/^Slab \d/.test(name) ? i : k), -1);
+      const where: [string, string] = [
+        'Slab in the walls',
+        `Top of slab ${drop > 0 ? `${drop}" below` : 'flush with'} the top of the wall${ledge ? ` · ${ledge.ledgeIn}" ledge cut in the walls from the bottom of the slab up; the slab runs onto it` : ''}`,
+      ];
+      if (lastSlab >= 0) out.splice(lastSlab + 1, 0, where);
+      else out.push(where);
+    }
   }
   if (yards) out.push(['Concrete', `${dec(yards, 2)} yd${pours > 1 ? ` in ${pours} pours` : ''}`]);
   if (rebar) {

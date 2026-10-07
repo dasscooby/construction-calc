@@ -215,6 +215,7 @@ export default function LayoutEditor({ job, start, preset, onClose }: { job: Job
   };
 
   // ---- Slab & pours ----
+  const [dropText, setDropText] = useState(() => (raw.layout.slabDropIn !== undefined ? String(raw.layout.slabDropIn) : ''));
   const toggleSlabAt = (spot: SlabSpot) => {
     const next = toggleSlab(raw.layout, spot);
     const on = next.slabs.length > raw.layout.slabs.length;
@@ -527,6 +528,29 @@ export default function LayoutEditor({ job, start, preset, onClose }: { job: Job
               {chip('Main slab: yes', spec.slabs.some((s) => s.at.in === 'main'), () => !spec.slabs.some((s) => s.at.in === 'main') && toggleSlabAt({ in: 'main' }), 'Main slab in the house')}
               {chip('No main slab', !spec.slabs.some((s) => s.at.in === 'main'), () => spec.slabs.some((s) => s.at.in === 'main') && toggleSlabAt({ in: 'main' }), 'No main slab')}
             </View>
+            {/* Where the slab sits in the wall: how far down, and the ledge cut into the wall for it. */}
+            {spec.slabs.length ? (
+              <>
+                <View style={styles.row2}>
+                  <NumBox
+                    label="Top of slab below top of wall"
+                    unit="in"
+                    value={dropText}
+                    onChange={setDropText}
+                    onDone={() => {
+                      const v = dropText.trim() === '' ? undefined : Math.max(0, Number(dropText) || 0);
+                      if (v !== spec.slabDropIn) commit({ ...raw.layout, slabDropIn: v }, v === undefined ? 'Slab drop back to the usual.' : `Top of slab ${v}" below the top of the wall.`);
+                    }}
+                  />
+                </View>
+                <Text style={styles.sub}>Slab ledge: the wall is cut back from the bottom of the slab up, so the slab runs onto it</Text>
+                <View style={styles.chips}>
+                  {[0, 1, 2, 3].map((v) =>
+                    chip(v ? `${v}" ledge` : 'No ledge', (spec.ledgeIn ?? 0) === v, () => commit({ ...raw.layout, ledgeIn: v }, v ? `${v}" slab ledge in the walls.` : 'No slab ledge.'), v ? `${v} inch slab ledge` : 'No slab ledge'),
+                  )}
+                </View>
+              </>
+            ) : null}
             {/* A second (third ...) slab goes in an add-on bay, its own pour unless you say otherwise. */}
             {layout.bays.length ? (
               <>
@@ -783,13 +807,13 @@ function LenBox({ label, value, onChange, autoFocus, wide }: { label: string; va
   );
 }
 
-function NumBox({ label, unit, value, onChange }: { label: string; unit: string; value: string; onChange: (v: string) => void }) {
+function NumBox({ label, unit, value, onChange, onDone }: { label: string; unit: string; value: string; onChange: (v: string) => void; onDone?: () => void }) {
   return (
     <View style={styles.field}>
       <Text style={styles.fieldLabel}>
         {label} ({unit})
       </Text>
-      <TextInput style={styles.input} value={value} onChangeText={onChange} keyboardType="decimal-pad" accessibilityLabel={`${label}, ${unit}`} />
+      <TextInput style={styles.input} value={value} onChangeText={onChange} onEndEditing={onDone} onBlur={onDone} keyboardType="decimal-pad" accessibilityLabel={`${label}, ${unit}`} />
     </View>
   );
 }

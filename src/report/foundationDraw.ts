@@ -29,7 +29,7 @@ export interface FoundationDraw {
   wallVert: { size: number; spacingIn: number } | null;
   wallHoriz: { size: number; spacingIn: number } | null;
   footing: { widthIn: number; depthIn: number; lines: number; barSize: number } | null;
-  slab: { thickIn: number; dropIn: number; steel: string; bar: { size: number; spacingIn: number } | null } | null;
+  slab: { thickIn: number; dropIn: number; steel: string; bar: { size: number; spacingIn: number } | null; /** Slab ledge cut in the wall, in */ ledgeIn?: number } | null;
   vaporBarrier: boolean;
   /** Walls that change height: pieces of the outline, each at its height (from corner A clockwise) */
   runs?: { a: Pt; b: Pt; height: number; run: number }[];
@@ -376,9 +376,15 @@ export function foundationSectionSvg(d: FoundationDraw): string {
   const conc = (x: number, y: number, w: number, h: number) =>
     out.push(`<rect x="${X(x)}" y="${Y(y)}" width="${n(w * k)}" height="${n(h * k)}" fill="#e6e3dc" stroke="#111" stroke-width="2.2"/><rect x="${X(x)}" y="${Y(y)}" width="${n(w * k)}" height="${n(h * k)}" fill="url(#conc)"/>`);
   if (d.footing) conc(fx0, fy0, fw, fd);
-  conc(0, 0, t, wallH);
+  // On a ledge the wall's slab side is cut back from the bottom of the slab to the top; the slab runs onto it.
+  const ledge = d.slab?.ledgeIn && d.slab.ledgeIn < t ? d.slab.ledgeIn : 0;
+  if (ledge) {
+    const wallPts: [number, number][] = [[0, 0], [t - ledge, 0], [t - ledge, slabBot], [t, slabBot], [t, wallH], [0, wallH]];
+    const pts = wallPts.map(([x, y]) => `${X(x)},${Y(y)}`).join(' ');
+    out.push(`<polygon points="${pts}" fill="#e6e3dc" stroke="#111" stroke-width="2.2"/><polygon points="${pts}" fill="url(#conc)"/>`);
+  } else conc(0, 0, t, wallH);
   if (d.slab) {
-    conc(t, slabTop, slabRun, d.slab.thickIn);
+    conc(t - ledge, slabTop, slabRun + ledge, d.slab.thickIn);
     // Break line where the drawing stops.
     const bx = Number(X(right));
     out.push(`<path d="M${bx} ${n(Number(Y(slabTop)) - 10)} L${bx} ${n(Number(Y((slabTop + slabBot) / 2)) - 6)} L${bx + 8} ${Y((slabTop + slabBot) / 2)} L${bx - 8} ${n(Number(Y((slabTop + slabBot) / 2)) + 6)} L${bx} ${n(Number(Y(slabBot)) + 10)}" fill="#fff" stroke="#111" stroke-width="1.6"/>`);
@@ -426,11 +432,19 @@ export function foundationSectionSvg(d: FoundationDraw): string {
   }
   if (d.slab && d.slab.dropIn > 0) dimV(right + 14, 0, slabTop, inch(d.slab.dropIn), 'R');
   if (d.slab) dimV(right + 14, slabTop, slabBot, inch(d.slab.thickIn), 'R');
+  if (ledge && d.slab) {
+    const y = slabBot + 4;
+    out.push(`<line x1="${X(t - ledge)}" y1="${Y(slabBot)}" x2="${X(t - ledge)}" y2="${Y(y + 2)}" stroke="#111" stroke-width="0.8"/>`);
+    out.push(`<line x1="${X(t - ledge)}" y1="${Y(y)}" x2="${X(t + 6)}" y2="${Y(y)}" stroke="#111" stroke-width="1"/>`);
+    for (const x of [t - ledge, t]) out.push(`<line x1="${n(Number(X(x)) - 5)}" y1="${n(Number(Y(y)) + 5)}" x2="${n(Number(X(x)) + 5)}" y2="${n(Number(Y(y)) - 5)}" stroke="#111" stroke-width="2"/>`);
+    out.push(`<text x="${n(Number(X(t + 6)) + 4)}" y="${n(Number(Y(y)) + 5)}" ${FONT} font-size="15" font-weight="700" fill="#111">${esc(inch(ledge))}</text>`);
+  }
   if (d.slab && d.slab.dropIn > 0) out.push(`<line x1="${X(t)}" y1="${Y(0)}" x2="${X(right + 18)}" y2="${Y(0)}" stroke="#111" stroke-width="0.8" stroke-dasharray="4 4"/>`);
 
   // Callouts with leaders, stacked on the right.
   const notes: { at: Pt; text: string[] }[] = [];
-  if (d.slab) notes.push({ at: { x: t + slabRun * 0.6, y: slabTop + 1 }, text: [`${inch(d.slab.thickIn)} CONCRETE SLAB`, d.slab.steel].filter(Boolean) });
+  if (d.slab) notes.push({ at: { x: t + slabRun * 0.6, y: slabTop + 1 }, text: [`${inch(d.slab.thickIn)} CONCRETE SLAB`, d.slab.steel, d.slab.dropIn > 0 ? `TOP ${inch(d.slab.dropIn)} BELOW TOP OF WALL` : 'TOP FLUSH WITH TOP OF WALL'].filter(Boolean) });
+  if (ledge && d.slab) notes.push({ at: { x: t - ledge / 2, y: slabBot - 0.5 }, text: [`${inch(ledge)} SLAB LEDGE`, `WALL ${inch(t - ledge)} ABOVE SLAB BOTTOM`] });
   notes.push({ at: { x: t * 0.7, y: wallH * 0.4 }, text: [`${inch(t)} CONCRETE WALL`, ...d.wallSteel.split(', ')].filter(Boolean) });
   if (d.footing) notes.push({ at: { x: fx0 + fw * 0.8, y: fy0 + fd * 0.5 }, text: [`${inch(fw)} × ${inch(fd)} CONT. FOOTING`, d.footing.lines ? `(${d.footing.lines}) #${d.footing.barSize} CONTINUOUS` : ''].filter(Boolean) });
   const nx = W - 236;

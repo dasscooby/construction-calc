@@ -170,7 +170,7 @@ const footings: Tool = {
     lapField(['bars']),
     ...ORDER_FIELDS,
   ],
-  compute: (inp) => {
+  compute: (inp, ctx) => {
     const t = inp.len('width');
     const h = inp.len('depth');
     if (t <= 0 || h <= 0) return { error: 'Height and thickness must be more than 0.' };
@@ -192,7 +192,9 @@ const footings: Tool = {
         note: `${inp.choice('kind') === 'footing' ? 'Centered under the wall, in from the house edge' : 'Middle of the wall'}: what the concrete and bars follow · ${run.corners} corners`,
       });
     }
-    rows.push(...concreteRows(run.centerFt * t * h, inp));
+    const less = ctx?.less && ctx.less.cuFt > 0 ? Math.min(ctx.less.cuFt, run.centerFt * t * h) : 0;
+    if (less) rows.push({ label: ctx!.less!.label, value: `−${commasTrim(less, 1)} cu ft`, note: ctx!.less!.note });
+    rows.push(...concreteRows(run.centerFt * t * h - less, inp));
     if (!inp.on('bars')) return { rows };
 
     const bar = getBar(inp.choice('barSize'));

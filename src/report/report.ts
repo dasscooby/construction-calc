@@ -24,6 +24,7 @@ import { AddOnDraw, FoundationDraw, foundationIsoSvg, foundationPlanSvg, foundat
 import { radiusSteps } from '../tools/concreteTools';
 import { radiusStepsSvg } from './stepsDraw';
 import { slabBarPlan } from '../tools/slabLayoutTool';
+import { ledgeOf, slabDropIn } from './slabLedge';
 import { LAYOUT_TOOL_ID, layoutChildren, LayoutRaw } from './layoutItems';
 import { buildLayout as buildFoundationLayout } from './foundationLayout';
 import { graphIsoSvg, graphPlanSvg } from './layoutPlanDraw';
@@ -716,7 +717,7 @@ export function layoutItemDrawings(job: Job, items: FiguredItem[], company = '',
     wallVert: bars && String(w.vSpacing ?? '').trim() ? { size: num(w.barSize, 4), spacingIn: num(w.vSpacing, 24) } : null,
     wallHoriz: bars && num(w.lines, 2) > 1 ? { size: num(w.barSize, 4), spacingIn: Math.max(6, (l.spec.wall.height * 12 - 6) / (num(w.lines, 2) - 1)) } : null,
     footing: l.spec.footing ? { widthIn: l.spec.footing.width * 12, depthIn: l.spec.footing.depth * 12, lines: ft.bars === '1' ? num(ft.lines, 2) : 0, barSize: num(ft.barSize, 4) } : null,
-    slab: l.slabs.length ? { thickIn: l.slabs[0].thick * 12, dropIn: l.spec.slabDropIn ?? (l.spec.wall.height >= 6 ? Math.round(l.spec.wall.height * 12 - l.slabs[0].thick * 12) : 0), steel: '', bar: null } : null,
+    slab: l.slabs.length ? { thickIn: l.slabs[0].thick * 12, dropIn: slabDropIn(l.spec, l.slabs[0].thick), steel: '', bar: null, ledgeIn: ledgeOf(l)?.ledgeIn } : null,
     vaporBarrier: items.some((x) => x.tool.id === 'vapor-barrier'),
     title: job.name,
     job: job.name,

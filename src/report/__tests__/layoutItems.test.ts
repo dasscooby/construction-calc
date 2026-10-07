@@ -141,7 +141,7 @@ describe('the bid shows the whole job', () => {
 
   test('scope of work lists every piece, priced or not', () => {
     const scope = scopeOfWork(figureItems(pumped), pumped);
-    expect(scope.map(([k]) => k)).toEqual(['Walls', 'Wall breakdown', 'Footings', 'Slab 1: Main slab', 'Slab 2: Add-on slab, middle bay', 'Concrete', 'Rebar', 'Pump truck']);
+    expect(scope.map(([k]) => k)).toEqual(['Walls', 'Wall breakdown', 'Footings', 'Slab 1: Main slab', 'Slab 2: Add-on slab, middle bay', 'Slab in the walls', 'Concrete', 'Rebar', 'Pump truck']);
     expect(scope.find(([k]) => k === 'Wall breakdown')![1]).toBe(`Main 280' · add-on outside walls 150' · inside walls 80' · 8" thick × 4' tall on a 16" × 10" footing`);
     expect(scope.find(([k]) => k === 'Walls')![1]).toMatch(/^510 ft as measured · 55.00 yd of concrete · [\d,]+ lb rebar$/);
     expect(scope.find(([k]) => k === 'Slab 2: Add-on slab, middle bay')![1]).toMatch(/1,861.8 sq ft poured inside the walls \(1,979.1 sq ft to the outside\)/);
