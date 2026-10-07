@@ -19,7 +19,7 @@ import {
 } from '../lib/site';
 import { fixed } from '../lib/units';
 import { commas, commasTrim, dec, ftIn, inches, pct, sqFt } from './format';
-import { tooBig } from './concreteShared';
+import { CHECK_IT, tooBig } from './concreteShared';
 import { ResultRow, Tool } from './types';
 
 /** Elevations and rod readings: decimal feet to the hundredth, like a grade rod. */
@@ -63,7 +63,12 @@ const slope: Tool = {
       { label: 'Slope', value: `${inches(slopeInPerFt(s))} per ft`, big: true },
       { label: 'Percent', value: pct(slopePercent(s), 2) },
     ];
-    return { rows };
+    const warnings: string[] = [];
+    // 2" per foot is 16.7%: far steeper than flatwork. Usually it's 2% typed with "inches per foot" picked.
+    if (hasSlope && inp.choice('slopeUnit') === 'inft' && inp.num('slope') >= 2) {
+      warnings.push(`${dec(inp.num('slope'))}" per foot is very steep. If you meant ${dec(inp.num('slope'))}%, pick “percent” under Slope in. ${CHECK_IT}`);
+    }
+    return { rows, warnings };
   },
   notes: ['1/4" per foot is about 2%. Ramps: no steeper than 1" per foot.'],
 };

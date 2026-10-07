@@ -25,9 +25,11 @@ export function tooBig(label: string, ft: number, maxFt: number): string | null 
 }
 const IN_BOX = 'Inches go in the “in” box.';
 const BIG = 'That’s bigger than usual. Check the number.';
+/** End a "did you mean…" note with this and the screen treats it like tooBig() (shown by the answer too). */
+export const CHECK_IT = 'Check the number.';
 
-/** True for a note from tooBig(): the screen also shows it next to the answer you see while typing. */
-export const isTooBig = (warning: string) => warning.endsWith(IN_BOX) || warning.endsWith(BIG);
+/** True for a likely-typo note: the screen also shows it next to the answer you see while typing. */
+export const isTooBig = (warning: string) => warning.endsWith(IN_BOX) || warning.endsWith(BIG) || warning.endsWith(CHECK_IT);
 
 /** The standard answer block: yards with waste, order amount, trucks, bags, and the before-waste number. */
 export function concreteRows(baseCuFt: number, inp: Inputs, bags = true): ResultRow[] {

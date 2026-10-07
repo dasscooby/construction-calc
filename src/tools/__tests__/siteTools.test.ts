@@ -26,6 +26,16 @@ describe('slope & fall', () => {
     expect(note(r, 'Drop')).toBe(`1' 0"`);
   });
 
+  test('2 with "inches per foot" picked asks if you meant 2%; 1/4" per foot and 2% say nothing', () => {
+    const warns = (r: ReturnType<typeof runTool>) => (r.status === 'ok' ? r.result.warnings : ['not ok']);
+    const r = runTool(tool('slope'), { run: 50, slope: 2 });
+    expect(warns(r)).toEqual(['2" per foot is very steep. If you meant 2%, pick “percent” under Slope in. Check the number.']);
+    expect(rowValue(r, 'Drop')).toBe('100"'); // 50 × 2" = 100", left as typed
+    expect(warns(runTool(tool('slope'), { run: 20, slope: '1/4' }))).toEqual([]);
+    expect(warns(runTool(tool('slope'), { run: 50, slope: 2, slopeUnit: 'pct' }))).toEqual([]);
+    expect(warns(runTool(tool('slope'), { run: 10, drop: 2 }))).toEqual([]); // a typed drop is what it is
+  });
+
   test('needs exactly one of slope or drop', () => {
     expect(runTool(tool('slope'), { run: 20 }).status).toBe('invalid');
     expect(runTool(tool('slope'), { run: 20, slope: 1, drop: 1 }).status).toBe('invalid');
