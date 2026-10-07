@@ -813,7 +813,7 @@ function NumBox({ label, unit, value, onChange, onDone }: { label: string; unit:
       <Text style={styles.fieldLabel}>
         {label} ({unit})
       </Text>
-      <TextInput style={styles.input} value={value} onChangeText={onChange} onEndEditing={onDone} onBlur={onDone} keyboardType="decimal-pad" accessibilityLabel={`${label}, ${unit}`} />
+      <TextInput style={styles.input} value={value} onChangeText={onChange} onBlur={onDone} keyboardType="decimal-pad" accessibilityLabel={`${label}, ${unit}`} />
     </View>
   );
 }
