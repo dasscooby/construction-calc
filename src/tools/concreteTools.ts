@@ -344,7 +344,7 @@ const steps: Tool = {
     const rise = inp.len('rise');
     const run = inp.len('run');
     if (rise <= 0 || run <= 0) return { error: 'Rise and run must be more than 0.' };
-    const warnings = [tooBig('Rise', rise, 1), tooBig('Run', run, 4), ...orderChecks(inp)].filter((w): w is string => !!w);
+    const warnings = [tooBig('Rise', rise, 1), tooBig('Run', run, 4), tooBig('Main diameter', inp.len('diameter'), 30), ...orderChecks(inp)].filter((w): w is string => !!w);
     const round = roundKind(inp.choice('shape'));
     if (round) {
       // Rounds stacked on one center: step k (1 = bottom) is D − 2 × (k − 1) × tread across, each one

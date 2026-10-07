@@ -660,3 +660,11 @@ test('100% waste (meant 10) gets a yellow check on every concrete tool; 10% does
   expect(w(runTool(tool('footings'), { shape: 'run', length: 40, depth: { ft: '', in: '10' }, width: { ft: '', in: '20' }, waste: 100 }))).toEqual([note]);
   expect(w(runTool(tool('slab'), { areas: [[10, 10]] }))).toEqual([]);
 });
+
+test('round steps: a 120 ft main diameter (meant 120") gets a yellow check; 10 ft does not', () => {
+  const L = (ft: string, i = '') => ({ ft, in: i });
+  const base = { shape: 'radius', steps: '3', rise: L('', '7'), run: L('1') };
+  const w = (r: ReturnType<typeof runTool>) => (r.status === 'ok' ? r.result.warnings ?? [] : ['not ok']);
+  expect(w(runTool(tool('steps'), { ...base, diameter: L('120') }))).toEqual([`Main diameter is 120' 0". That’s bigger than usual. Check the number.`]);
+  expect(w(runTool(tool('steps'), { ...base, diameter: L('10') }))).toEqual([]);
+});
