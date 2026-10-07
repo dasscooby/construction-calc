@@ -270,7 +270,7 @@ const formPressureTool: Tool = {
     const w = inp.num('weight');
     if (heightFt <= 0) return { error: 'Pour height must be more than 0.' };
     if (rate <= 0) return { error: 'Pour rate must be more than 0.' };
-    if (temp <= 32) return { error: 'Concrete temp must be above freezing.' };
+    if (temp <= 32) return { error: 'Concrete temp must be above freezing (32°F). Type it in °F.' };
     if (w <= 0) return { error: 'Concrete weight must be more than 0.' };
 
     const cc = chemistryCoefficient(inp.choice('cement') as Binder, inp.choice('retarder') === 'yes');
