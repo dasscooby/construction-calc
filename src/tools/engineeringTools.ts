@@ -157,7 +157,7 @@ const ptElongation: Tool = {
     { key: 'length', label: 'Cable length', kind: 'length' },
     { key: 'force', label: 'Jack force', kind: 'number', unit: 'kips', default: '33', help: '33 for 1/2" strand' },
     { key: 'area', label: 'Strand area', kind: 'number', unit: 'sq in', default: '0.153', help: '0.153 for 1/2" strand' },
-    { key: 'modulus', label: 'Strand E', kind: 'number', unit: 'ksi', default: '28500', help: 'From the mill cert (28,500 is typical)' },
+    { key: 'modulus', label: 'Strand E (stiffness)', kind: 'number', unit: 'ksi', default: '28500', help: 'From the mill cert (28,500 is typical)' },
     { key: 'required', label: 'Required elongation', kind: 'number', unit: 'in', optional: true, help: 'From the shop drawings' },
     { key: 'measured', label: 'Measured elongation', kind: 'number', unit: 'in', optional: true, help: 'Both ends added together' },
   ],

@@ -117,7 +117,7 @@ const slabRebar: Tool = {
     { key: 'cover', label: 'From edge', kind: 'number', unit: 'in', default: '3', help: 'Slab edge to the first bar' },
     STICK_FIELD,
     LAP_FIELD,
-    { key: 'layers', label: 'Mats', kind: 'count', default: '1', help: '2 = top and bottom' },
+    { key: 'layers', label: 'Mats (layers of bars)', kind: 'count', default: '1', help: '1 = one layer. 2 = top and bottom.' },
     { key: 'chairSpacing', label: 'Chairs every', kind: 'number', unit: 'ft', optional: true },
   ],
   compute: (inp) => {
@@ -204,7 +204,7 @@ const beamBarsTool: Tool = {
   title: 'Beam & Footing Bars',
   blurb: 'Bars running the length, laps, corner bars, sticks',
   fields: [
-    { key: 'run', label: 'Length', kind: 'length', help: 'Total length, like the whole perimeter' },
+    { key: 'run', label: 'Length', kind: 'length', help: 'Total length, like all the way around the footing' },
     { key: 'bars', label: 'Number of bars', kind: 'count', default: '4', help: '2 top + 2 bottom = 4' },
     barSizeField(3, 8, '5'),
     STICK_FIELD,
