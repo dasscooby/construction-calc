@@ -35,4 +35,34 @@ Branch: `overnight-2026-10-06` (not main, nothing sent to your phone or the stor
 - The "Cubic yards" answer shows "1.36" with the unit only in the label. Adding "cu yd" after the number would mean touching the layout reports' tests, so I left it.
 - On the web/home-screen version the tab names still get cut off at "Concr…" (the shrink-to-fit only works in the phone app).
 
+## Night of 2026-10-07
+
+Same branch, built on last night's work. Today's main (round steps, layout rebar, bids and more) is merged in. I didn't touch the layout screens.
+
+### What got better
+- More "did you mean…?" checks, all shown in yellow by the answer with the number left as typed:
+  - Slope & Fall: 2 typed with "inches per foot" picked (very steep) asks if you meant 2% and to pick "percent".
+  - Grade Rod: a rod reading over 25 ft (462 for 4.62) asks if you missed a decimal point.
+  - Forms & Stakes: a 4 ft form height (meant 4"), or stakes every 40 ft.
+  - Every concrete tool: waste over 30% (100 for 10), or a truck over 15 yd (100 for 10).
+  - Round steps: a main diameter over 30 ft.
+  - Cylinder Breaks: a break load under 1,000 lb ("If the tester shows kips, 37.7 kips = 37,700 lb") before you call a pour failed.
+  - Footing Size: soil bearing under 500 psf (15 for 1,500).
+  - Excavation: swell over 60% (250 for 25).
+- Rebar Weight: 0 bars or a 0 ft length says what to fix instead of showing 0 lb.
+- Form Pressure: a freezing temperature now says "Type it in °F" (21 °C reads as below freezing).
+- Plain words: "Mats" is now "Mats (layers of bars)" and "Strand E" is now "Strand E (stiffness)". Beam & Footing Bars says "all the way around the footing" instead of "perimeter".
+- Steps: the zero checks now work with the new round steps too.
+- New tests for the unit conversions every tool uses (feet, yards, metric, square and cubic sizes, rounding, fractions).
+
+### Tests
+- Before tonight: 476 on this branch (main alone: 459). After: 492 passing (35 suites). Typecheck clean.
+
+### Math I think might be off (nothing changed)
+- Nothing new tonight. Last night's three items (Fill & Base Rock tons, 2 stakes per corner, 10" layout footing depth) still need your answer.
+
+### Ideas for you
+- The same "did you mean inches?" check could go on Wall Forms (panel height typed in feet) and the add-on / second-slab boxes. Those were off limits, so I didn't touch them.
+- Rebar Cut List can't tell an 18" dowel typed as 18 ft from a real 18 ft bar. A "Did you mean 18 inches?" for short-bar marks would need you to say what's normal.
+
 Reply "ship it" to send to your phone, or "scrap it" to throw it away.
