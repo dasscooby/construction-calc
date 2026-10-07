@@ -21,7 +21,7 @@ import { confirmedFoundation, Foundation, foundationLines, pourName } from './fo
 import { daylightWall, splitOutline, WallSteel } from './heightRuns';
 import { concreteResult } from '../lib/concrete';
 import { AddOnDraw, FoundationDraw, foundationIsoSvg, foundationPlanSvg, foundationSectionSvg } from './foundationDraw';
-import { radiusSteps } from '../tools/concreteTools';
+import { radiusSteps, roundKind } from '../tools/concreteTools';
 import { radiusStepsSvg } from './stepsDraw';
 import { slabBarPlan } from '../tools/slabLayoutTool';
 import { footingRebarSvg } from './rebarDraw';
@@ -533,9 +533,10 @@ export function toolDrawings(toolId: string, raw: RawValues, title: string): Dra
   if (toolId === 'slab-layout') return layoutDrawings(raw, title, date);
   if (toolId === 'layout-sketch') return sketchDrawings(raw, title, date);
   if (toolId === 'footings') return footingDrawings(raw, title, date);
-  if (toolId === 'steps' && raw.shape === 'radius') {
+  const round = toolId === 'steps' ? roundKind(raw.shape) : null;
+  if (round) {
     const r = radiusSteps(Number(raw.steps) || 0, parseLength(raw.diameter as never) ?? 0, parseLength(raw.run as never) ?? 0);
-    return 'error' in r ? null : { plan: radiusStepsSvg(r.diameters, parseLength(raw.run as never) ?? 0, title) };
+    return 'error' in r ? null : { plan: radiusStepsSvg(r.diameters, parseLength(raw.run as never) ?? 0, title, round) };
   }
   return null;
 }

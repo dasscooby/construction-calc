@@ -545,3 +545,22 @@ test('radius steps: half rounds off the main diameter, 2 treads smaller each ste
   const sq = runTool(t, { steps: '4', rise: L('', '7'), run: L('', '11'), width: L('4'), waste: '10' });
   expect(rowValue(sq, 'Before waste')).toBe('0.79 cu yd');
 });
+
+test('round steps: full and quarter rounds off the main diameter, checked by hand', () => {
+  const t = CONCRETE_TOOLS.find((x) => x.id === 'steps')!;
+  const L = (ft: string, i = '') => ({ ft, in: i });
+  const base = { steps: '3', rise: L('', '7'), run: L('1'), diameter: L('10'), waste: '0' };
+  // Full: 7/12 × π/4 × (10² + 8² + 6²) = 91.63 cu ft; curved form π × 24 = 75.4 ft.
+  const full = runTool(t, { ...base, shape: 'full' });
+  expect(rowValue(full, 'Cubic feet')).toBe('91.6');
+  expect(rowValue(full, 'Curved form')).toBe('75.4 ft');
+  expect(rowValue(full, 'Step 3 (top)')).toBe(`6' 0" across`);
+  // Quarter: 7/12 × π/16 × 200 = 22.91 cu ft; curved form π/4 × 24 = 18.8 ft; sizes as reach out from the corner.
+  const q = runTool(t, { ...base, shape: 'quarter' });
+  expect(rowValue(q, 'Cubic feet')).toBe('22.9');
+  expect(rowValue(q, 'Curved form')).toBe('18.8 ft');
+  expect(rowValue(q, 'Step 1 (bottom)')).toBe(`5' 0" out from the corner`);
+  // The drawing, for each shape.
+  const { radiusStepsSvg } = require('../../report/stepsDraw') as typeof import('../../report/stepsDraw');
+  for (const kind of ['half', 'full', 'quarter'] as const) expect(radiusStepsSvg([10, 8, 6], 1, 'Front steps', kind)).toContain(`${kind.toUpperCase()} ROUND STEPS`);
+});
