@@ -71,7 +71,7 @@ describe('paper sizes', () => {
 
 describe('the plan set', () => {
   const spec: LayoutSpec = {
-    house: { length: 70, width: 40 },
+    house: { length: 70, width: 70 },
     wall: { thick: 8 / 12, height: 44 / 12 },
     footing: { width: 16 / 12, depth: 10 / 12 },
     addOns: [{ side: 'top', width: 70, depth: 40, bays: [10, null, 10] }],

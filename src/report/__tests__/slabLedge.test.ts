@@ -7,9 +7,9 @@ import { LAYOUT_TOOL_ID, LayoutRaw } from '../layoutItems';
 import { figureItems } from '../report';
 import { grow, ledgeOf } from '../slabLedge';
 
-// Test 4: 70 × 40 house, a 70 × 40 add-on off the back with 10' bays each side, 8" × 44" walls, 4" slabs.
+// Test 4 (the real job): 70 × 70 house, a 70 × 40 add-on off the back with 10' bays each side, 8" × 44" walls, 4" slabs.
 const spec = (ledgeIn?: number, slabDropIn?: number): LayoutSpec => ({
-  house: { length: 70, width: 40 },
+  house: { length: 70, width: 70 },
   wall: { thick: 8 / 12, height: 44 / 12 },
   footing: { width: 16 / 12, depth: 10 / 12 },
   addOns: [{ side: 'top', width: 70, depth: 40, bays: [10, null, 10] }],
@@ -45,13 +45,14 @@ describe('the slab ledge', () => {
   test('Test 4 by hand: 2" ledge, slab top flush with the wall top, 4" tall notches', () => {
     const lg = ledgeOf(buildLayout(spec(2)))!;
     const e = 2 / 12;
-    const main = { P: 2 * (68 + 8 / 12 + 38 + 8 / 12) }; // 68'-8" × 38'-8" clear
+    const main = { P: 2 * (68 + 8 / 12 + 68 + 8 / 12) }; // 68'-8" × 68'-8" clear: 274'-8"
     const bay = { P: 2 * (47 + 4 / 12 + 39 + 4 / 12) }; // 47'-4" × 39'-4" clear
     expect(lg.slabs.map((x) => x.perimeter)).toEqual([expect.closeTo(main.P, 6), expect.closeTo(bay.P, 6)]);
-    expect(lg.slabs[0].strip).toBeCloseTo(main.P * e + 4 * e * e, 6); // 35.89 sq ft
+    expect(lg.slabs[0].strip).toBeCloseTo(main.P * e + 4 * e * e, 6); // 45.89 sq ft
     expect(lg.slabs[1].strip).toBeCloseTo(bay.P * e + 4 * e * e, 6); // 29.00 sq ft
     expect(lg.slabs.every((x) => Math.abs(x.notchH - 4 / 12) < 1e-9)).toBe(true);
-    expect(lg.wallLessCuFt).toBeCloseTo((35.8889 + 29.0) / 3, 3); // 21.63 cu ft
+    expect(lg.length).toBeCloseTo(448, 6); // 274'-8" + 173'-4"
+    expect(lg.wallLessCuFt).toBeCloseTo((45.8889 + 29.0) / 3, 3); // 24.96 cu ft (448' × 2" × 4" + the corners)
   });
 
   test('Test 4 takeoff: before and after', () => {
@@ -60,12 +61,12 @@ describe('the slab ledge', () => {
     const wallsLess = cuFt(before, 'L:walls') - cuFt(after, 'L:walls');
     const slab1More = cuFt(after, 'L:slab1') - cuFt(before, 'L:slab1');
     const slab2More = cuFt(after, 'L:slab2') - cuFt(before, 'L:slab2');
-    expect(Math.abs(wallsLess - 21.63)).toBeLessThan(0.15); // rows are to 0.1 cu ft
-    expect(Math.abs(slab1More - 35.8889 / 3)).toBeLessThan(0.15); // 12.0 cu ft
+    expect(Math.abs(wallsLess - 24.96)).toBeLessThan(0.15); // rows are to 0.1 cu ft
+    expect(Math.abs(slab1More - 45.8889 / 3)).toBeLessThan(0.15); // 12.0 cu ft
     expect(Math.abs(slab2More - 29.0 / 3)).toBeLessThan(0.15); // 9.7 cu ft
-    expect(row(after, 'L:walls', 'Slab ledge')).toMatchObject({ value: '−21.6 cu ft' });
-    expect(row(after, 'L:slab1', 'On the ledge')!.note).toBe(`Clear 68' 8" × 38' 8" at the top; poured 69' 0" × 39' 0"`);
-    expect(row(after, 'L:forms', 'Slab ledge blockout')).toMatchObject({ value: '388 ft' });
+    expect(row(after, 'L:walls', 'Slab ledge')).toMatchObject({ value: '−25 cu ft' });
+    expect(row(after, 'L:slab1', 'On the ledge')!.note).toBe(`Clear 68' 8" × 68' 8" at the top; poured 69' 0" × 69' 0"`);
+    expect(row(after, 'L:forms', 'Slab ledge blockout')).toMatchObject({ value: '448 ft' });
     // Before-and-after orders, for the report.
     const order = (j: Job, id: string) => row(j, id, 'Order')!.value;
     console.log(
