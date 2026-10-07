@@ -16,7 +16,7 @@ import { Field, Inputs, ResultRow, Tool, WallRow } from './types';
 import { cornersAfter } from '../report/geometry';
 import { addonLayout } from './addon';
 
-import { concreteRows, CUFT_PER_CUYD, ORDER_FIELDS, tooBig } from './concreteShared';
+import { CHECK_IT, concreteRows, CUFT_PER_CUYD, ORDER_FIELDS, tooBig } from './concreteShared';
 import { slabLayout } from './slabLayoutTool';
 import { slab } from './slabTool';
 
@@ -431,6 +431,9 @@ const forms: Tool = {
     const topBoards = topNominal ? Math.ceil(lf / boardFt - 1e-9) : 0;
     const stackIn = rows * nominal + topNominal;
     const warnings: string[] = [];
+    const tall = tooBig('Form height', heightIn / 12, 3);
+    if (tall) warnings.push(tall);
+    if (spacing > 10) warnings.push(`Stakes every ${dec(spacing, 1)} ft is far apart for slab forms (4 ft is usual). ${CHECK_IT}`);
     if (topNominal && stackIn > heightIn + 1e-9) {
       warnings.push(`Those boards stack to ${dec(stackIn)}", taller than the ${dec(heightIn)}" form. Set the form height to match, or pick smaller boards.`);
     }

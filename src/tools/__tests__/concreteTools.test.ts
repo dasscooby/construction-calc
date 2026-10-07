@@ -289,6 +289,15 @@ describe('concrete cost', () => {
 });
 
 describe('forms & stakes', () => {
+  test('a 4 ft form (meant 4") and stakes every 40 ft get a yellow check; the count is left as typed', () => {
+    const w = (r: ReturnType<typeof runTool>) => (r.status === 'ok' ? r.result.warnings : ['not ok']);
+    const r = runTool(tool('forms'), { length: 40, width: 30, height: 4 });
+    expect(w(r)).toEqual(['Form height is 4 feet. Did you mean 4 inches? Inches go in the “in” box.']);
+    expect(rowValue(r, 'Rows of boards')).toBe('12 high'); // 48" of 2x4s, as typed
+    expect(w(runTool(tool('forms'), { length: 40, width: 30, stakeSpacing: 40 }))).toEqual(['Stakes every 40 ft is far apart for slab forms (4 ft is usual). Check the number.']);
+    expect(w(runTool(tool('forms'), { length: 40, width: 30 }))).toEqual([]);
+  });
+
   // 40 x 30 = 140 ft of 2x4. 140 / 16 = 8.75 → 9 boards.
   // Stakes: 40' side = 10 + 1 = 11, 30' side = 8 + 1 = 9 → 2 × 11 + 2 × 9 = 40
   test('40 x 30 slab, 4" forms', () => {
