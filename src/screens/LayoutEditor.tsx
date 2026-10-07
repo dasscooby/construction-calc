@@ -3,6 +3,7 @@
 // off, how far it comes out), + Inside walls (the bays between them, clear, wall face to wall face), and
 // Slab & pours (tap the bays that get slab). Every step can be undone; nothing asks "are you sure".
 
+import type React from 'react';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { GestureResponderEvent, LayoutChangeEvent, Modal, Pressable, ScrollView, Text, TextInput, View } from 'react-native';
 import { SvgXml } from 'react-native-svg';
@@ -13,10 +14,11 @@ import { addOnProblem, addedRuns, blankLayout, fmtFtIn, insideProblem, parseFtIn
 import { AddOnSpec, bayName, buildLayout, fillBays, Layout, LayoutSpec, SIDE_NAME, Side, sideLength, SlabSpot } from '../report/foundationLayout';
 import { layoutChildren, LayoutRaw, rollUp } from '../report/layoutItems';
 import { graphPlanSvg, hitLayout, planFrame } from '../report/layoutPlanDraw';
+import { insideCorners, PieceShape, PieceSpec } from '../report/layoutPieces';
 import { faceAt } from '../report/wallGraph';
 import { colors, onThemeChange, themed } from '../theme';
 
-type Mode = 'idle' | 'main' | 'addon-pick' | 'addon-size' | 'inside' | 'slab';
+type Mode = 'idle' | 'main' | 'addon-pick' | 'addon-size' | 'inside' | 'slab' | 'piece';
 
 const SIDES: Side[] = ['left', 'top', 'right', 'bottom'];
 const SIDE_SHORT: Record<Side, string> = { left: 'Left A–B', top: 'Back B–C', right: 'Right C–D', bottom: 'Front D–A' };
@@ -352,6 +354,7 @@ export default function LayoutEditor({ job, start, preset, onClose }: { job: Job
             {btn('+ Add-on', () => setMode('addon-pick'), { on: mode === 'addon-pick' || mode === 'addon-size', disabled: !layout })}
             {btn('+ Inside walls', () => openInside(Math.min(insideIdx, addOnsHere.length - 1)), { on: mode === 'inside', disabled: !addOnsHere.length })}
             {btn('Slab & pours', () => setMode('slab'), { on: mode === 'slab', disabled: !layout })}
+            {btn('+ Steps & pads', () => setMode('piece'), { on: mode === 'piece', disabled: !layout })}
           </View>
         </View>
 
@@ -516,6 +519,17 @@ export default function LayoutEditor({ job, start, preset, onClose }: { job: Job
             {insideIssue ? <Text style={styles.problem}>{insideIssue}</Text> : null}
             {done('Done', finishInside, !!insideIssue)}
           </View>
+        ) : null}
+
+        {/* ---- Steps & pads ---- */}
+        {mode === 'piece' && layout ? (
+          <PiecePanel
+            layout={layout}
+            onAdd={(p, text) => commit({ ...raw.layout, pieces: [...(raw.layout.pieces ?? []), p] }, text)}
+            onRemove={(i) => commit({ ...raw.layout, pieces: (raw.layout.pieces ?? []).filter((_, k) => k !== i) }, 'Taken out.')}
+            onClose={() => setMode('idle')}
+            chip={chip}
+          />
         ) : null}
 
         {/* ---- Slab & pours ---- */}
@@ -787,6 +801,123 @@ function RunList({
 }
 
 /** A length box that takes 40, 40 6, 40-6 or 40'6" and shows what it read. */
+/** Steps and pads: what it is, its shape, where it goes, its sizes; and the ones already on, to take off. */
+function PiecePanel({
+  layout,
+  onAdd,
+  onRemove,
+  onClose,
+  chip,
+}: {
+  layout: Layout;
+  onAdd: (p: PieceSpec, text: string) => void;
+  onRemove: (index: number) => void;
+  onClose: () => void;
+  chip: (label: string, on: boolean, onPress: () => void, a11y?: string) => React.ReactElement;
+}) {
+  const [kind, setKind] = useState<'steps' | 'pad'>('steps');
+  const [shape, setShape] = useState<PieceShape>('half');
+  const [wall, setWall] = useState(0);
+  const [corner, setCorner] = useState(0);
+  const [along, setAlong] = useState('');
+  const [count, setCount] = useState('3');
+  const [rise, setRise] = useState('7');
+  const [tread, setTread] = useState('12');
+  const [width, setWidth] = useState('');
+  const [depth, setDepth] = useState('');
+  const [diameter, setDiameter] = useState('');
+  const [thick, setThick] = useState('4');
+  const faces = layout.faceLines;
+  const corners = insideCorners(layout.graph.outside);
+  const face = faces[Math.min(wall, faces.length - 1)];
+  const num = (v: string) => Number(v) || 0;
+  const len = (v: string) => parseFtIn(v) ?? 0;
+  const spec: PieceSpec = {
+    kind,
+    shape,
+    ...(shape === 'quarter' ? { corner } : { wall: face?.ref, along: along.trim() ? len(along) : (face?.length ?? 0) / 2 }),
+    ...(kind === 'steps' ? { steps: Math.round(num(count)), rise: num(rise) / 12, tread: num(tread) / 12 } : { thick: num(thick) / 12 }),
+    ...(shape === 'square' ? { width: len(width), ...(kind === 'pad' ? { depth: len(depth) } : {}) } : { diameter: len(diameter) }),
+  };
+  // Check it the way the layout will: placed against this layout, any problem shown before it's added.
+  const tryIt = buildLayout({ ...layout.spec, pieces: [spec] });
+  const issue = tryIt.pieces[0]?.problem || tryIt.problems.find((p) => /^(Steps|Pad) 1/.test(p)) || '';
+  const placed = tryIt.pieces[0];
+  const shapes: [PieceShape, string][] = [['square', 'Square'], ['half', 'Half round'], ['full', 'Full round'], ['quarter', 'Quarter round']];
+  return (
+    <View style={styles.panel}>
+      <Text style={styles.panelTitle}>Steps & pads</Text>
+      <View style={styles.chips}>
+        {chip('Steps', kind === 'steps', () => setKind('steps'))}
+        {chip('Pad / landing', kind === 'pad', () => setKind('pad'))}
+      </View>
+      <View style={styles.chips}>{shapes.map(([v, lab]) => chip(lab, shape === v, () => setShape(v), `${lab} ${kind === 'steps' ? 'steps' : 'pad'}`))}</View>
+      {shape === 'quarter' ? (
+        corners.length ? (
+          <>
+            <Text style={styles.sub}>Which inside corner (its straight sides against the two walls)</Text>
+            <View style={styles.chips}>{corners.map((_, i) => chip(`Corner ${i + 1}`, corner === i, () => setCorner(i)))}</View>
+          </>
+        ) : (
+          <Text style={styles.help}>A quarter round goes in an inside corner, where an add-on meets the house. This layout has none.</Text>
+        )
+      ) : (
+        <>
+          <Text style={styles.sub}>Which wall (it goes outside it)</Text>
+          <View style={styles.chips}>{faces.map((f, i) => chip(f.name, wall === i, () => setWall(i)))}</View>
+          <View style={styles.row2}>
+            <LenBox label={`Center, from ${face?.from ?? 'its end'} (wall ${fmtFtIn(face?.length ?? 0)})`} value={along} onChange={setAlong} />
+          </View>
+        </>
+      )}
+      {kind === 'steps' ? (
+        <View style={styles.row2}>
+          <NumBox label="Steps" unit="#" value={count} onChange={setCount} />
+          <NumBox label="Rise" unit="in" value={rise} onChange={setRise} />
+          <NumBox label="Tread" unit="in" value={tread} onChange={setTread} />
+        </View>
+      ) : (
+        <View style={styles.row2}>
+          <NumBox label="Thick" unit="in" value={thick} onChange={setThick} />
+        </View>
+      )}
+      {shape === 'square' ? (
+        <View style={styles.row2}>
+          <LenBox label="Wide (along the wall)" value={width} onChange={setWidth} />
+          {kind === 'pad' ? <LenBox label="Out from the wall" value={depth} onChange={setDepth} /> : null}
+        </View>
+      ) : (
+        <View style={styles.row2}>
+          <LenBox label={kind === 'steps' ? 'Main diameter (bottom step)' : 'Diameter'} value={diameter} onChange={setDiameter} />
+        </View>
+      )}
+      {issue ? <Text style={styles.help}>{issue.replace(/^(Steps|Pad) 1:? ?/, '')}</Text> : placed ? <Text style={styles.help}>{`${placed.describe} · ${Math.round(placed.cuFt * 10) / 10} cu ft`}</Text> : null}
+      {(layout.spec.pieces ?? []).length ? <Text style={styles.panelTitle}>On the layout</Text> : null}
+      {layout.pieces.map((pc) => (
+        <View key={pc.index} style={styles.listRow}>
+          <Text style={styles.listText}>{`${pc.name}: ${pc.describe}`}</Text>
+          <Pressable onPress={() => (feel.tap(), onRemove(pc.index))} style={styles.small} accessibilityRole="button" accessibilityLabel={`Take out ${pc.name}`}>
+            <Text style={[styles.smallText, styles.danger]}>Remove</Text>
+          </Pressable>
+        </View>
+      ))}
+      <View style={styles.doneRow}>
+        <Pressable onPress={onClose} style={styles.cancel} accessibilityRole="button">
+          <Text style={styles.cancelText}>Done</Text>
+        </Pressable>
+        <Pressable
+          onPress={() => !issue && placed && onAdd(spec, `${placed.describe} added, its own pour.`)}
+          style={[styles.done, (!!issue || !placed) && styles.toolOff]}
+          accessibilityRole="button"
+          accessibilityState={{ disabled: !!issue || !placed }}
+        >
+          <Text style={styles.doneText}>{kind === 'steps' ? 'Add steps' : 'Add pad'}</Text>
+        </Pressable>
+      </View>
+    </View>
+  );
+}
+
 function LenBox({ label, value, onChange, autoFocus, wide }: { label: string; value: string; onChange: (v: string) => void; autoFocus?: boolean; wide?: boolean }) {
   const ft = parseFtIn(value);
   return (

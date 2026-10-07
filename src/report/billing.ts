@@ -9,6 +9,7 @@ import { DocMedia, docCss, logoHtml, noticeHtml, uniqueSvgIds } from './docStyle
 import { confirmedFoundation, pourCount, pourName } from './foundation';
 import { bidOptions, refreshLines, remapLines } from './bidOptions';
 import { buildLayout, LayoutRun, LayoutSpec } from './foundationLayout';
+import { LAYOUT_POUR } from './layoutItems';
 import { ledgeOf, slabDropIn } from './slabLedge';
 import { Block, contentWidth, drawingCss, drawingPage, footerHtml, letterPortrait, pageCss, paginate, textHeight } from './pager';
 import { builtItems, FiguredItem, itemRebarLb, jobDrawings, jobTotals, numberIn, pieceName, steelItems } from './report';
@@ -134,7 +135,7 @@ export function suggestLines(items: FiguredItem[], s?: Settings, job?: Job): Omi
     const lb = itemRebarLb(f);
     if (lb > 0) lines.push({ desc: `${pieceName(f, items, job)}: rebar, cut, bent and tied`, qty: String(Math.round(lb)), unit: 'lb', price: price(p?.rebarLb), src: `item:${f.item.id}:rebar` });
   }
-  const layoutPours = items.filter((x) => /:(footings|walls|slab\d+)$/.test(x.item.id)).length;
+  const layoutPours = items.filter((x) => LAYOUT_POUR.test(x.item.id)).length;
   if (job?.order?.place === 'pump') lines.push({ desc: 'Pump truck', qty: String(layoutPours || (fnd ? pourCount(fnd) : 1)), unit: 'pour', price: price(p?.pumpPour), src: 'pump' });
   lines.push({ desc: 'Labor', qty: '1', unit: 'job', price: price(p?.laborJob), src: 'labor' });
   return lines;
@@ -253,7 +254,7 @@ export function scopeOfWork(items: FiguredItem[], job: Job): [string, string][] 
     }
     if (parts.length) out.push([name, parts.join(' · ')]);
   }
-  const pours = items.filter((x) => /:(footings|walls|slab\d+)$/.test(x.item.id)).length;
+  const pours = items.filter((x) => LAYOUT_POUR.test(x.item.id)).length;
   // A foundation layout: the walls by where they are, and their size.
   const layoutItem = job.items.find((it) => it.toolId === 'foundation-layout');
   const spec = (layoutItem?.raw as { layout?: LayoutSpec } | undefined)?.layout;

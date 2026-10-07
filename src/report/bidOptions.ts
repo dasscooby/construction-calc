@@ -8,6 +8,7 @@ import type { Settings } from '../lib/settings';
 import { dec } from '../tools/format';
 import { parseLength, parseNumber, RawLength, RawWallRow } from '../tools/run';
 import { deliveredYd } from './billing';
+import { LAYOUT_POUR } from './layoutItems';
 import { confirmedFoundation, Foundation, pourCount, pourName } from './foundation';
 import { builtItems, FiguredItem, itemRebarLb, jobTotals, numberIn, pieceName, steelItems } from './report';
 
@@ -38,8 +39,8 @@ const pourList = (f: Foundation) =>
 /** "footings, walls, slab 1, slab 2" from a layout's pieces */
 const layoutPourList = (items: FiguredItem[]) =>
   items
-    .filter((x) => /:(footings|walls|slab\d+)$/.test(x.item.id))
-    .map((x) => (x.item.id.endsWith(':footings') ? 'footings' : x.item.id.endsWith(':walls') ? 'walls' : `slab ${x.item.id.match(/slab(\d+)$/)![1]}`))
+    .filter((x) => LAYOUT_POUR.test(x.item.id))
+    .map((x) => (x.item.id.endsWith(':footings') ? 'footings' : x.item.id.endsWith(':walls') ? 'walls' : /slab\d+$/.test(x.item.id) ? `slab ${x.item.id.match(/slab(\d+)$/)![1]}` : (x.item.label.split(':')[0] || 'steps').toLowerCase()))
     .join(', ');
 
 export const UNITS = ['sq ft', 'ft', 'yd', 'lb', 'tons', 'ea', 'set', 'job', 'pour', 'hr', 'day', 'lump sum'];
@@ -190,7 +191,7 @@ export function bidOptions(items: FiguredItem[], s: Settings, job?: Job): BidSou
     });
   }
   // A foundation layout knows its pours: footings, walls, each slab pour.
-  const layoutPours = items.filter((x) => /:(footings|walls|slab\d+)$/.test(x.item.id)).length;
+  const layoutPours = items.filter((x) => LAYOUT_POUR.test(x.item.id)).length;
   const pours = layoutPours || (fnd ? pourCount(fnd) : 1);
   if (layoutPours > 1) {
     layoutPourList(items)

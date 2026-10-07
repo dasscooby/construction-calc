@@ -16,6 +16,9 @@ import type { Pt } from './wallGraph';
 
 export const LAYOUT_TOOL_ID = 'foundation-layout';
 
+/** A layout's pieces that are each a pour: footings, walls, each slab pour, each step or pad. */
+export const LAYOUT_POUR = /:(footings|walls|slab\d+|piece\d+)$/;
+
 /** What a layout item saves: the layout, and the boxes for the pieces (rebar, waste, price ...). */
 export interface LayoutRaw {
   layout: LayoutSpec;
@@ -186,5 +189,42 @@ export function layoutChildren(item: JobItem): FiguredItem[] {
       ]),
     );
   }
+
+  // Steps and pads: each its own piece and pour, figured with the Steps tool (steps) or the Slab tool (pads).
+  const stepsTool = ALL_TOOLS.find((x) => x.id === 'steps')!;
+  const order = (raw.slab ?? {}) as RawValues;
+  const keep = (r: RawValues, keys: string[]) => Object.fromEntries(keys.filter((k) => r[k] !== undefined).map((k) => [k, r[k]]));
+  const firstPour = (spec.footing ? 1 : 0) + 1 + new Set(l.slabs.map((s) => s.pour)).size;
+  l.pieces
+    .filter((pc) => pc.layers.length)
+    .forEach((pc, i) => {
+      const ps = pc.spec;
+      const rows: ResultRow[] = [
+        { label: 'Pour', value: `Pour ${firstPour + i + 1}`, note: pc.describe },
+        ...(pc.curvedForm ? [{ label: 'Curved form', value: `${commasTrim(pc.curvedForm, 1)} ft`, note: ps.kind === 'steps' ? 'Each riser, bender board or ply strips' : 'Round the edge' }] : []),
+        ...(pc.straightForm ? [{ label: 'Straight form', value: `${commasTrim(pc.straightForm, 1)} ft`, note: ps.kind === 'steps' ? 'Risers across the front and both sides of each step' : 'The open edges' }] : []),
+        { label: 'Finish', value: `${commasTrim(pc.topArea, 1)} sq ft`, note: ps.kind === 'steps' ? 'Treads and the top' : 'The top' },
+      ];
+      const label = `${pc.name}: ${pc.describe.split(',')[0]}`;
+      if (ps.kind === 'steps') {
+        const r = defaultRaw(stepsTool, {
+          ...keep(order, ['waste', 'truck', 'price']),
+          shape: ps.shape === 'half' ? 'radius' : ps.shape,
+          steps: String(ps.steps ?? 1),
+          rise: toRaw(ps.rise ?? 7 / 12),
+          run: toRaw(ps.tread ?? 1),
+          ...(ps.shape === 'square' ? { width: toRaw(ps.width ?? 0) } : { diameter: toRaw(ps.diameter ?? 0) }),
+        });
+        out.push(child(`piece${i + 1}`, label, stepsTool, r, rows));
+      } else {
+        // The Slab tool by area: a square pad as its size, a round one as its area (a 1 ft wide strip).
+        const r = defaultRaw(slabTool, {
+          ...keep(order, ['waste', 'truck', 'price']),
+          thick: toRaw(ps.thick ?? 4 / 12),
+          areas: (ps.shape === 'square' ? [{ length: toRaw(ps.width ?? 0), width: toRaw(ps.depth ?? 0) }] : [{ length: toRaw(pc.topArea), width: toRaw(1) }]) as never,
+        });
+        out.push(child(`piece${i + 1}`, label, slabTool, r, rows));
+      }
+    });
   return out;
 }
