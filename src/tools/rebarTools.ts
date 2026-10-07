@@ -413,6 +413,8 @@ const rebarWeight: Tool = {
   ],
   compute: (inp) => {
     const bar = getBar(inp.choice('barSize'));
+    if (inp.count('count') < 1) return { error: 'How many must be at least 1.' };
+    if (inp.len('lengthEach') <= 0) return { error: 'Length each must be more than 0.' };
     const totalFt = inp.count('count') * inp.len('lengthEach');
     const d = bar.diaIn;
     const lapText = [40, 48, 60].map((n) => inches(up8(n * d))).join(' · ');

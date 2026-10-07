@@ -306,6 +306,8 @@ describe('rebar-weight', () => {
   test('blank length or bad count', () => {
     expect(runTool(rw, { lengthEach: { ft: '', in: '' } })).toEqual({ status: 'missing', message: 'Enter length each' });
     expect(runTool(rw, { count: '2.5' }).status).toBe('invalid');
+    expect(runTool(rw, { count: 0 })).toEqual({ status: 'invalid', message: 'How many must be at least 1.' });
+    expect(runTool(rw, { lengthEach: 0 })).toEqual({ status: 'invalid', message: 'Length each must be more than 0.' });
   });
 });
 
