@@ -31,6 +31,12 @@ export const CHECK_IT = 'Check the number.';
 /** True for a likely-typo note: the screen also shows it next to the answer you see while typing. */
 export const isTooBig = (warning: string) => warning.endsWith(IN_BOX) || warning.endsWith(BIG) || warning.endsWith(CHECK_IT);
 
+/** A waste % far past normal (100 typed for 10) doubles the order: flag it, leave it as typed. */
+export function orderChecks(inp: Inputs): string[] {
+  const waste = inp.num('waste');
+  return waste > 30 ? [`Waste is ${dec(waste, 1)}%. Most crews add 5–15%. ${CHECK_IT}`] : [];
+}
+
 /** The standard answer block: yards with waste, order amount, trucks, bags, and the before-waste number. */
 export function concreteRows(baseCuFt: number, inp: Inputs, bags = true): ResultRow[] {
   const waste = inp.num('waste');

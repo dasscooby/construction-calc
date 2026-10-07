@@ -648,3 +648,15 @@ test('round steps: full and quarter rounds off the main diameter, checked by han
   const { radiusStepsSvg } = require('../../report/stepsDraw') as typeof import('../../report/stepsDraw');
   for (const kind of ['half', 'full', 'quarter'] as const) expect(radiusStepsSvg([10, 8, 6], 1, 'Front steps', kind)).toContain(`${kind.toUpperCase()} ROUND STEPS`);
 });
+
+test('100% waste (meant 10) gets a yellow check on every concrete tool; 10% does not', () => {
+  const w = (r: ReturnType<typeof runTool>) => (r.status === 'ok' ? r.result.warnings ?? [] : ['not ok']);
+  const note = 'Waste is 100%. Most crews add 5–15%. Check the number.';
+  const r = runTool(tool('slab'), { areas: [[10, 10]], waste: 100 });
+  expect(w(r)).toEqual([note]);
+  expect(rowValue(r, 'Cubic yards')).toBe('2.47'); // 1.23 × 2, left as typed
+  expect(w(runTool(tool('piers'), { size: 1, height: 8, waste: 100 }))).toEqual([note]);
+  expect(w(runTool(tool('steps'), { steps: 3, rise: { ft: '', in: '7' }, run: { ft: '', in: '11' }, width: 4, waste: 100 }))).toEqual([note]);
+  expect(w(runTool(tool('footings'), { shape: 'run', length: 40, depth: { ft: '', in: '10' }, width: { ft: '', in: '20' }, waste: 100 }))).toEqual([note]);
+  expect(w(runTool(tool('slab'), { areas: [[10, 10]] }))).toEqual([]);
+});

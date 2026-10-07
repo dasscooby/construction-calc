@@ -9,7 +9,7 @@
 
 import { beamBars, Bar, BARS, countAlong, getBar, lapIn, LB_PER_TON, planRun, slabBarsAdvice, sticksToCut, weightLb } from '../lib/rebar';
 import { buildLayout, insetRuns } from '../report/layoutGeom';
-import { concreteRows, CUFT_PER_CUYD, ORDER_FIELDS, tooBig } from './concreteShared';
+import { concreteRows, CUFT_PER_CUYD, ORDER_FIELDS, orderChecks, tooBig } from './concreteShared';
 import { commas, commasTrim, cuYd, dec, ftIn, inches, lb, sqFt, tons } from './format';
 import { ChoiceField, ResultRow, Tool } from './types';
 
@@ -315,6 +315,7 @@ export const slab: Tool = {
     }
 
     rows.push(...concreteRows(totalCuFt, inp));
+    warnings.push(...orderChecks(inp));
 
     // ---- Rebar ----
     const slabRebar = inp.on('slabRebar');

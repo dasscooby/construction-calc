@@ -16,7 +16,7 @@ import { Field, Inputs, ResultRow, Tool, WallRow } from './types';
 import { cornersAfter } from '../report/geometry';
 import { addonLayout } from './addon';
 
-import { CHECK_IT, concreteRows, CUFT_PER_CUYD, ORDER_FIELDS, tooBig } from './concreteShared';
+import { CHECK_IT, concreteRows, CUFT_PER_CUYD, ORDER_FIELDS, orderChecks, tooBig } from './concreteShared';
 import { slabLayout } from './slabLayoutTool';
 import { slab } from './slabTool';
 
@@ -184,6 +184,7 @@ const footings: Tool = {
       tooBig(isFooting ? 'Footing thickness' : 'Wall height', h, isFooting ? 4 : 20),
       inp.choice('shape') === 'rect' ? tooBig('House length', inp.len('bLength'), 400) : null,
       inp.choice('shape') === 'rect' ? tooBig('House width', inp.len('bWidth'), 400) : null,
+      ...orderChecks(inp),
     ].filter((w): w is string => !!w);
     const rows: ResultRow[] = [];
     if (run.addon) {
@@ -285,7 +286,7 @@ const piers: Tool = {
       each = columnCuFt(d, h, 1);
     }
     rows.push({ label: 'Each pier', value: `${dec(each, 2)} cu ft`, note: cuYd(each / CUFT_PER_CUYD) });
-    const warnings = [tooBig('Diameter', d, 6), tooBig('Depth', h, 100)].filter((w): w is string => !!w);
+    const warnings = [tooBig('Diameter', d, 6), tooBig('Depth', h, 100), ...orderChecks(inp)].filter((w): w is string => !!w);
     return { rows: [...rows, ...concreteRows(each * qty, inp)], warnings };
   },
   notes: ['Drilled holes are rarely perfect. Many crews use more waste on piers.'],
@@ -343,7 +344,7 @@ const steps: Tool = {
     const rise = inp.len('rise');
     const run = inp.len('run');
     if (rise <= 0 || run <= 0) return { error: 'Rise and run must be more than 0.' };
-    const warnings = [tooBig('Rise', rise, 1), tooBig('Run', run, 4)].filter((w): w is string => !!w);
+    const warnings = [tooBig('Rise', rise, 1), tooBig('Run', run, 4), ...orderChecks(inp)].filter((w): w is string => !!w);
     const round = roundKind(inp.choice('shape'));
     if (round) {
       // Rounds stacked on one center: step k (1 = bottom) is D − 2 × (k − 1) × tread across, each one
