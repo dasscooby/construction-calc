@@ -191,6 +191,7 @@ export default function SettingsScreen({ onClose }: { onClose: () => void }) {
           <Field label="Base rock" unit="$/ton" value={s.prices.baseTon} placeholder="none" onChange={(v) => setPrice('baseTon', v)} />
           <Field label="Vapor barrier" unit="$/sq ft" value={s.prices.barrierSqFt} placeholder="none" onChange={(v) => setPrice('barrierSqFt', v)} />
           <Field label="Dowels" unit="$ each" value={s.prices.dowelEa} placeholder="none" onChange={(v) => setPrice('dowelEa', v)} />
+          <Field label="Anchor bolts" unit="$ each" value={s.prices.boltEa} placeholder="none" onChange={(v) => setPrice('boltEa', v)} />
           <Field label="Pump truck" unit="$/pour" value={s.prices.pumpPour} placeholder="none" onChange={(v) => setPrice('pumpPour', v)} />
           <Text style={styles.label}>Bids and bills</Text>
           <Field label="Sales tax" unit="%" value={s.prices.taxPct} placeholder="0" onChange={(v) => setPrice('taxPct', v)} />

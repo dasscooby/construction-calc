@@ -7,6 +7,7 @@
 // C back right, D front right. On the plan the back is up.
 
 import { FaceLine, PieceSpec, PlacedPiece, placePieces } from './layoutPieces';
+import type { LayoutRebar } from './layoutRebar';
 import { faceAt, Face, GraphResult, Pt, Run, solveGraph } from './wallGraph';
 
 /** Side of the main house, on the plan: top = back (B–C), right = C–D, bottom = front (D–A), left = A–B. */
@@ -57,6 +58,10 @@ export interface LayoutSpec {
   bayLabels?: Record<string, string>;
   /** Steps and pads outside the walls, each its own pour */
   pieces?: PieceSpec[];
+  /** The rebar and anchor bolts, as set (none until you add them; layouts saved before this have none) */
+  rebar?: LayoutRebar;
+  /** "No rebar yet" put away on purpose */
+  rebarWarnOff?: boolean;
 }
 
 export type EndText = string;

@@ -156,6 +156,11 @@ export function bidOptions(items: FiguredItem[], s: Settings, job?: Job): BidSou
     if (dowels) {
       out.push({ src: `${src}:dowels`, what: `${name}: dowels drilled and epoxied`, group: 'Rebar and dowels', measures: [{ id: 'count', label: `How many (${numberIn(dowels.value)})`, qty: numberIn(dowels.value), unit: 'ea' }], prices: { ea: price(p.dowelEa) } });
     }
+    const bolts = rowOf(f, 'Anchor bolts');
+    if (bolts) {
+      const kind = bolts.note?.split(' with ')[0] ?? 'J-bolt';
+      out.push({ src: `${src}:bolts`, what: `${name}: anchor bolts set (${kind}s, nuts and washers)`, group: 'Rebar and dowels', measures: [{ id: 'count', label: `How many (${numberIn(bolts.value)})`, qty: numberIn(bolts.value), unit: 'ea' }], prices: { ea: price(p.boltEa) } });
+    }
   }
 
   for (const f of steelItems(built)) {

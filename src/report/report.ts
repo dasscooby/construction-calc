@@ -30,6 +30,7 @@ import { LAYOUT_TOOL_ID, layoutChildren, LayoutRaw } from './layoutItems';
 import { buildLayout as buildFoundationLayout } from './foundationLayout';
 import { graphIsoSvg, graphPlanSvg } from './layoutPlanDraw';
 import { slabBarsAdvice } from '../lib/rebar';
+import { layoutSteel, LayoutSteel, spotKey } from './layoutRebar';
 
 export interface FiguredItem {
   item: JobItem;
@@ -48,6 +49,9 @@ export interface Totals {
   fillers: Map<string, number>;
   insideCorners: number;
   ties: number;
+  /** Anchor bolts, and what kind */
+  bolts: number;
+  boltSize: string;
 }
 
 /** First number in a value like "16.50 yd", "$2,475.00", "about 351", "565 lb". */
@@ -188,6 +192,8 @@ function rawTotals(items: FiguredItem[]): Totals {
     fillers: new Map(),
     insideCorners: 0,
     ties: 0,
+    bolts: 0,
+    boltSize: '',
   };
   // A cut list sent from Slab Layout is that slab's steel, cut up: count it once, from the cut list.
   const cutFromLayout = items.some((f) => f.tool.id === 'cut-list' && f.item.raw.from === 'slab-layout' && f.result.status === 'ok');
@@ -219,6 +225,11 @@ function rawTotals(items: FiguredItem[]): Totals {
       }
       t.insideCorners += numberIn(row('Inside corners (4×4)')?.value ?? '0');
       t.ties += numberIn(row('Ties')?.value ?? '0');
+    }
+    const bolts = row('Anchor bolts');
+    if (bolts) {
+      t.bolts += numberIn(bolts.value);
+      t.boltSize ||= bolts.note?.split(' with ')[0] ?? '';
     }
     if (!steel) continue;
     if (row('Weight') && / lb$/.test(row('Weight')!.value)) t.rebarLb += numberIn(row('Weight')!.value);
@@ -663,6 +674,13 @@ const REBAR_ROWS = new Set([
   'Stirrups',
   'Ties',
   'Corner bars',
+  'Inside walls: Vertical bars',
+  'Inside walls: Horizontal bars',
+  'Anchor bolts',
+  'Nose bars',
+  'Pad bars',
+  'Wire mesh',
+  'Chairs',
 ]);
 const REBAR_TOOLS = ['slab-rebar', 'beam-bars', 'stirrups', 'cut-list', 'dowels'];
 
@@ -691,7 +709,7 @@ export interface RebarLine {
 export function rebarSchedule(items: FiguredItem[], job?: Job): RebarLine[] {
   const out: RebarLine[] = [];
   for (const f of steelItems(builtItems(items, job).items)) {
-    if (f.result.status !== 'ok' || (!itemRebarLb(f) && !f.result.result.rows.some((r) => r.label === 'Dowels'))) continue;
+    if (f.result.status !== 'ok' || (!itemRebarLb(f) && !f.result.result.rows.some((r) => ['Dowels', 'Anchor bolts', 'Wire mesh'].includes(r.label)))) continue;
     const where = pieceName(f, items, job);
     for (const r of f.result.result.rows) {
       const isRebar = REBAR_ROWS.has(r.label) || (REBAR_TOOLS.includes(f.tool.id) && !/sticks|Weight|Sticks to order|Lap$|Total footage|Chairs/.test(r.label));
@@ -718,15 +736,51 @@ export function layoutItemDrawings(job: Job, items: FiguredItem[], company = '',
   const ft = raw.footing ?? {};
   const num = (v: unknown, d: number) => parseNumber(String(v ?? '')) ?? d;
   const bars = w.bars === '1';
+  // The layout's own rebar, once it's set: what the section and the footing view show.
+  const set = l.spec.rebar;
+  let st: LayoutSteel | null = null;
+  try {
+    st = set ? layoutSteel(l, set) : null;
+  } catch {
+    st = null;
+  }
+  const slab0 = l.slabs[0] ? set?.slabs[spotKey(l.slabs[0].at)] : undefined;
+  const wallIn = l.spec.wall.height * 12;
   const d: FoundationDraw = {
     outline: [],
     wallIn: l.spec.wall.thick * 12,
     wallFt: l.spec.wall.height,
-    wallSteel: bars && String(w.vSpacing ?? '').trim() ? `#${num(w.barSize, 4)} VERT. @ ${n2(num(w.vSpacing, 24))}" O.C.` : '',
-    wallVert: bars && String(w.vSpacing ?? '').trim() ? { size: num(w.barSize, 4), spacingIn: num(w.vSpacing, 24) } : null,
-    wallHoriz: bars && num(w.lines, 2) > 1 ? { size: num(w.barSize, 4), spacingIn: Math.max(6, (l.spec.wall.height * 12 - 6) / (num(w.lines, 2) - 1)) } : null,
-    footing: l.spec.footing ? { widthIn: l.spec.footing.width * 12, depthIn: l.spec.footing.depth * 12, lines: ft.bars === '1' ? num(ft.lines, 2) : 0, barSize: num(ft.barSize, 4) } : null,
-    slab: l.slabs.length ? { thickIn: l.slabs[0].thick * 12, dropIn: slabDropIn(l.spec, l.slabs[0].thick), steel: '', bar: null, ledgeIn: ledgeOf(l)?.ledgeIn } : null,
+    wallSteel: set
+      ? [
+          set.vert.spacingIn > 0 ? `#${set.vert.size} VERT. @ ${n2(set.vert.spacingIn)}" O.C.` : '',
+          st && st.rows > 0 ? (set.horiz.rows === 'topMid' ? `#${set.horiz.size} HORIZ. TOP + MID` : `(${st.rows}) #${set.horiz.size} HORIZ.`) : '',
+          st && st.bolts.total ? `${set.bolts.size.toUpperCase()}S @ ${n2(set.bolts.spacingFt)}' O.C.` : '',
+        ]
+          .filter(Boolean)
+          .join(', ')
+      : bars && String(w.vSpacing ?? '').trim()
+        ? `#${num(w.barSize, 4)} VERT. @ ${n2(num(w.vSpacing, 24))}" O.C.`
+        : '',
+    wallVert: set ? (set.vert.spacingIn > 0 ? { size: set.vert.size, spacingIn: set.vert.spacingIn } : null) : bars && String(w.vSpacing ?? '').trim() ? { size: num(w.barSize, 4), spacingIn: num(w.vSpacing, 24) } : null,
+    wallHoriz: set
+      ? st && st.rows > 0
+        ? { size: set.horiz.size, spacingIn: st.rows > 1 ? Math.max(6, (wallIn - 6) / (st.rows - 1)) : wallIn }
+        : null
+      : bars && num(w.lines, 2) > 1
+        ? { size: num(w.barSize, 4), spacingIn: Math.max(6, (l.spec.wall.height * 12 - 6) / (num(w.lines, 2) - 1)) }
+        : null,
+    footing: l.spec.footing
+      ? { widthIn: l.spec.footing.width * 12, depthIn: l.spec.footing.depth * 12, lines: set ? set.footing.bars : ft.bars === '1' ? num(ft.lines, 2) : 0, barSize: set ? set.footing.size : num(ft.barSize, 4) }
+      : null,
+    slab: l.slabs.length
+      ? {
+          thickIn: l.slabs[0].thick * 12,
+          dropIn: slabDropIn(l.spec, l.slabs[0].thick),
+          steel: !slab0 ? '' : slab0.kind === 'grid' ? `#${slab0.size} @ ${n2(slab0.spacingIn)}" O.C. E.W.${slab0.chairsFt ? ' ON CHAIRS' : ''}` : slab0.kind === 'mesh' ? `WIRE MESH${slab0.chairsFt ? ' ON CHAIRS' : ''}` : 'NO STEEL',
+          bar: slab0?.kind === 'grid' ? { size: slab0.size, spacingIn: slab0.spacingIn } : null,
+          ledgeIn: ledgeOf(l)?.ledgeIn,
+        }
+      : null,
     vaporBarrier: items.some((x) => x.tool.id === 'vapor-barrier'),
     title: job.name,
     job: job.name,
@@ -735,11 +789,11 @@ export function layoutItemDrawings(job: Job, items: FiguredItem[], company = '',
     kind: 'Foundation',
   };
   return {
-    plan: graphPlanSvg(l, { title: 'Foundation layout', job: job.name, company, date, pourYd, highlight }),
+    plan: graphPlanSvg(l, { title: 'Foundation layout', job: job.name, company, date, pourYd, highlight, bolts: st?.bolts.total ? { spots: st.bolts.runs.flatMap((b) => b.spots), text: `${set!.bolts.size.toUpperCase()} @ ${n2(set!.bolts.spacingFt)}' O.C. MAX, ${n2(set!.bolts.endIn)}" FROM ENDS · ${st.bolts.total} TOTAL` } : undefined }),
     iso: graphIsoSvg(l, highlight),
     apart: graphIsoSvg(l, {}, { apart: true }),
     section: foundationSectionSvg(d),
-    rebar: rebarOf(d, job.name),
+    rebar: d.footing ? footingRebarSvg({ wallIn: d.wallIn, wallFt: d.wallFt, footing: d.footing, vert: d.wallVert, job: job.name, ...(st && set ? { vertCutFt: st.vertCutFt, hookIn: st.hookFt * 12, lapIn: (set.lapDia * set.footing.size) / 8 } : {}) }) : undefined,
   };
 }
 
@@ -797,6 +851,7 @@ function totalsRows(t: Totals): { label: string; value: string }[] {
   for (const [k, v] of [...t.fillers].sort((a, b) => inchesOf(b[0]) - inchesOf(a[0]))) rows.push({ label: k, value: commas(v) });
   if (t.insideCorners) rows.push({ label: 'Inside corners (4×4)', value: commas(t.insideCorners) });
   if (t.ties) rows.push({ label: 'Ties', value: `about ${commas(t.ties)}` });
+  if (t.bolts) rows.push({ label: `Anchor bolts${t.boltSize ? ` (${t.boltSize}s, nuts and washers)` : ''}`, value: commas(t.bolts) });
   return rows;
 }
 
@@ -818,6 +873,7 @@ export function buildReport(job: Job, s: Settings, opts: { now?: Date; crew?: bo
   const steelTotals: [string, string][] = [
     ...[...totals.sticks].map(([k, v]): [string, string] => [`${k} to load`, commas(v)]),
     ...(totals.rebarLb ? [['Rebar weight', `${commas(totals.rebarLb)} lb (${dec(totals.rebarLb / 2000, 2)} tons)`] as [string, string]] : []),
+    ...(totals.bolts ? [[`Anchor bolts${totals.boltSize ? ` (${totals.boltSize}s)` : ''}`, commas(totals.bolts)] as [string, string]] : []),
   ];
   const company = companyLine(s);
   const drawings = jobDrawings(job, items, s.company.name);

@@ -122,6 +122,9 @@ export function suggestLines(items: FiguredItem[], s?: Settings, job?: Job): Omi
     // Dowels into the house or an existing slab, from a slab.
     const dowels = rows.find((r) => r.label === 'Dowels');
     if (dowels) lines.push({ desc: `${name}: dowels drilled and epoxied`, qty: String(numberIn(dowels.value)), unit: 'ea', price: price(p?.dowelEa), src: `${src}:dowels` });
+    // Anchor bolts in the walls of a foundation layout.
+    const bolts = rows.find((r) => r.label === 'Anchor bolts');
+    if (bolts) lines.push({ desc: `${name}: anchor bolts set (${bolts.note?.split(' with ')[0] ?? 'J-bolt'}s, nuts and washers)`, qty: String(numberIn(bolts.value)), unit: 'ea', price: price(p?.boltEa), src: `${src}:bolts` });
   }
   const delivered = deliveredYd(job);
   if (delivered !== null) {
@@ -227,6 +230,8 @@ export function scopeOfWork(items: FiguredItem[], job: Job): [string, string][] 
   const row = (f: FiguredItem, label: string) => (f.result.status === 'ok' ? f.result.result.rows.find((r) => r.label === label) : undefined);
   let rebar = 0;
   let yards = 0;
+  let boltCount = 0;
+  let boltText = '';
   for (const f of items) {
     if (f.result.status !== 'ok' || f.item.id.endsWith(':forms')) continue;
     const name = f.item.label || f.tool.title;
@@ -247,6 +252,14 @@ export function scopeOfWork(items: FiguredItem[], job: Job): [string, string][] 
     if (lb > 0) {
       parts.push(`${commas(Math.round(lb))} lb rebar`);
       rebar += lb;
+    }
+    const mesh = row(f, 'Wire mesh');
+    if (mesh) parts.push(`wire mesh, ${mesh.value}`);
+    const bolts = row(f, 'Anchor bolts');
+    if (bolts) {
+      parts.push(`${bolts.value} anchor bolts`);
+      boltCount += numberIn(bolts.value);
+      boltText ||= bolts.note ?? '';
     }
     if (!parts.length) {
       const big = f.result.result.rows.find((r) => r.big);
@@ -293,6 +306,7 @@ export function scopeOfWork(items: FiguredItem[], job: Job): [string, string][] 
       .map((f) => `${f.item.label || f.tool.title} ${commas(Math.round(itemRebarLb(f)))} lb`);
     out.push(['Rebar', `${commas(Math.round(rebar))} lb, cut, bent and tied${by.length > 1 ? ` (${by.join(' · ')})` : ''}`]);
   }
+  if (boltCount) out.push(['Anchor bolts', `${commas(boltCount)}: ${boltText.split(' · ').slice(0, 2).join(', ')}`]);
   if (job.order?.place === 'pump') out.push(['Pump truck', `${pours > 1 ? `${pours} pours` : 'for the pour'}`]);
   return out;
 }

@@ -45,6 +45,8 @@ export interface Settings {
     baseTon: string;
     barrierSqFt: string;
     dowelEa: string;
+    /** Anchor bolts, set in the wet wall */
+    boltEa: string;
     pumpPour: string;
     /** Sales tax %, put on every new bid */
     taxPct: string;
@@ -80,6 +82,7 @@ export const DEFAULT_SETTINGS: Settings = {
     baseTon: '',
     barrierSqFt: '',
     dowelEa: '',
+    boltEa: '',
     pumpPour: '',
     taxPct: '',
     depositPct: '',

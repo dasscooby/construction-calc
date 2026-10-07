@@ -26,6 +26,7 @@ import type { ConcreteOrder } from '../lib/jobs';
 import { buildReport, figureItems, FiguredItem, foundationDrawings, jobTotals, layoutItemDrawings, pieceName } from '../report/report';
 import { buildLayout } from '../report/foundationLayout';
 import { LayoutRaw, runList } from '../report/layoutItems';
+import { noSteelWarning, withRebar } from '../report/layoutRebar';
 import { fmtFtIn, Start, startFromJob } from '../lib/layoutEdit';
 import { mergeSummary, pickBackup, shareBackup } from '../lib/backup';
 import { nav } from '../lib/nav';
@@ -822,6 +823,31 @@ function BuildLayoutCard({ job, figured, onOpen }: { job: Job; figured: FiguredI
   );
 }
 
+/**
+ * A layout with pieces that have no rebar or bolts set yet: says so, and one tap adds them with the usual
+ * (changeable after, in the layout's Rebar & bolts), or puts the warning away. Nothing is added on its own.
+ */
+function NoSteelNote({ job, compact }: { job: Job; compact?: boolean }) {
+  const it = job.items.find((x) => x.toolId === 'foundation-layout');
+  const raw = it?.raw as unknown as LayoutRaw | undefined;
+  const warn = useMemo(() => (raw?.layout?.house?.length ? noSteelWarning(buildLayout(raw.layout), raw) : ''), [raw]);
+  if (!raw || !warn) return null;
+  const save = (layout: LayoutRaw['layout']) => jobStore.saveLayout(job.id, { ...raw, layout } as never);
+  return (
+    <View style={[styles.overlap, styles.lineGap]}>
+      <Text style={styles.warn}>{warn}</Text>
+      {compact ? <Text style={styles.help}>The bid has no rebar or anchor bolt lines for these.</Text> : null}
+      <Pressable onPress={() => (feel.success(), save(withRebar(raw.layout, raw)))} style={[styles.primary, styles.wide]} accessibilityRole="button">
+        <Text style={styles.primaryText}>Add rebar & bolts</Text>
+        <Text style={styles.primarySub}>The usual, changeable after in the layout: (2) #4 footing, #4 @ 24" walls, #4 @ 18" slabs, 1/2" J-bolts @ 6'</Text>
+      </Pressable>
+      <Pressable onPress={() => (feel.tap(), save({ ...raw.layout, rebarWarnOff: true }))} style={styles.linkBtn} accessibilityRole="button">
+        <Text style={styles.linkText}>None on this job, stop asking</Text>
+      </Pressable>
+    </View>
+  );
+}
+
 /** The job's foundation layout: plan, runs, pours, and the way back into the editor. */
 function LayoutCard({ job, figured, onEdit, replacedCount }: { job: Job; figured: FiguredItem[]; onEdit: () => void; replacedCount: number }) {
   const prefs = useSettings();
@@ -849,6 +875,7 @@ function LayoutCard({ job, figured, onEdit, replacedCount }: { job: Job; figured
               {p}
             </Text>
           ))}
+          <NoSteelNote job={job} />
         </>
       ) : null}
       {drawings ? (
@@ -1103,6 +1130,7 @@ function Prices({ job, figured }: { job: Job; figured: FiguredItem[] }) {
   return (
     <>
       <Text style={styles.section}>Bid and bill</Text>
+      <NoSteelNote job={job} compact />
       <TextInput
         style={[styles.field, styles.customer]}
         value={job.customer ?? ''}

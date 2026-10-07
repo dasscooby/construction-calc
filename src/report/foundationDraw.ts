@@ -448,8 +448,11 @@ export function foundationSectionSvg(d: FoundationDraw): string {
   notes.push({ at: { x: t * 0.7, y: wallH * 0.4 }, text: [`${inch(t)} CONCRETE WALL`, ...d.wallSteel.split(', ')].filter(Boolean) });
   if (d.footing) notes.push({ at: { x: fx0 + fw * 0.8, y: fy0 + fd * 0.5 }, text: [`${inch(fw)} × ${inch(fd)} CONT. FOOTING`, d.footing.lines ? `(${d.footing.lines}) #${d.footing.barSize} CONTINUOUS` : ''].filter(Boolean) });
   const nx = W - 236;
+  // Each note as tall as its lines, stacked down the right side, all kept above the title line.
+  const tall = notes.map((note) => note.text.length * 20 + 30);
+  let ny = Math.min(190, H - 62 - 16 - tall.reduce((s, h) => s + h, 0) + 30);
   notes.forEach((note, i) => {
-    const ny = 190 + i * 115;
+    if (i) ny += tall[i - 1];
     out.push(`<polyline points="${X(note.at.x)},${Y(note.at.y)} ${nx - 14},${ny - 6} ${nx - 4},${ny - 6}" fill="none" stroke="#111" stroke-width="1.2"/>`);
     out.push(`<circle cx="${X(note.at.x)}" cy="${Y(note.at.y)}" r="3" fill="#111"/>`);
     note.text.forEach((l, j) => out.push(`<text x="${nx}" y="${n(ny + j * 20)}" ${FONT} font-size="${j === 0 ? 15 : 13}" font-weight="${j === 0 ? 800 : 500}" fill="#111">${esc(l)}</text>`));

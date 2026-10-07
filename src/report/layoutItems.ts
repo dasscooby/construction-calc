@@ -11,6 +11,7 @@ import type { ResultRow, ToolContext } from '../tools/types';
 import { buildLayout, Layout, LayoutSpec } from './foundationLayout';
 import { DEFAULT_FORMS, formsRows, FormsSetup, layoutForms } from './layoutForms';
 import type { FiguredItem } from './report';
+import { layoutSteel, LayoutSteel, PieceSteel } from './layoutRebar';
 import { ledgeOf } from './slabLedge';
 import type { Pt } from './wallGraph';
 
@@ -88,9 +89,19 @@ export function layoutChildren(item: JobItem): FiguredItem[] {
   const turns = `${l.totals.corners} corners, ${l.totals.tees} tees`;
   const ledge = ledgeOf(l);
   const inch = (ft: number) => `${commasTrim(ft * 12, 1)}"`;
-  const child = (suffix: string, label: string, tool: typeof footingsTool, r: RawValues, extra: ResultRow[], ctx?: ToolContext): FiguredItem => {
+  // The layout's own rebar and bolts, once they're set. Before that, the old boxes, as they were.
+  let steel: LayoutSteel | null = null;
+  let steelProblem = '';
+  try {
+    steel = spec.rebar ? layoutSteel(l, spec.rebar) : null;
+  } catch (e) {
+    steelProblem = e instanceof Error ? e.message : String(e);
+  }
+  const own = !!spec.rebar;
+  const child = (suffix: string, label: string, tool: typeof footingsTool, r: RawValues, extra: ResultRow[], ctx?: ToolContext, ps?: PieceSteel | null): FiguredItem => {
     const res = runTool(tool, r, ctx);
-    const result = res.status === 'ok' ? { ...res, result: { ...res.result, rows: [...extra, ...res.result.rows], warnings: [...(res.result.warnings ?? []), ...l.problems] } } : res;
+    const warnings = [...(res.status === 'ok' ? (res.result.warnings ?? []) : []), ...l.problems, ...(steelProblem && suffix === 'walls' ? [steelProblem] : [])];
+    const result = res.status === 'ok' ? { ...res, result: { ...res.result, rows: [...extra, ...res.result.rows, ...(ps?.rows ?? [])], warnings } } : res;
     return { item: { ...item, id: `${item.id}:${suffix}`, toolId: tool.id, title: tool.title, label, raw: r }, tool, result, inputs: [] };
   };
 
@@ -99,6 +110,7 @@ export function layoutChildren(item: JobItem): FiguredItem[] {
   if (l.totals.measured > 0) {
   const wallRaw = defaultRaw(footingsTool, {
     ...(raw.wall ?? {}),
+    ...(own ? { bars: '' } : {}),
     kind: 'wall',
     shape: 'run',
     length: toRaw(l.totals.middle),
@@ -120,7 +132,8 @@ export function layoutChildren(item: JobItem): FiguredItem[] {
             note: `${inch(ledge.e)} cut back from the bottom of the slab to the top of the wall, ${commasTrim(ledge.length, 1)} ft along the slab sides`,
           },
         }
-      : undefined),
+      : undefined,
+    steel?.walls),
   );
   }
 
@@ -128,6 +141,7 @@ export function layoutChildren(item: JobItem): FiguredItem[] {
   if (spec.footing && l.totals.footingMiddle > 0) {
     const footRaw = defaultRaw(footingsTool, {
       ...(raw.footing ?? {}),
+      ...(own ? { bars: '' } : {}),
       kind: 'footing',
       shape: 'run',
       length: toRaw(l.totals.footingMiddle),
@@ -139,7 +153,7 @@ export function layoutChildren(item: JobItem): FiguredItem[] {
     out.push(
       child('footings', 'Footings', footingsTool, footRaw, [
         { label: 'Along the middle', value: `${commasTrim(l.totals.footingMiddle, 1)} ft`, note: `Centered under the walls · ${turns}: each footing that meets another stops at its edge` },
-      ]),
+      ], undefined, steel?.footing),
     );
   }
 
@@ -168,6 +182,7 @@ export function layoutChildren(item: JobItem): FiguredItem[] {
     });
     const slabRaw = defaultRaw(slabTool, {
       ...(raw.slab ?? {}),
+      ...(own ? { slabRebar: '', footBars: '' } : {}),
       thick: toRaw(these[0].thick),
       areas: rects.map((r) => ({ length: toRaw(r.w), width: toRaw(r.h) })) as never,
     });
@@ -186,7 +201,7 @@ export function layoutChildren(item: JobItem): FiguredItem[] {
               },
             ]
           : []),
-      ]),
+      ], undefined, steel?.slabs.get(pour)),
     );
   }
 
@@ -215,7 +230,7 @@ export function layoutChildren(item: JobItem): FiguredItem[] {
           run: toRaw(ps.tread ?? 1),
           ...(ps.shape === 'square' ? { width: toRaw(ps.width ?? 0) } : { diameter: toRaw(ps.diameter ?? 0) }),
         });
-        out.push(child(`piece${i + 1}`, label, stepsTool, r, rows));
+        out.push(child(`piece${i + 1}`, label, stepsTool, r, rows, undefined, steel?.pieces.get(pc.index)));
       } else {
         // The Slab tool by area: a square pad as its size, a round one as its area (a 1 ft wide strip).
         const r = defaultRaw(slabTool, {
@@ -223,7 +238,7 @@ export function layoutChildren(item: JobItem): FiguredItem[] {
           thick: toRaw(ps.thick ?? 4 / 12),
           areas: (ps.shape === 'square' ? [{ length: toRaw(ps.width ?? 0), width: toRaw(ps.depth ?? 0) }] : [{ length: toRaw(pc.topArea), width: toRaw(1) }]) as never,
         });
-        out.push(child(`piece${i + 1}`, label, slabTool, r, rows));
+        out.push(child(`piece${i + 1}`, label, slabTool, r, rows, undefined, steel?.pieces.get(pc.index)));
       }
     });
   return out;

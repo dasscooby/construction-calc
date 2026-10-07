@@ -29,6 +29,8 @@ export interface LayoutDrawInfo {
   highlight?: { run?: number; face?: number };
   /** Just the plan (no legend or title block), for the editor */
   compact?: boolean;
+  /** Anchor bolts: where each one goes (on the middle of the wall), and the legend line */
+  bolts?: { spots: Pt[]; text: string };
 }
 
 /** Plan scale and placement, shared by the drawing and the hit-test. */
@@ -110,7 +112,7 @@ export function graphPlanSvg(l: Layout, info: LayoutDrawInfo): string {
   const F = planFrame(l);
   const { W, s, X, Y, planH } = F;
   const ledge = ledgeOf(l);
-  const legendH = info.compact ? 0 : 24 + 32 * (2 + (l.spec.footing ? 1 : 0) + l.slabs.length + (l.slabs.length ? 1 : 0));
+  const legendH = info.compact ? 0 : 24 + 32 * (2 + (l.spec.footing ? 1 : 0) + l.slabs.length + (l.slabs.length ? 1 : 0) + (info.bolts ? 1 : 0));
   const titleH = info.compact ? 6 : 76;
   const H = Math.round(planH + legendH + titleH);
   const path = (pts: Pt[]) => `M${pts.map((p) => `${X(p.x)} ${Y(p.y)}`).join(' L')} Z`;
@@ -142,6 +144,19 @@ export function graphPlanSvg(l: Layout, info: LayoutDrawInfo): string {
   for (const r of rects) out.push(`<path d="${path(r)}" fill="none" stroke="#111" stroke-width="5" stroke-linejoin="miter"/>`);
   for (const r of rects) out.push(`<path d="${path(r)}" fill="#ffffff" stroke="none"/>`);
   rects.forEach((r, i) => out.push(`<path d="${path(r)}" fill="${l.runs[i].existing ? '#d9d9d9' : 'url(#lhatch)'}" stroke="none"/>`));
+  // Anchor bolts: a tick across the wall at each one.
+  for (const p of info.bolts?.spots ?? []) {
+    const run = l.graph.runs.find((r) => {
+      const d = unit(r.run);
+      const L = Math.hypot(r.run.b.x - r.run.a.x, r.run.b.y - r.run.a.y);
+      const along = (p.x - r.run.a.x) * d.x + (p.y - r.run.a.y) * d.y;
+      return Math.abs((p.x - r.run.a.x) * -d.y + (p.y - r.run.a.y) * d.x) < 1e-3 && along > -r.run.thick && along < L + r.run.thick;
+    });
+    if (!run) continue;
+    const d = unit(run.run);
+    const h = run.run.thick / 2 + 0.25;
+    out.push(`<line x1="${X(p.x - d.y * h)}" y1="${Y(p.y + d.x * h)}" x2="${X(p.x + d.y * h)}" y2="${Y(p.y - d.x * h)}" stroke="#b5371a" stroke-width="${info.compact ? 3 : 2.2}" stroke-linecap="round"/>`);
+  }
   if (hl.run !== undefined && rects[hl.run]) out.push(`<path d="${path(rects[hl.run])}" fill="${HILITE}" fill-opacity="0.75" stroke="${HILITE}" stroke-width="2"/>`);
   // Steps and pads: each step's outline, the top one shaded; named beside it, along the wall (the wall's
   // own label moves out past it).
@@ -303,7 +318,7 @@ export function graphPlanSvg(l: Layout, info: LayoutDrawInfo): string {
     const drop = slabDropIn(l.spec, l.slabs[0].thick);
     legend.push([
       ledge ? `<line x1="28" y1="${n(ly + 23 + legend.length * 32)}" x2="72" y2="${n(ly + 23 + legend.length * 32)}" stroke="#111" stroke-width="1.2" stroke-dasharray="5 4"/>` : '',
-      `TOP OF SLAB ${drop > 0 ? `${inch(drop / 12)} BELOW` : 'FLUSH WITH'} TOP OF WALL${ledge ? ` · SLAB RUNS ${inch(ledge.e)} ONTO A LEDGE IN THE WALL (DASHED)` : ''}`,
+      `TOP OF SLAB ${drop > 0 ? `${inch(drop / 12)} BELOW` : 'FLUSH WITH'} TOP OF WALL${ledge ? ` · SLAB ON A ${inch(ledge.e)} LEDGE (DASHED)` : ''}`,
     ]);
   }
   for (const sl of l.slabs) {
@@ -313,6 +328,10 @@ export function graphPlanSvg(l: Layout, info: LayoutDrawInfo): string {
       '',
       `SLAB ${sl.pour}: ${sl.name.toUpperCase()}, ${inch(sl.thick)}${rect ? ` · ${dim(rect.w)} × ${dim(rect.h)} CLEAR` : ''} · ${Math.round(sl.face.clearArea).toLocaleString()} SQ FT${yd ? ` · ${yd} YD` : ''}`,
     ]);
+  }
+  if (info.bolts) {
+    const y = ly + 23 + legend.length * 32;
+    legend.push([`<line x1="28" y1="${n(y)}" x2="72" y2="${n(y)}" stroke="#111" stroke-width="1"/><line x1="50" y1="${n(y - 9)}" x2="50" y2="${n(y + 9)}" stroke="#b5371a" stroke-width="2.4" stroke-linecap="round"/>`, `ANCHOR BOLT: ${info.bolts.text}`]);
   }
   legend.forEach(([sym, text], i) => {
     out.push(sym);

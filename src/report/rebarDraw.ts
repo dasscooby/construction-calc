@@ -19,6 +19,10 @@ export interface FootingSteel {
   /** Vertical bars (dowels) up into the wall; null = none set */
   vert: { size: number; spacingIn: number } | null;
   job: string;
+  /** From the layout's rebar: each vertical's cut length (ft), its hook (in), the footing bars' lap (in) */
+  vertCutFt?: number;
+  hookIn?: number;
+  lapIn?: number;
 }
 
 export function footingRebarSvg(d: FootingSteel): string {
@@ -71,7 +75,7 @@ export function footingRebarSvg(d: FootingSteel): string {
     for (let s = c; s <= leg - 3; s += d.vert.spacingIn) dowels.push([s, c]);
     for (let s = c + d.vert.spacingIn; s <= leg - 3; s += d.vert.spacingIn) dowels.push([c, s]);
     dowels.sort((a, b) => a[0] + a[1] - (b[0] + b[1]));
-    const hook = Math.min(12, fw / 2 - 3);
+    const hook = d.hookIn ?? Math.min(12, fw / 2 - 3);
     for (const [x, y] of dowels) {
       const onFirst = y === c;
       const foot: [number, number, number] = onFirst ? [x, y + hook, -fd + 3] : [x + hook, y, -fd + 3];
@@ -100,9 +104,9 @@ export function footingRebarSvg(d: FootingSteel): string {
   const notes: { at: [number, number, number]; text: string[] }[] = [];
   if (d.vert && dowels.length) {
     const [x, y] = dowels[Math.min(2, dowels.length - 1)];
-    notes.push({ at: [x, y, wallH * 0.7], text: [`#${d.vert.size} VERTICAL @ ${inch(d.vert.spacingIn)} O.C.`, `${dim((wallH + fd - 6) / 12)} TALL, HOOKED IN THE FOOTING`, 'CENTERED IN THE WALL'] });
+    notes.push({ at: [x, y, wallH * 0.7], text: [`#${d.vert.size} VERTICAL @ ${inch(d.vert.spacingIn)} O.C.`, `${dim((wallH + fd - 6) / 12)} TALL, HOOKED IN THE FOOTING`, d.vertCutFt ? `CUT ${dim(d.vertCutFt)} (${inch(d.hookIn ?? 0)} HOOK)` : 'CENTERED IN THE WALL'] });
   } else notes.push({ at: [fw / 2, leg * 0.6, wallH * 0.5], text: ['NO VERTICAL BARS SET', 'SET THEM IN THE WALL BOXES'] });
-  notes.push({ at: [leg * 0.55, fw / 2, -fd / 2], text: [d.footing.lines ? `(${d.footing.lines}) #${d.footing.barSize} CONTINUOUS` : 'NO FOOTING BARS SET', d.footing.lines ? 'BENT AROUND EVERY CORNER' : ''].filter(Boolean) });
+  notes.push({ at: [leg * 0.55, fw / 2, -fd / 2], text: [d.footing.lines ? `(${d.footing.lines}) #${d.footing.barSize} CONTINUOUS` : 'NO FOOTING BARS SET', d.footing.lines ? (d.lapIn ? `L-BARS AT CORNERS, ${inch(d.lapIn)} LAPS` : 'BENT AROUND EVERY CORNER') : ''].filter(Boolean) });
   notes.push({ at: [fw, leg * 0.75, -fd * 0.5], text: [`${inch(fw)} × ${inch(fd)} FOOTING`, 'SHOWN SEE-THROUGH'] });
   notes.push({ at: [w1, leg * 0.75, wallH], text: [`${inch(t)} WALL ABOVE (DASHED)`, `${dim(d.wallFt)} TALL`] });
   const nx = W - 250;
