@@ -139,8 +139,11 @@ const excavation: Tool = {
     );
     const truck = inp.num('truck');
     if (truck > 0) rows.push({ label: 'Truck loads', value: commas(loadsNeeded(loose, truck)) });
+    const warnings: string[] = [];
     const deep = tooBig('Depth', inp.len('depth'), 12);
-    return { rows, warnings: deep ? [deep] : [] };
+    if (deep) warnings.push(deep);
+    if (inp.num('swell') > 60) warnings.push(`Swell is ${dec(inp.num('swell'), 1)}%. Dirt runs 10–40%. ${CHECK_IT}`);
+    return { rows, warnings };
   },
   notes: ['Swell: sand 10–15%, dirt 20–30%, clay 30–40%.'],
 };

@@ -164,6 +164,7 @@ describe('inches typed in the feet box', () => {
   test('an 18 ft deep footing trench and 4 ft of rock get a yellow check; normal ones do not', () => {
     expect(warns(runTool(tool('excavation'), { length: 120, width: 2, depth: 18 }))).toEqual(['Depth is 18 feet. Did you mean 18 inches? Inches go in the “in” box.']);
     expect(warns(runTool(tool('excavation'), { length: 40, width: 30, depth: 9 }))).toEqual([]); // a basement dig
+    expect(warns(runTool(tool('excavation'), { length: 40, width: 30, depth: 3, swell: 250 }))).toEqual(['Swell is 250%. Dirt runs 10–40%. Check the number.']);
     expect(warns(runTool(tool('fill-base'), { areas: [[40, 30]], depth: 4 }))).toEqual(['Compacted depth is 4 feet. Did you mean 4 inches? Inches go in the “in” box.']);
     expect(warns(runTool(tool('fill-base'), { areas: [[40, 30]] }))).toEqual([]);
   });
