@@ -668,3 +668,10 @@ test('round steps: a 120 ft main diameter (meant 120") gets a yellow check; 10 f
   expect(w(runTool(tool('steps'), { ...base, diameter: L('120') }))).toEqual([`Main diameter is 120' 0". That’s bigger than usual. Check the number.`]);
   expect(w(runTool(tool('steps'), { ...base, diameter: L('10') }))).toEqual([]);
 });
+
+test('a 100 yd truck (typo) gets a yellow check; 10 yd does not', () => {
+  const r = runTool(tool('slab'), { areas: [[40, 30]], truck: 100 });
+  expect(r.status === 'ok' && r.result.warnings).toEqual(['Truck size is 100 yd. A mixer truck carries about 8–12 yd. Check the number.']);
+  expect(rowValue(r, 'Trucks')).toBe('1 truck'); // left as typed
+  expect(runTool(tool('slab'), { areas: [[40, 30]], truck: 10 })).toMatchObject({ status: 'ok', result: { warnings: [] } });
+});
