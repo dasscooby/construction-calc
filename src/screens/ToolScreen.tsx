@@ -41,6 +41,7 @@ import { layoutSketchSvg } from '../report/layoutDraw';
 import { toolDrawings } from '../report/report';
 import DrawingView from './DrawingView';
 import PadInput from './PadInput';
+import { isTooBig } from '../tools/concreteShared';
 import { shareText } from '../tools/share';
 import { BarListField, Field, Tool } from '../tools/types';
 import { colors, onThemeChange, themed } from '../theme';
@@ -84,6 +85,8 @@ export default function ToolScreen({ tool, raw, onChange, onBack, active, jobLin
   };
 
   const main = result.status === 'ok' ? result.result.rows.filter((r) => r.big).slice(0, 2) : [];
+  // A likely typo (4 ft slab) shows by the answer too, since the yellow box above may be off screen.
+  const typo = result.status === 'ok' ? result.result.warnings?.find(isTooBig) : undefined;
   const text = shareText(tool, raw, result, companyLine(prefs));
   // Plan / 3D / edge drawings for tools that have a shape (Slab, Wall Forms).
   const drawings = useMemo(() => (result.status === 'ok' ? toolDrawings(tool.id, raw, tool.title) : null), [result, tool, raw]);
@@ -162,6 +165,13 @@ export default function ToolScreen({ tool, raw, onChange, onBack, active, jobLin
         ))}
       </ScrollView>
 
+      {typo ? (
+        <View style={styles.footerCheck}>
+          <Text style={styles.footerCheckText} numberOfLines={2}>
+            ⚠ {typo}
+          </Text>
+        </View>
+      ) : null}
       {/* Main answer stays in view while typing */}
       <View style={styles.footer}>
         {main.length ? (
@@ -892,6 +902,8 @@ const getStyles = themed(() => ({
     minHeight: 62,
     alignItems: 'center',
   },
+  footerCheck: { backgroundColor: colors.warningBg, borderTopWidth: 1, borderTopColor: colors.accent, paddingHorizontal: 14, paddingVertical: 6 },
+  footerCheckText: { fontSize: 15, fontWeight: '600', color: colors.text },
   footerItem: { flex: 1, marginHorizontal: 4 },
   footerLabel: { fontSize: 13, fontWeight: '600', color: colors.subtext },
   footerValue: { fontSize: 28, fontWeight: '300', color: colors.accent },

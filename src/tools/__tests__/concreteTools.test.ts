@@ -3,6 +3,7 @@ import { belledPierCuFt, bellHeightFt, perimeterBeamCenterline, truckLoads } fro
 import { CONCRETE_TOOLS } from '../concreteTools';
 import { migrateItem } from '..';
 import { rowValue, runTool } from '../run';
+import { isTooBig } from '../concreteShared';
 
 const tool = (id: string) => CONCRETE_TOOLS.find((t) => t.id === id)!;
 
@@ -589,4 +590,13 @@ describe('inches typed in the feet box get a yellow check, numbers unchanged', (
     expect(warns(runTool(tool('piers'), { size: 12, height: 8 }))[0]).toMatch(/^Diameter is 12 feet\. Did you mean 12 inches\?/);
     expect(warns(runTool(tool('steps'), { steps: 3, rise: 7, run: { ft: '', in: '11' }, width: 4 }))[0]).toMatch(/^Rise is 7 feet/);
   });
+});
+
+test('the typo notes are told apart from the everyday ones (the screen shows them by the answer too)', () => {
+  const r = runTool(tool('slab'), { areas: [[700, 30]], thick: 4, footing: true, fDepth: 2 });
+  if (r.status !== 'ok') throw new Error(r.status);
+  expect(r.result.warnings!.filter(isTooBig)).toHaveLength(2); // 4 ft thick, 700 ft side
+  const everyday = r.result.warnings!.filter((w) => !isTooBig(w));
+  expect(everyday.some((w) => /rarely dug even/.test(w))).toBe(true);
+  expect(everyday.some((w) => /Did you mean|bigger than usual/.test(w))).toBe(false);
 });

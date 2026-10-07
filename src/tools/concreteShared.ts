@@ -21,10 +21,13 @@ export const ORDER_FIELDS: Field[] = [
 export function tooBig(label: string, ft: number, maxFt: number): string | null {
   if (!(ft > maxFt)) return null;
   const whole = Math.abs(ft - Math.round(ft)) < 1e-9 && ft <= 48;
-  return whole
-    ? `${label} is ${ft} feet. Did you mean ${ft} inches? Inches go in the “in” box.`
-    : `${label} is ${ftIn(ft)}. That’s bigger than usual. Check the number.`;
+  return whole ? `${label} is ${ft} feet. Did you mean ${ft} inches? ${IN_BOX}` : `${label} is ${ftIn(ft)}. ${BIG}`;
 }
+const IN_BOX = 'Inches go in the “in” box.';
+const BIG = 'That’s bigger than usual. Check the number.';
+
+/** True for a note from tooBig(): the screen also shows it next to the answer you see while typing. */
+export const isTooBig = (warning: string) => warning.endsWith(IN_BOX) || warning.endsWith(BIG);
 
 /** The standard answer block: yards with waste, order amount, trucks, bags, and the before-waste number. */
 export function concreteRows(baseCuFt: number, inp: Inputs, bags = true): ResultRow[] {
