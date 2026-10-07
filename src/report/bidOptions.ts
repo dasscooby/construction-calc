@@ -8,6 +8,7 @@ import type { Settings } from '../lib/settings';
 import { dec } from '../tools/format';
 import { parseLength, parseNumber, RawLength, RawWallRow } from '../tools/run';
 import { deliveredYd } from './billing';
+import { LAYOUT_POUR } from './layoutItems';
 import { confirmedFoundation, Foundation, pourCount, pourName } from './foundation';
 import { builtItems, FiguredItem, itemRebarLb, jobTotals, numberIn, pieceName, steelItems } from './report';
 
@@ -38,8 +39,8 @@ const pourList = (f: Foundation) =>
 /** "footings, walls, slab 1, slab 2" from a layout's pieces */
 const layoutPourList = (items: FiguredItem[]) =>
   items
-    .filter((x) => /:(footings|walls|slab\d+)$/.test(x.item.id))
-    .map((x) => (x.item.id.endsWith(':footings') ? 'footings' : x.item.id.endsWith(':walls') ? 'walls' : `slab ${x.item.id.match(/slab(\d+)$/)![1]}`))
+    .filter((x) => LAYOUT_POUR.test(x.item.id))
+    .map((x) => (x.item.id.endsWith(':footings') ? 'footings' : x.item.id.endsWith(':walls') ? 'walls' : /slab\d+$/.test(x.item.id) ? `slab ${x.item.id.match(/slab(\d+)$/)![1]}` : (x.item.label.split(':')[0] || 'steps').toLowerCase()))
     .join(', ');
 
 export const UNITS = ['sq ft', 'ft', 'yd', 'lb', 'tons', 'ea', 'set', 'job', 'pour', 'hr', 'day', 'lump sum'];
@@ -155,6 +156,11 @@ export function bidOptions(items: FiguredItem[], s: Settings, job?: Job): BidSou
     if (dowels) {
       out.push({ src: `${src}:dowels`, what: `${name}: dowels drilled and epoxied`, group: 'Rebar and dowels', measures: [{ id: 'count', label: `How many (${numberIn(dowels.value)})`, qty: numberIn(dowels.value), unit: 'ea' }], prices: { ea: price(p.dowelEa) } });
     }
+    const bolts = rowOf(f, 'Anchor bolts');
+    if (bolts) {
+      const kind = bolts.note?.split(' with ')[0] ?? 'J-bolt';
+      out.push({ src: `${src}:bolts`, what: `${name}: anchor bolts set (${kind}s, nuts and washers)`, group: 'Rebar and dowels', measures: [{ id: 'count', label: `How many (${numberIn(bolts.value)})`, qty: numberIn(bolts.value), unit: 'ea' }], prices: { ea: price(p.boltEa) } });
+    }
   }
 
   for (const f of steelItems(built)) {
@@ -190,8 +196,21 @@ export function bidOptions(items: FiguredItem[], s: Settings, job?: Job): BidSou
     });
   }
   // A foundation layout knows its pours: footings, walls, each slab pour.
-  const layoutPours = items.filter((x) => /:(footings|walls|slab\d+)$/.test(x.item.id)).length;
+  const layoutPours = items.filter((x) => LAYOUT_POUR.test(x.item.id)).length;
   const pours = layoutPours || (fnd ? pourCount(fnd) : 1);
+  if (layoutPours > 1) {
+    layoutPourList(items)
+      .split(', ')
+      .forEach((name, i) =>
+        out.push({
+          src: `pump:${i + 1}`,
+          what: `Pump truck: pour ${i + 1}, ${name}`,
+          group: 'Concrete and pump',
+          measures: [{ id: 'pour', label: 'One pour', qty: 1, unit: 'pour' }],
+          prices: { pour: price(p.pumpPour) },
+        }),
+      );
+  }
   out.push({
     src: 'pump',
     what: 'Pump truck',
@@ -217,12 +236,52 @@ export function bidOptions(items: FiguredItem[], s: Settings, job?: Job): BidSou
   return out;
 }
 
+/**
+ * A line for every part of the job that isn't on the bid yet (what you tap "+ Add every part of the job"
+ * for): each measured the usual way, a pump for each pour, labor and "something else" left out.
+ */
+export function missingLines(sources: BidSource[], lines: { src?: string }[]): Omit<PriceLine, 'id'>[] {
+  const have = new Set(lines.map((l) => l.src).filter(Boolean));
+  return sources
+    // With a pump line for each pour, the one-line "Pump truck" isn't offered too.
+    .filter((s) => s.src !== 'other' && s.src !== 'labor' && !have.has(s.src) && s.measures.length)
+    .filter((s) => !(s.src === 'pump' && sources.some((x) => x.src.startsWith('pump:'))) && !(s.src.startsWith('pump:') && have.has('pump')))
+    .map((s) => lineFor(s));
+}
+
+const SLAB_SIZE: Record<string, string> = { house: 'house size, to the outside of the walls', inside: 'poured, inside the walls', concrete: 'concrete' };
+
+/**
+ * Lines made before the foundation layout took over a piece (the old wall, footing or slab is hidden, so
+ * its line would bill with yesterday's name and numbers) move to the layout's piece: same price, the
+ * layout's wording and today's quantity.
+ */
+export function remapLines(lines: PriceLine[], job: Job, sources: BidSource[]): PriceLine[] {
+  const layout = job.items.find((it) => it.toolId === 'foundation-layout');
+  if (!layout) return lines;
+  const have = new Set(sources.map((s) => s.src));
+  return lines.map((l) => {
+    const m = l.src?.match(/^item:([^:]+)(:rebar|:dowels)?$/);
+    if (!m || have.has(l.src!)) return l;
+    const old = job.items.find((it) => it.id === m[1]);
+    if (!old || old.replacedBy !== layout.id) return l;
+    const kind = old.toolId === 'slab' || old.toolId === 'slab-layout' ? 'slab1' : old.toolId === 'wall-forms' || old.raw.kind === 'wall' ? 'walls' : 'footings';
+    const src = `item:${layout.id}:${kind}${m[2] ?? ''}`;
+    const to = sources.find((s) => s.src === src);
+    if (!to) return l;
+    const fresh = lineFor(to, to.measures.some((x) => x.id === l.measure) ? l.measure : undefined);
+    return { ...l, ...fresh, price: l.price || fresh.price, id: l.id };
+  });
+}
+
 /** A new line for a picked source and measure: wording, quantity, unit and the price book price. */
 export function lineFor(source: BidSource, measureId?: string): Omit<PriceLine, 'id'> {
   const m = source.measures.find((x) => x.id === measureId) ?? source.measures[0];
   if (!m) return { desc: source.what, qty: '1', unit: '', price: '', src: source.src === 'other' ? undefined : source.src };
+  // A slab line says which size it bills.
+  const size = source.group === 'Slabs' ? SLAB_SIZE[m.id] : undefined;
   return {
-    desc: source.what,
+    desc: size ? `${source.what} (${size})` : source.what,
     qty: m.qty ? dec(m.qty, m.unit === 'ea' || m.unit === 'lb' ? 0 : 2) : '',
     unit: m.unit,
     price: source.prices[m.unit] ?? '',

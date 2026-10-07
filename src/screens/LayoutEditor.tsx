@@ -3,6 +3,7 @@
 // off, how far it comes out), + Inside walls (the bays between them, clear, wall face to wall face), and
 // Slab & pours (tap the bays that get slab). Every step can be undone; nothing asks "are you sure".
 
+import type React from 'react';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { GestureResponderEvent, LayoutChangeEvent, Modal, Pressable, ScrollView, Text, TextInput, View } from 'react-native';
 import { SvgXml } from 'react-native-svg';
@@ -13,10 +14,12 @@ import { addOnProblem, addedRuns, blankLayout, fmtFtIn, insideProblem, parseFtIn
 import { AddOnSpec, bayName, buildLayout, fillBays, Layout, LayoutSpec, SIDE_NAME, Side, sideLength, SlabSpot } from '../report/foundationLayout';
 import { layoutChildren, LayoutRaw, rollUp } from '../report/layoutItems';
 import { graphPlanSvg, hitLayout, planFrame } from '../report/layoutPlanDraw';
+import { insideCorners, PieceShape, PieceSpec } from '../report/layoutPieces';
+import { dropPieceSteel, layoutSteel, LayoutRebar, NO_SLAB_STEEL, NO_STEPS_STEEL, noSteelYet, oldBars, OldBoxes, SlabSteel, spotKey, StepsSteel, WallSteel, withPieceSteel, withRebar } from '../report/layoutRebar';
 import { faceAt } from '../report/wallGraph';
 import { colors, onThemeChange, themed } from '../theme';
 
-type Mode = 'idle' | 'main' | 'addon-pick' | 'addon-size' | 'inside' | 'slab';
+type Mode = 'idle' | 'main' | 'addon-pick' | 'addon-size' | 'inside' | 'slab' | 'piece' | 'rebar';
 
 const SIDES: Side[] = ['left', 'top', 'right', 'bottom'];
 const SIDE_SHORT: Record<Side, string> = { left: 'Left A–B', top: 'Back B–C', right: 'Right C–D', bottom: 'Front D–A' };
@@ -98,9 +101,16 @@ export default function LayoutEditor({ job, start, preset, onClose }: { job: Job
 
   // ---- the plan ----
   const [planW, setPlanW] = useState(0);
+  const boltSpots = useMemo(() => {
+    try {
+      return layout?.spec.rebar ? layoutSteel(layout, layout.spec.rebar).bolts.runs.flatMap((b) => b.spots) : [];
+    } catch {
+      return [];
+    }
+  }, [layout]);
   const svg = useMemo(
-    () => (layout ? graphPlanSvg(layout, { title: 'Foundation layout', job: job.name, company: '', date: '', pourYd: yards, highlight: pick, compact: true }) : ''),
-    [layout, job.name, yards, pick],
+    () => (layout ? graphPlanSvg(layout, { title: 'Foundation layout', job: job.name, company: '', date: '', pourYd: yards, highlight: pick, compact: true, bolts: boltSpots.length ? { spots: boltSpots, text: '' } : undefined }) : ''),
+    [layout, job.name, yards, pick, boltSpots],
   );
   const vb = svg.match(/viewBox="0 0 ([\d.]+) ([\d.]+)"/);
   const vbW = vb ? Number(vb[1]) : 760;
@@ -215,6 +225,7 @@ export default function LayoutEditor({ job, start, preset, onClose }: { job: Job
   };
 
   // ---- Slab & pours ----
+  const [dropText, setDropText] = useState(() => (raw.layout.slabDropIn !== undefined ? String(raw.layout.slabDropIn) : ''));
   const toggleSlabAt = (spot: SlabSpot) => {
     const next = toggleSlab(raw.layout, spot);
     const on = next.slabs.length > raw.layout.slabs.length;
@@ -231,6 +242,7 @@ export default function LayoutEditor({ job, start, preset, onClose }: { job: Job
     footD: String(Math.round((raw.layout.footing?.depth ?? 10 / 12) * 12)),
     footing: !!raw.layout.footing,
     existing: !!raw.layout.existing,
+    slab: hasHouse ? raw.layout.slabs.some((x) => x.at.in === 'main') : true,
   }));
   const mainSpec = (): LayoutSpec | null => {
     const L = parseFtIn(main.length);
@@ -244,7 +256,12 @@ export default function LayoutEditor({ job, start, preset, onClose }: { job: Job
       wall: { thick: t, height: h },
       footing: main.footing ? { width: (Number(main.footW) || 16) / 12, depth: (Number(main.footD) || 10) / 12 } : null,
       existing: main.existing || undefined,
-      slabs: raw.layout.slabs.length || hasHouse ? raw.layout.slabs : [{ at: { in: 'main' }, thick: 4 / 12 }],
+      // The main slab, one piece, on or off; slabs in add-on bays stay as they are.
+      slabs: main.slab
+        ? raw.layout.slabs.some((x) => x.at.in === 'main')
+          ? raw.layout.slabs
+          : [{ at: { in: 'main' }, thick: raw.layout.slabs[0]?.thick ?? 4 / 12 }, ...raw.layout.slabs]
+        : raw.layout.slabs.filter((x) => x.at.in !== 'main'),
     };
   };
   const mainIssue = (() => {
@@ -345,6 +362,8 @@ export default function LayoutEditor({ job, start, preset, onClose }: { job: Job
             {btn('+ Add-on', () => setMode('addon-pick'), { on: mode === 'addon-pick' || mode === 'addon-size', disabled: !layout })}
             {btn('+ Inside walls', () => openInside(Math.min(insideIdx, addOnsHere.length - 1)), { on: mode === 'inside', disabled: !addOnsHere.length })}
             {btn('Slab & pours', () => setMode('slab'), { on: mode === 'slab', disabled: !layout })}
+            {btn('+ Steps & pads', () => setMode('piece'), { on: mode === 'piece', disabled: !layout })}
+            {btn('Rebar & bolts', () => setMode('rebar'), { on: mode === 'rebar', disabled: !layout })}
           </View>
         </View>
 
@@ -377,6 +396,10 @@ export default function LayoutEditor({ job, start, preset, onClose }: { job: Job
                 <NumBox label="Footing deep" unit="in" value={main.footD} onChange={(footD) => setMain({ ...main, footD })} />
               </View>
             ) : null}
+            <View style={styles.chips}>
+              {chip('Slab in the house', main.slab, () => setMain({ ...main, slab: true }))}
+              {chip('No slab', !main.slab, () => setMain({ ...main, slab: false }))}
+            </View>
             <View style={styles.chips}>
               {chip('In this bid', !main.existing, () => setMain({ ...main, existing: false }))}
               {chip('Already there (not in bid)', main.existing, () => setMain({ ...main, existing: true }))}
@@ -507,20 +530,72 @@ export default function LayoutEditor({ job, start, preset, onClose }: { job: Job
           </View>
         ) : null}
 
+        {/* ---- Steps & pads ---- */}
+        {mode === 'piece' && layout ? (
+          <PiecePanel
+            layout={layout}
+            onAdd={(p, text) => commit({ ...raw.layout, pieces: [...(raw.layout.pieces ?? []), p] }, text)}
+            onRemove={(i) => commit(dropPieceSteel(raw.layout, i), 'Taken out.')}
+            onClose={() => setMode('idle')}
+            chip={chip}
+          />
+        ) : null}
+
         {/* ---- Slab & pours ---- */}
         {mode === 'slab' && layout ? (
           <View style={styles.panel}>
             <Text style={styles.panelTitle}>Slab & pours</Text>
+            {/* Slab 1: the main slab, one piece. */}
+            <Text style={styles.sub}>Main slab (one piece, inside the house walls)</Text>
             <View style={styles.chips}>
-              {chip('Main house', spec.slabs.some((s) => s.at.in === 'main'), () => toggleSlabAt({ in: 'main' }), 'Slab in the main house')}
-              {layout.bays.flatMap((bs, ai) =>
-                bs.map((_, bi) => {
-                  const on = spec.slabs.some((s) => s.at.in === 'addon' && s.at.addOn === ai && s.at.bay === bi);
-                  const name = cap(`${addOnsHere.length > 1 ? `Add-on ${ai + 1} ` : ''}${bs.length > 1 ? bayName(bi, bs.length, addOnsHere[ai]) : 'add-on'}`);
-                  return chip(name, on, () => toggleSlabAt({ in: 'addon', addOn: ai, bay: bi }), `Slab in the ${name}`);
-                }),
-              )}
+              {chip('Main slab: yes', spec.slabs.some((s) => s.at.in === 'main'), () => !spec.slabs.some((s) => s.at.in === 'main') && toggleSlabAt({ in: 'main' }), 'Main slab in the house')}
+              {chip('No main slab', !spec.slabs.some((s) => s.at.in === 'main'), () => spec.slabs.some((s) => s.at.in === 'main') && toggleSlabAt({ in: 'main' }), 'No main slab')}
             </View>
+            {/* Where the slab sits in the wall: how far down, and the ledge cut into the wall for it. */}
+            {spec.slabs.length ? (
+              <>
+                <View style={styles.row2}>
+                  <NumBox
+                    label="Top of slab below top of wall"
+                    unit="in"
+                    value={dropText}
+                    onChange={setDropText}
+                    onDone={() => {
+                      const v = dropText.trim() === '' ? undefined : Math.max(0, Number(dropText) || 0);
+                      if (v !== spec.slabDropIn) commit({ ...raw.layout, slabDropIn: v }, v === undefined ? 'Slab drop back to the usual.' : `Top of slab ${v}" below the top of the wall.`);
+                    }}
+                  />
+                </View>
+                <Text style={styles.sub}>Slab ledge: the wall is cut back from the bottom of the slab up, so the slab runs onto it</Text>
+                <View style={styles.chips}>
+                  {[0, 1, 2, 3].map((v) =>
+                    chip(v ? `${v}" ledge` : 'No ledge', (spec.ledgeIn ?? 0) === v, () => commit({ ...raw.layout, ledgeIn: v }, v ? `${v}" slab ledge in the walls.` : 'No slab ledge.'), v ? `${v} inch slab ledge` : 'No slab ledge'),
+                  )}
+                </View>
+              </>
+            ) : null}
+            {/* A second (third ...) slab goes in an add-on bay, its own pour unless you say otherwise. */}
+            {layout.bays.length ? (
+              <>
+                <Text style={styles.sub}>+ Second slab: tap where it goes (on the plan, or here). It's its own pour.</Text>
+                <View style={styles.chips}>
+                  {layout.bays.flatMap((bs, ai) =>
+                    bs.map((_, bi) => {
+                      const on = spec.slabs.some((s) => s.at.in === 'addon' && s.at.addOn === ai && s.at.bay === bi);
+                      const name = cap(`${addOnsHere.length > 1 ? `Add-on ${ai + 1} ` : ''}${bs.length > 1 ? bayName(bi, bs.length, addOnsHere[ai]) : 'add-on'}`);
+                      return chip(`${on ? '✓ ' : '+ '}${name}`, on, () => toggleSlabAt({ in: 'addon', addOn: ai, bay: bi }), `Slab in the ${name}`);
+                    }),
+                  )}
+                </View>
+              </>
+            ) : (
+              <View style={styles.listRow}>
+                <Text style={styles.help}>A second slab goes in an add-on. Add one, then come back here.</Text>
+                <Pressable onPress={() => setMode('addon-pick')} style={styles.small} accessibilityRole="button">
+                  <Text style={styles.smallText}>+ Add-on</Text>
+                </Pressable>
+              </View>
+            )}
             {layout.slabs.map((sl) => {
               const yd = yards[sl.pour];
               const r = sl.face.rect;
@@ -569,6 +644,9 @@ export default function LayoutEditor({ job, start, preset, onClose }: { job: Job
             {done('Done', () => setMode('idle'), false)}
           </View>
         ) : null}
+
+        {/* ---- Rebar & bolts ---- */}
+        {mode === 'rebar' && layout ? <RebarPanel layout={layout} old={raw} onSave={(s, text) => commit(s, text)} onClose={() => setMode('idle')} chip={chip} /> : null}
 
         {mode === 'idle' && layout ? (
           <View style={styles.panel}>
@@ -735,6 +813,435 @@ function RunList({
 }
 
 /** A length box that takes 40, 40 6, 40-6 or 40'6" and shows what it read. */
+/** Steps and pads: what it is, its shape, where it goes, its sizes; and the ones already on, to take off. */
+function PiecePanel({
+  layout,
+  onAdd,
+  onRemove,
+  onClose,
+  chip,
+}: {
+  layout: Layout;
+  onAdd: (p: PieceSpec, text: string) => void;
+  onRemove: (index: number) => void;
+  onClose: () => void;
+  chip: (label: string, on: boolean, onPress: () => void, a11y?: string) => React.ReactElement;
+}) {
+  const [kind, setKind] = useState<'steps' | 'pad'>('steps');
+  const [shape, setShape] = useState<PieceShape>('half');
+  const [wall, setWall] = useState(0);
+  const [corner, setCorner] = useState(0);
+  const [along, setAlong] = useState('');
+  const [count, setCount] = useState('3');
+  const [rise, setRise] = useState('7');
+  const [tread, setTread] = useState('12');
+  const [width, setWidth] = useState('');
+  const [depth, setDepth] = useState('');
+  const [diameter, setDiameter] = useState('');
+  const [thick, setThick] = useState('4');
+  const faces = layout.faceLines;
+  const corners = insideCorners(layout.graph.outside);
+  const face = faces[Math.min(wall, faces.length - 1)];
+  const num = (v: string) => Number(v) || 0;
+  const len = (v: string) => parseFtIn(v) ?? 0;
+  const spec: PieceSpec = {
+    kind,
+    shape,
+    ...(shape === 'quarter' ? { corner } : { wall: face?.ref, along: along.trim() ? len(along) : (face?.length ?? 0) / 2 }),
+    ...(kind === 'steps' ? { steps: Math.round(num(count)), rise: num(rise) / 12, tread: num(tread) / 12 } : { thick: num(thick) / 12 }),
+    ...(shape === 'square' ? { width: len(width), ...(kind === 'pad' ? { depth: len(depth) } : {}) } : { diameter: len(diameter) }),
+  };
+  // Check it the way the layout will: placed against this layout, any problem shown before it's added.
+  const tryIt = buildLayout({ ...layout.spec, pieces: [spec] });
+  const issue = tryIt.pieces[0]?.problem || tryIt.problems.find((p) => /^(Steps|Pad) 1/.test(p)) || '';
+  const placed = tryIt.pieces[0];
+  const shapes: [PieceShape, string][] = [['square', 'Square'], ['half', 'Half round'], ['full', 'Full round'], ['quarter', 'Quarter round']];
+  return (
+    <View style={styles.panel}>
+      <Text style={styles.panelTitle}>Steps & pads</Text>
+      <View style={styles.chips}>
+        {chip('Steps', kind === 'steps', () => setKind('steps'))}
+        {chip('Pad / landing', kind === 'pad', () => setKind('pad'))}
+      </View>
+      <View style={styles.chips}>{shapes.map(([v, lab]) => chip(lab, shape === v, () => setShape(v), `${lab} ${kind === 'steps' ? 'steps' : 'pad'}`))}</View>
+      {shape === 'quarter' ? (
+        corners.length ? (
+          <>
+            <Text style={styles.sub}>Which inside corner (its straight sides against the two walls)</Text>
+            <View style={styles.chips}>{corners.map((_, i) => chip(`Corner ${i + 1}`, corner === i, () => setCorner(i)))}</View>
+          </>
+        ) : (
+          <Text style={styles.help}>A quarter round goes in an inside corner, where an add-on meets the house. This layout has none.</Text>
+        )
+      ) : (
+        <>
+          <Text style={styles.sub}>Which wall (it goes outside it)</Text>
+          <View style={styles.chips}>{faces.map((f, i) => chip(f.name, wall === i, () => setWall(i)))}</View>
+          <View style={styles.row2}>
+            <LenBox label={`Center, from ${face?.from ?? 'its end'} (wall ${fmtFtIn(face?.length ?? 0)})`} value={along} onChange={setAlong} />
+          </View>
+        </>
+      )}
+      {kind === 'steps' ? (
+        <View style={styles.row2}>
+          <NumBox label="Steps" unit="#" value={count} onChange={setCount} />
+          <NumBox label="Rise" unit="in" value={rise} onChange={setRise} />
+          <NumBox label="Tread" unit="in" value={tread} onChange={setTread} />
+        </View>
+      ) : (
+        <View style={styles.row2}>
+          <NumBox label="Thick" unit="in" value={thick} onChange={setThick} />
+        </View>
+      )}
+      {shape === 'square' ? (
+        <View style={styles.row2}>
+          <LenBox label="Wide (along the wall)" value={width} onChange={setWidth} />
+          {kind === 'pad' ? <LenBox label="Out from the wall" value={depth} onChange={setDepth} /> : null}
+        </View>
+      ) : (
+        <View style={styles.row2}>
+          <LenBox label={kind === 'steps' ? 'Main diameter (bottom step)' : 'Diameter'} value={diameter} onChange={setDiameter} />
+        </View>
+      )}
+      {issue ? <Text style={styles.help}>{issue.replace(/^(Steps|Pad) 1:? ?/, '')}</Text> : placed ? <Text style={styles.help}>{`${placed.describe} · ${Math.round(placed.cuFt * 10) / 10} cu ft`}</Text> : null}
+      {(layout.spec.pieces ?? []).length ? <Text style={styles.panelTitle}>On the layout</Text> : null}
+      {layout.pieces.map((pc) => (
+        <View key={pc.index} style={styles.listRow}>
+          <Text style={styles.listText}>{`${pc.name}: ${pc.describe}`}</Text>
+          <Pressable onPress={() => (feel.tap(), onRemove(pc.index))} style={styles.small} accessibilityRole="button" accessibilityLabel={`Take out ${pc.name}`}>
+            <Text style={[styles.smallText, styles.danger]}>Remove</Text>
+          </Pressable>
+        </View>
+      ))}
+      <View style={styles.doneRow}>
+        <Pressable onPress={onClose} style={styles.cancel} accessibilityRole="button">
+          <Text style={styles.cancelText}>Done</Text>
+        </Pressable>
+        <Pressable
+          onPress={() => !issue && placed && onAdd(spec, `${placed.describe} added, its own pour.`)}
+          style={[styles.done, (!!issue || !placed) && styles.toolOff]}
+          accessibilityRole="button"
+          accessibilityState={{ disabled: !!issue || !placed }}
+        >
+          <Text style={styles.doneText}>{kind === 'steps' ? 'Add steps' : 'Add pad'}</Text>
+        </Pressable>
+      </View>
+    </View>
+  );
+}
+
+/** A number box that keeps what you type and sets it when you leave the box. Blank = `blank`. */
+function SetNum({ label, unit, value, onSet, blank = 0 }: { label: string; unit: string; value: number; onSet: (v: number) => void; blank?: number }) {
+  const [text, setText] = useState(String(value));
+  useEffect(() => setText(String(value)), [value]);
+  return (
+    <NumBox
+      label={label}
+      unit={unit}
+      value={text}
+      onChange={setText}
+      onDone={() => {
+        const v = text.trim() === '' ? blank : Number(text);
+        if (Number.isFinite(v) && v >= 0 && v !== value) onSet(v);
+        else setText(String(value));
+      }}
+    />
+  );
+}
+
+const SIZES = [3, 4, 5, 6];
+
+/**
+ * Rebar & bolts: nothing until you add it (the usual filled in, all changeable), then every piece and wall
+ * its own, any of them set to none on purpose. Each change is a step you can undo.
+ */
+function RebarPanel({
+  layout,
+  old,
+  onSave,
+  onClose,
+  chip,
+}: {
+  layout: Layout;
+  old: OldBoxes;
+  onSave: (next: LayoutSpec, text: string) => void;
+  onClose: () => void;
+  chip: (label: string, on: boolean, onPress: () => void, a11y?: string) => React.ReactElement;
+}) {
+  const spec = layout.spec;
+  const r = spec.rebar;
+  const [walls, setWalls] = useState(false);
+  const steel = useMemo(() => {
+    try {
+      return r ? layoutSteel(layout, r) : null;
+    } catch {
+      return null;
+    }
+  }, [layout, r]);
+  const missing = noSteelYet(layout, old);
+  if (!r) {
+    return (
+      <View style={styles.panel}>
+        <Text style={styles.panelTitle}>Rebar & bolts</Text>
+        <Text style={styles.help}>
+          {Object.values(oldBars(old)).some(Boolean) ? `Not set in the layout yet: ${missing.join(', ')}.` : 'No rebar or anchor bolts in this layout yet.'} Add them with the usual and change anything after: (2) #4 in the footing, #4 @ 24" up and along the walls, #4 @ 18" both ways in slabs and pads, a #4 in each step nose, 1/2" × 10" J-bolts at 6' on center.
+        </Text>
+        <Pressable onPress={() => (feel.success(), onSave(withRebar(spec, old), 'Rebar and bolts added. Change any of it below.'))} style={[styles.done, styles.bigBtn]} accessibilityRole="button">
+          <Text style={styles.doneText}>Add rebar & bolts</Text>
+        </Pressable>
+        {!spec.rebarWarnOff ? (
+          <Pressable onPress={() => onSave({ ...spec, rebarWarnOff: true }, 'No rebar on this one. The warning is put away.')} style={[styles.cancel, styles.bigBtn]} accessibilityRole="button">
+            <Text style={styles.cancelText}>None on this job, stop asking</Text>
+          </Pressable>
+        ) : (
+          <Text style={styles.help}>Set to no rebar on purpose.</Text>
+        )}
+        {doneBtn(onClose)}
+      </View>
+    );
+  }
+  const set = (next: Partial<LayoutRebar>, text: string) => onSave({ ...spec, rebar: { ...r, ...next } }, text);
+  const size = (cur: number, onPick: (s: number) => void, none?: string) => (
+    <View style={styles.chips}>
+      {none ? chip(none, cur === 0, () => onPick(0)) : null}
+      {SIZES.map((s) => chip(`#${s}`, cur === s, () => onPick(s), `Number ${s} bar`))}
+    </View>
+  );
+  const slabBox = (cur: SlabSteel, put: (s: SlabSteel, text: string) => void, name: string) => (
+    <>
+      <View style={styles.chips}>
+        {chip('Rebar grid', cur.kind === 'grid', () => put({ ...cur, kind: 'grid', chairsFt: cur.chairsFt || 3 }, `${name}: rebar grid.`))}
+        {chip('Wire mesh', cur.kind === 'mesh', () => put({ ...cur, kind: 'mesh', chairsFt: cur.chairsFt || 3 }, `${name}: wire mesh.`))}
+        {chip('None', cur.kind === 'none', () => put({ ...cur, kind: 'none', chairsFt: 0 }, `${name}: no steel.`))}
+      </View>
+      {cur.kind === 'grid' ? size(cur.size, (s) => put({ ...cur, size: s }, `${name}: #${s} bars.`)) : null}
+      {cur.kind !== 'none' ? (
+        <View style={styles.row2}>
+          {cur.kind === 'grid' ? <SetNum label="On center" unit="in" value={cur.spacingIn} onSet={(v) => v > 0 && put({ ...cur, spacingIn: v }, `${name}: bars @ ${v}".`)} /> : null}
+          <SetNum label="Chairs every (0 = none)" unit="ft" value={cur.chairsFt} onSet={(v) => put({ ...cur, chairsFt: v }, v ? `${name}: chairs every ${v}'.` : `${name}: no chairs.`)} />
+        </View>
+      ) : null}
+    </>
+  );
+  const runs = layout.graph.runs.filter((_, i) => !layout.runs[i].existing);
+  const wallOwn = (name: string) => r.walls?.[name] ?? {};
+  const setWall = (name: string, w: WallSteel, text: string) => set({ walls: { ...(r.walls ?? {}), [name]: { ...wallOwn(name), ...w } } }, text);
+  const sticks = new Map<number, number>();
+  let lbs = 0;
+  if (steel) {
+    for (const p of [steel.footing, steel.walls, ...steel.slabs.values(), ...steel.pieces.values()]) {
+      if (!p) continue;
+      lbs += p.lb;
+      for (const [k, v] of p.sticks) sticks.set(k, (sticks.get(k) ?? 0) + v);
+    }
+  }
+  return (
+    <View style={styles.panel}>
+      <Text style={styles.panelTitle}>Rebar & bolts</Text>
+      <Text style={styles.calcLine}>
+        {steel
+          ? `${[...sticks].sort((a, b) => a[0] - b[0]).map(([k, v]) => `#${k}: ${v.toLocaleString()} sticks × ${r.stockFt}'`).join(' · ') || 'No bars'} · ${Math.round(lbs).toLocaleString()} lb · ${steel.bolts.total} anchor bolts`
+          : 'A vertical bar is longer than a stick. Pick a longer stick.'}
+      </Text>
+      {missing.length ? <Text style={styles.problem}>No rebar yet: {missing.join(', ')}</Text> : null}
+
+      <Text style={styles.sub}>Sticks and laps</Text>
+      <View style={styles.chips}>{[20, 30, 40, 60].map((v) => chip(`${v}' sticks`, r.stockFt === v, () => set({ stockFt: v }, `${v}' sticks.`)))}</View>
+      <View style={styles.row2}>
+        <SetNum label="Lap, bar diameters" unit="× bar" value={r.lapDia} onSet={(v) => v > 0 && set({ lapDia: v }, `Laps ${v} bar diameters (${(v / 2).toFixed(1).replace(/\.0$/, '')}" on a #4).`)} />
+      </View>
+
+      {spec.footing ? (
+        <>
+          <Text style={styles.groupHead}>Footing</Text>
+          <View style={styles.chips}>{[0, 1, 2, 3, 4].map((v) => chip(v ? `(${v}) bars` : 'None', r.footing.bars === v, () => set({ footing: { ...r.footing, bars: v } }, v ? `(${v}) #${r.footing.size} in the footing.` : 'No footing bars.')))}</View>
+          {r.footing.bars ? size(r.footing.size, (s) => set({ footing: { ...r.footing, size: s } }, `Footing bars #${s}.`)) : null}
+          <Text style={styles.help}>Continuous, with an L-bar at every corner and tee and laps of {r.lapDia} bar diameters.</Text>
+        </>
+      ) : null}
+
+      <Text style={styles.groupHead}>Walls: verticals</Text>
+      {size(r.vert.size, (s) => set({ vert: { ...r.vert, size: s } }, `Verticals #${s}.`))}
+      <View style={styles.row2}>
+        <SetNum label="On center (0 = none)" unit="in" value={r.vert.spacingIn} onSet={(v) => set({ vert: { ...r.vert, spacingIn: v } }, v ? `Verticals @ ${v}".` : 'No verticals.')} />
+      </View>
+      <Text style={styles.help}>From a hook in the footing to 3" below the top of the wall{steel?.vertCutFt ? `: cut ${fmtFtIn(steel.vertCutFt)}` : ''}. Two at every corner, tee and end.</Text>
+
+      <Text style={styles.groupHead}>Walls: horizontals</Text>
+      <View style={styles.chips}>
+        {chip('At a spacing', r.horiz.rows === 'spacing', () => set({ horiz: { ...r.horiz, rows: 'spacing' } }, 'Horizontal rows at a spacing.'))}
+        {chip('Top + mid-height', r.horiz.rows === 'topMid', () => set({ horiz: { ...r.horiz, rows: 'topMid' } }, 'One at the top, one at mid-height.'))}
+        {chip('Rows', r.horiz.rows === 'count', () => set({ horiz: { ...r.horiz, rows: 'count' } }, 'Horizontal rows by count.'))}
+        {chip('None', r.horiz.rows === 'none', () => set({ horiz: { ...r.horiz, rows: 'none' } }, 'No horizontals.'))}
+      </View>
+      {r.horiz.rows !== 'none' ? size(r.horiz.size, (s) => set({ horiz: { ...r.horiz, size: s } }, `Horizontals #${s}.`)) : null}
+      {r.horiz.rows === 'spacing' ? (
+        <View style={styles.row2}>
+          <SetNum label="Up the wall every" unit="in" value={r.horiz.spacingIn} onSet={(v) => v > 0 && set({ horiz: { ...r.horiz, spacingIn: v } }, `Horizontals every ${v}" up the wall.`)} />
+        </View>
+      ) : null}
+      {r.horiz.rows === 'count' ? (
+        <View style={styles.row2}>
+          <SetNum label="Rows" unit="rows" value={r.horiz.count} onSet={(v) => set({ horiz: { ...r.horiz, count: Math.round(v) } }, `${Math.round(v)} rows.`)} />
+        </View>
+      ) : null}
+      {steel && steel.rows ? <Text style={styles.help}>{steel.rows} rows of bars along every wall, an L-bar at each corner and tee, lapped.</Text> : null}
+
+      {runs.some((x) => /inside/i.test(x.run.name)) ? (
+        <>
+          <Text style={styles.groupHead}>Inside walls</Text>
+          <View style={styles.chips}>
+            {chip('Same as outside', !r.inside, () => set({ inside: null }, 'Inside walls: same bars as outside.'))}
+            {chip('Their own', !!r.inside, () => set({ inside: r.inside ?? { ...r.vert } }, 'Inside walls get their own verticals.'))}
+          </View>
+          {r.inside ? (
+            <>
+              {size(r.inside.size, (s) => set({ inside: { ...r.inside!, size: s } }, `Inside verticals #${s}.`))}
+              <View style={styles.row2}>
+                <SetNum label="Verticals on center (0 = none)" unit="in" value={r.inside.spacingIn} onSet={(v) => set({ inside: { ...r.inside!, spacingIn: v } }, v ? `Inside verticals @ ${v}".` : 'No verticals in the inside walls.')} />
+              </View>
+            </>
+          ) : null}
+        </>
+      ) : null}
+
+      <Text style={styles.groupHead}>Anchor bolts</Text>
+      <View style={styles.chips}>
+        {chip('Bolts', r.bolts.on, () => set({ bolts: { ...r.bolts, on: true } }, 'Anchor bolts on.'))}
+        {chip('No bolts', !r.bolts.on, () => set({ bolts: { ...r.bolts, on: false } }, 'No anchor bolts.'))}
+      </View>
+      {r.bolts.on ? (
+        <>
+          <View style={styles.chips}>
+            {['1/2" × 10" J-bolt', '5/8" × 10" J-bolt', '1/2" × 12" J-bolt', '5/8" × 12" J-bolt'].map((b) => chip(b, r.bolts.size === b, () => set({ bolts: { ...r.bolts, size: b } }, `${b}s.`)))}
+          </View>
+          <View style={styles.row2}>
+            <SetNum label="On center, max" unit="ft" value={r.bolts.spacingFt} onSet={(v) => v > 0 && set({ bolts: { ...r.bolts, spacingFt: v } }, `Bolts ${v}' on center.`)} />
+            <SetNum label="From corners and ends" unit="in" value={r.bolts.endIn} onSet={(v) => set({ bolts: { ...r.bolts, endIn: v } }, `Bolts within ${v}" of corners and ends.`)} />
+          </View>
+          {steel ? <Text style={styles.help}>{steel.bolts.total} bolts: {steel.bolts.runs.map((b) => `${b.name} ${b.count}`).join(', ')}.</Text> : null}
+        </>
+      ) : null}
+
+      <Pressable onPress={() => setWalls(!walls)} style={styles.listRow} accessibilityRole="button">
+        <Text style={styles.groupHead}>Each wall {walls ? '▾' : '›'}</Text>
+      </Pressable>
+      {walls
+        ? runs.map((run) => {
+            const w = wallOwn(run.run.name);
+            const insideRun = /inside/i.test(run.run.name);
+            const usual = insideRun && r.inside ? r.inside.spacingIn : r.vert.spacingIn;
+            const b = steel?.bolts.runs.find((x) => x.name === run.run.name)?.count ?? 0;
+            return (
+              <View key={`${run.run.name}${run.run.a.x}${run.run.a.y}`} style={styles.slabRow}>
+                <Text style={styles.listText}>
+                  {run.run.name} {fmtFtIn(run.run.measured)}
+                </Text>
+                <View style={styles.chips}>
+                  {chip(w.bolts === false ? 'No bolts' : `${b} bolts`, w.bolts !== false && r.bolts.on, () => setWall(run.run.name, { bolts: w.bolts === false }, w.bolts === false ? `${run.run.name}: bolts on.` : `${run.run.name}: no bolts.`), `Bolts on the ${run.run.name}`)}
+                </View>
+                <View style={styles.row2}>
+                  <SetNum
+                    label="Verticals on center (0 = none)"
+                    unit="in"
+                    value={w.vertSpacingIn ?? usual}
+                    onSet={(v) => setWall(run.run.name, { vertSpacingIn: v === usual ? undefined : v }, v ? `${run.run.name}: verticals @ ${v}".` : `${run.run.name}: no verticals.`)}
+                  />
+                </View>
+              </View>
+            );
+          })
+        : null}
+
+      {layout.slabs.length ? <Text style={styles.groupHead}>Slabs</Text> : null}
+      {layout.slabs.map((sl) => {
+        const key = spotKey(sl.at);
+        const cur = r.slabs[key];
+        const name = `Slab ${sl.pour}${layout.slabs.filter((x) => x.pour === sl.pour).length > 1 ? ` (${sl.name})` : ''}`;
+        return (
+          <View key={key} style={styles.slabRow}>
+            <Text style={styles.listText}>
+              {name}: {Math.round(sl.face.clearArea).toLocaleString()} sq ft
+            </Text>
+            {cur ? (
+              slabBox(cur, (s, text) => set({ slabs: { ...r.slabs, [key]: s } }, text), name)
+            ) : (
+              <View style={styles.listRow}>
+                <Text style={styles.problem}>No rebar yet</Text>
+                <Pressable onPress={() => onSave(withPieceSteel(spec, { slab: sl.at }), `${name}: #4 @ 18" both ways.`)} style={styles.small} accessibilityRole="button">
+                  <Text style={styles.smallText}>Add rebar</Text>
+                </Pressable>
+                <Pressable onPress={() => set({ slabs: { ...r.slabs, [key]: { ...NO_SLAB_STEEL } } }, `${name}: no steel.`)} style={styles.small} accessibilityRole="button">
+                  <Text style={styles.smallText}>None</Text>
+                </Pressable>
+              </View>
+            )}
+          </View>
+        );
+      })}
+
+      {layout.pieces.some((p) => p.layers.length) ? <Text style={styles.groupHead}>Steps & pads</Text> : null}
+      {layout.pieces.map((pc, i) => {
+        if (!pc.layers.length) return null;
+        const cur = r.pieces[String(i)];
+        const put = (v: SlabSteel | StepsSteel, text: string) => set({ pieces: { ...r.pieces, [String(i)]: v } }, text);
+        const round = pc.spec.shape !== 'square';
+        return (
+          <View key={i} style={styles.slabRow}>
+            <Text style={styles.listText}>{pc.name}</Text>
+            {!cur ? (
+              <View style={styles.listRow}>
+                <Text style={styles.problem}>No rebar yet</Text>
+                <Pressable onPress={() => onSave(withPieceSteel(spec, { piece: i }), `${pc.name}: rebar added.`)} style={styles.small} accessibilityRole="button">
+                  <Text style={styles.smallText}>Add rebar</Text>
+                </Pressable>
+                <Pressable onPress={() => put(pc.spec.kind === 'steps' ? { ...NO_STEPS_STEEL } : { ...NO_SLAB_STEEL }, `${pc.name}: no steel.`)} style={styles.small} accessibilityRole="button">
+                  <Text style={styles.smallText}>None</Text>
+                </Pressable>
+              </View>
+            ) : pc.spec.kind === 'steps' && 'noseSize' in cur ? (
+              <>
+                <Text style={styles.sub}>Bar in each tread nose{round ? ', bent to the curve' : ''}</Text>
+                {size(cur.noseSize, (s) => put({ ...cur, noseSize: s }, s ? `${pc.name}: #${s} in each nose.` : `${pc.name}: no nose bars.`), 'None')}
+                <Text style={styles.sub}>Dowels into the wall</Text>
+                {size(cur.dowelSize, (s) => put({ ...cur, dowelSize: s, dowelSpacingIn: s ? cur.dowelSpacingIn || 24 : 0 }, s ? `${pc.name}: #${s} dowels.` : `${pc.name}: no dowels.`), 'None')}
+                {cur.dowelSize ? (
+                  <View style={styles.row2}>
+                    <SetNum label="On center (0 = none)" unit="in" value={cur.dowelSpacingIn} onSet={(v) => put({ ...cur, dowelSpacingIn: v }, v ? `${pc.name}: dowels @ ${v}".` : `${pc.name}: no dowels.`)} />
+                    <SetNum label="Into the wall" unit="in" value={cur.dowelIn} onSet={(v) => v > 0 && put({ ...cur, dowelIn: v }, `${pc.name}: dowels ${v}" into the wall.`)} />
+                  </View>
+                ) : null}
+              </>
+            ) : 'kind' in cur ? (
+              <>
+                {slabBox(cur, put, pc.name)}
+                {round && cur.kind === 'grid' ? <Text style={styles.help}>Plus a bar round the curved edge, bent to the curve.</Text> : null}
+              </>
+            ) : null}
+          </View>
+        );
+      })}
+
+      <Pressable
+        onPress={() => onSave({ ...spec, rebar: undefined, rebarWarnOff: true }, 'Rebar and bolts taken out of the layout.')}
+        style={styles.linkRow}
+        accessibilityRole="button"
+      >
+        <Text style={[styles.smallText, styles.danger]}>Take all rebar and bolts out</Text>
+      </Pressable>
+      {doneBtn(onClose)}
+    </View>
+  );
+}
+
+const doneBtn = (onClose: () => void) => (
+  <View style={styles.doneRow}>
+    <Pressable onPress={onClose} style={styles.done} accessibilityRole="button">
+      <Text style={styles.doneText}>Done</Text>
+    </Pressable>
+  </View>
+);
+
 function LenBox({ label, value, onChange, autoFocus, wide }: { label: string; value: string; onChange: (v: string) => void; autoFocus?: boolean; wide?: boolean }) {
   const ft = parseFtIn(value);
   return (
@@ -755,13 +1262,13 @@ function LenBox({ label, value, onChange, autoFocus, wide }: { label: string; va
   );
 }
 
-function NumBox({ label, unit, value, onChange }: { label: string; unit: string; value: string; onChange: (v: string) => void }) {
+function NumBox({ label, unit, value, onChange, onDone }: { label: string; unit: string; value: string; onChange: (v: string) => void; onDone?: () => void }) {
   return (
     <View style={styles.field}>
       <Text style={styles.fieldLabel}>
         {label} ({unit})
       </Text>
-      <TextInput style={styles.input} value={value} onChangeText={onChange} keyboardType="decimal-pad" accessibilityLabel={`${label}, ${unit}`} />
+      <TextInput style={styles.input} value={value} onChangeText={onChange} onBlur={onDone} keyboardType="decimal-pad" accessibilityLabel={`${label}, ${unit}`} />
     </View>
   );
 }
@@ -847,6 +1354,8 @@ const getStyles = themed(() => ({
   runLen: { fontSize: 20, fontWeight: '800', color: colors.text, marginLeft: 8 },
   editRow: { flexDirection: 'row', alignItems: 'flex-end', gap: 8, marginBottom: 8 },
   calcLine: { fontSize: 14, color: colors.subtext, marginVertical: 14, lineHeight: 19 },
+  bigBtn: { flex: 0, marginTop: 10 },
+  linkRow: { minHeight: 44, justifyContent: 'center', marginTop: 10 },
 }));
 
 // Rebuilt when the colors or text size change.

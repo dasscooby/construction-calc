@@ -12,19 +12,24 @@ import { Settings, useSettings } from '../lib/settings';
 import type { DocMedia } from '../report/docStyle';
 import { dec } from '../tools/format';
 import { liveActivitiesSupported } from '../widgets/bridge';
-import { openReport } from '../report/open';
+import { openReport, PageSize } from '../report/open';
+import { buildPlanSet } from '../report/planSet';
+import { PAPERS, paperOf } from '../report/pager';
+import { setPaper, usePaper } from '../lib/paperPref';
 import { buildBid, buildBill, buildChange, lineAmount, priceTotals } from '../report/billing';
-import { bidOptions, lineFor, refreshLines, UNITS } from '../report/bidOptions';
+import { bidOptions, lineFor, missingLines, refreshLines, remapLines, UNITS } from '../report/bidOptions';
 import PickSheet from './PickSheet';
 import SignaturePad from './SignaturePad';
 import { orderText, PLACE_TEXT, sendOrder } from '../lib/order';
 import { dayName, fetchForecast, pourWarnings } from '../lib/weather';
 import type { ConcreteOrder } from '../lib/jobs';
-import { buildReport, figureItems, FiguredItem, foundationDrawings, jobTotals, layoutItemDrawings } from '../report/report';
+import { buildReport, figureItems, FiguredItem, foundationDrawings, jobTotals, layoutItemDrawings, pieceName } from '../report/report';
 import { buildLayout } from '../report/foundationLayout';
 import { LayoutRaw, runList } from '../report/layoutItems';
+import { noSteelWarning, withRebar } from '../report/layoutRebar';
 import { fmtFtIn, Start, startFromJob } from '../lib/layoutEdit';
 import { mergeSummary, pickBackup, shareBackup } from '../lib/backup';
+import { nav } from '../lib/nav';
 import LayoutEditor from './LayoutEditor';
 import DrawingView from './DrawingView';
 import HeightRuns from './HeightRuns';
@@ -42,6 +47,15 @@ export default function JobsScreen({ onOpenItem }: Props) {
   const jobs = useJobs();
   const [openId, setOpenId] = useState<string | null>(null);
   const [newName, setNewName] = useState('');
+  // Asked from a tool to lay out a job's foundation: open that job (it opens its layout).
+  useEffect(() => {
+    const open = () => {
+      const id = nav.peekLayout();
+      if (id) setOpenId(id);
+    };
+    open();
+    return nav.subscribe(open);
+  }, []);
   const job = jobs.find((j) => j.id === openId);
 
   if (job) return <JobDetail job={job} onBack={() => setOpenId(null)} onOpenItem={(it) => onOpenItem(job, it)} />;
@@ -76,7 +90,7 @@ export default function JobsScreen({ onOpenItem }: Props) {
         jobs.map((j) => (
           <Pressable key={j.id} onPress={() => setOpenId(j.id)} accessibilityRole="button" style={({ pressed }) => [styles.card, pressed && styles.pressed]}>
             <View style={styles.cardHead}>
-              <Text style={styles.cardTitle}>{j.name}</Text>
+              <JobName job={j} />
               <Text style={styles.cardMeta}>{dayLabel(j.createdAt)}</Text>
             </View>
             {j.address ? <Text style={styles.cardSub}>{j.address}</Text> : null}
@@ -88,6 +102,56 @@ export default function JobsScreen({ onOpenItem }: Props) {
       )}
       <BackupCard jobs={jobs} />
     </ScrollView>
+  );
+}
+
+/** A job's name with a ✎ Rename button: a box filled in with the name, Save or Cancel. A blank name isn't saved. */
+function JobName({ job, big }: { job: Job; big?: boolean }) {
+  const [text, setText] = useState<string | null>(null);
+  const save = () => {
+    if (text === null) return;
+    if (jobStore.rename(job.id, text)) {
+      feel.success();
+      setText(null);
+    }
+  };
+  if (text === null) {
+    return (
+      <View style={styles.nameRow}>
+        <Text style={big ? styles.nameBig : styles.cardTitle} numberOfLines={big ? 3 : 2}>
+          {job.name}
+        </Text>
+        <Pressable onPress={() => (feel.tap(), setText(job.name))} style={styles.renameBtn} accessibilityRole="button" accessibilityLabel={`Rename ${job.name}`} hitSlop={8}>
+          <Text style={styles.renameText}>✎ Rename</Text>
+        </Pressable>
+      </View>
+    );
+  }
+  const blank = !text.trim();
+  return (
+    <View style={styles.renameBox}>
+      <TextInput
+        style={styles.renameInput}
+        value={text}
+        onChangeText={setText}
+        autoFocus
+        selectTextOnFocus
+        returnKeyType="done"
+        onSubmitEditing={save}
+        placeholder="Job name"
+        placeholderTextColor={colors.faint}
+        accessibilityLabel="Job name, rename"
+      />
+      {blank ? <Text style={styles.warn}>A job needs a name.</Text> : null}
+      <View style={styles.renameBtns}>
+        <Pressable onPress={() => setText(null)} style={styles.smallBtn} accessibilityRole="button">
+          <Text style={styles.smallBtnText}>Cancel</Text>
+        </Pressable>
+        <Pressable onPress={save} style={[styles.smallBtn, styles.saveBtn, blank && styles.disabled]} disabled={blank} accessibilityRole="button">
+          <Text style={[styles.smallBtnText, styles.saveText]}>Save</Text>
+        </Pressable>
+      </View>
+    </View>
   );
 }
 
@@ -140,6 +204,17 @@ function JobDetail({ job, onBack, onOpenItem }: { job: Job; onBack: () => void; 
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [layoutOpen, setLayoutOpen] = useState<{ start: Start | null; preset?: 'barn' } | null>(null);
   const figured = useMemo(() => figureItems(job), [job]);
+  // Sent here from a tool's "Lay out the whole foundation": open the editor (from the house in the job, if any).
+  useEffect(() => {
+    const open = () => {
+      if (nav.peekLayout() !== job.id) return;
+      nav.takeLayout();
+      setLayoutOpen({ start: job.items.some((it) => it.toolId === 'foundation-layout') ? null : startFromJob(figured, job) });
+    };
+    open();
+    return nav.subscribe(open);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [job.id]);
   const report = useMemo(() => buildReport(job, prefs, { crew: true }), [job, prefs]);
   const totals = useMemo(() => jobTotals(figured, job), [figured, job]);
   const [scanning, setScanning] = useState(false);
@@ -199,14 +274,7 @@ function JobDetail({ job, onBack, onOpenItem }: { job: Job; onBack: () => void; 
         </Pressable>
       </View>
       <ScrollView contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled">
-        <TextInput
-          style={styles.nameInput}
-          value={job.name}
-          onChangeText={(name) => jobStore.edit(job.id, { name })}
-          placeholder="Job name"
-          placeholderTextColor={colors.faint}
-          accessibilityLabel="Job name"
-        />
+        <JobName job={job} big />
         <TextInput
           style={styles.field}
           value={job.address}
@@ -261,6 +329,7 @@ function JobDetail({ job, onBack, onOpenItem }: { job: Job; onBack: () => void; 
         <Pressable onPress={() => Share.share({ title: job.name, message: report.text }).catch(() => {})} style={styles.linkBtn} accessibilityRole="button">
           <Text style={styles.linkText}>Text the crew sheet instead</Text>
         </Pressable>
+        <PlanSetCard job={job} figured={figured} />
 
         <Prices job={job} figured={figured} />
 
@@ -681,10 +750,10 @@ function PlanReader({ job }: { job: Job }) {
  * Makes a document with your logo (and, on the phone, the job's photos and scanned plans) and opens it.
  * Web: everything is already in memory, so it opens straight from the tap (Safari only allows that).
  */
-export function sendDoc(job: Job | null, s: Settings, make: (m: DocMedia) => { html: string; text: string }, title: string): void {
+export function sendDoc(job: Job | null, s: Settings, make: (m: DocMedia) => { html: string; text: string }, title: string, page?: PageSize): void {
   if (Platform.OS === 'web') {
     const r = make({ logo: s.docs.logo || undefined });
-    openReport(r.html, r.text, title);
+    openReport(r.html, r.text, title, page);
     return;
   }
   void (async () => {
@@ -692,8 +761,42 @@ export function sendDoc(job: Job | null, s: Settings, make: (m: DocMedia) => { h
     const photos = job?.photos?.length ? await asDataUris(job.photos) : [];
     const scans = job?.scans?.length ? await scansForReport(job.scans) : [];
     const r = make({ logo, photos, scans });
-    openReport(r.html, r.text, title);
+    openReport(r.html, r.text, title, page);
   })();
+}
+
+/** The drawings as a plan set: sideways sheets with a title block, on the paper picked here (remembered). */
+function PlanSetCard({ job, figured }: { job: Job; figured: FiguredItem[] }) {
+  const prefs = useSettings();
+  const paperId = usePaper();
+  const paper = paperOf(paperId);
+  return (
+    <View style={styles.card}>
+      <Text style={styles.label}>Plan set</Text>
+      <Text style={styles.help}>The drawings on sideways sheets with a title block, like engineered plans. Letter for home and the crew; the big sizes for a print shop.</Text>
+      <View style={styles.chipRow}>
+        {PAPERS.map((pp) => (
+          <Pressable
+            key={pp.id}
+            onPress={() => setPaper(pp.id)}
+            style={[styles.chip, pp.id === paperId && styles.chipOn]}
+            accessibilityRole="button"
+            accessibilityState={{ selected: pp.id === paperId }}
+            accessibilityLabel={`Paper ${pp.label}`}
+          >
+            <Text style={[styles.chipText, pp.id === paperId && styles.chipTextOn]}>{pp.label}</Text>
+          </Pressable>
+        ))}
+      </View>
+      <Pressable
+        onPress={() => sendDoc(job, prefs, (m) => buildPlanSet(job, prefs, figured, paper, undefined, m), `${job.name} plans`, { wIn: paper.hIn, hIn: paper.wIn })}
+        style={[styles.secondary, { marginBottom: 0 }]}
+        accessibilityRole="button"
+      >
+        <Text style={styles.secondaryText}>Plan set · {paper.label}</Text>
+      </Pressable>
+    </View>
+  );
 }
 
 /** Start a foundation layout: from the house already in the job, the container barn preset, or blank. */
@@ -720,12 +823,39 @@ function BuildLayoutCard({ job, figured, onOpen }: { job: Job; figured: FiguredI
   );
 }
 
+/**
+ * A layout with pieces that have no rebar or bolts set yet: says so, and one tap adds them with the usual
+ * (changeable after, in the layout's Rebar & bolts), or puts the warning away. Nothing is added on its own.
+ */
+function NoSteelNote({ job, compact }: { job: Job; compact?: boolean }) {
+  const it = job.items.find((x) => x.toolId === 'foundation-layout');
+  const raw = it?.raw as unknown as LayoutRaw | undefined;
+  const warn = useMemo(() => (raw?.layout?.house?.length ? noSteelWarning(buildLayout(raw.layout), raw) : ''), [raw]);
+  if (!raw || !warn) return null;
+  const save = (layout: LayoutRaw['layout']) => jobStore.saveLayout(job.id, { ...raw, layout } as never);
+  return (
+    <View style={[styles.overlap, styles.lineGap]}>
+      <Text style={styles.warn}>{warn}</Text>
+      {compact ? <Text style={styles.help}>The bid has no rebar or anchor bolt lines for these.</Text> : null}
+      <Pressable onPress={() => (feel.success(), save(withRebar(raw.layout, raw)))} style={[styles.primary, styles.wide]} accessibilityRole="button">
+        <Text style={styles.primaryText}>Add rebar & bolts</Text>
+        <Text style={styles.primarySub}>The usual, changeable after in the layout: (2) #4 footing, #4 @ 24" walls, #4 @ 18" slabs, 1/2" J-bolts @ 6'</Text>
+      </Pressable>
+      <Pressable onPress={() => (feel.tap(), save({ ...raw.layout, rebarWarnOff: true }))} style={styles.linkBtn} accessibilityRole="button">
+        <Text style={styles.linkText}>None on this job, stop asking</Text>
+      </Pressable>
+    </View>
+  );
+}
+
 /** The job's foundation layout: plan, runs, pours, and the way back into the editor. */
 function LayoutCard({ job, figured, onEdit, replacedCount }: { job: Job; figured: FiguredItem[]; onEdit: () => void; replacedCount: number }) {
   const prefs = useSettings();
   const raw = job.items.find((it) => it.toolId === 'foundation-layout')!.raw as unknown as LayoutRaw;
   const l = useMemo(() => (raw?.layout?.house?.length ? buildLayout(raw.layout) : null), [raw]);
   const drawings = useMemo(() => layoutItemDrawings(job, figured, prefs.company.name), [job, figured, prefs.company.name]);
+  // Walls, footings or slabs still in the job on their own: likely the same ones the layout has.
+  const overlap = figured.filter((f) => !f.item.id.includes(':') && ['footings', 'wall-forms', 'slab', 'slab-layout', 'beam-bars'].includes(f.tool.id));
   return (
     <View style={styles.card}>
       <Text style={styles.label}>Foundation layout</Text>
@@ -745,11 +875,26 @@ function LayoutCard({ job, figured, onEdit, replacedCount }: { job: Job; figured
               {p}
             </Text>
           ))}
+          <NoSteelNote job={job} />
         </>
       ) : null}
       {drawings ? (
         <View style={styles.lineGap}>
           <DrawingView drawings={drawings} />
+        </View>
+      ) : null}
+      {overlap.length ? (
+        <View style={[styles.overlap, styles.lineGap]}>
+          <Text style={styles.label}>Also in this job</Text>
+          <Text style={styles.help}>These are counted on their own too. If the layout already has them, take them out of the bid so they aren't counted twice.</Text>
+          {overlap.map((f) => (
+            <View key={f.item.id} style={styles.sumRow}>
+              <Text style={styles.sumLabel}>{pieceName(f, figured, job)}</Text>
+              <Pressable onPress={() => (feel.tap(), jobStore.coveredByLayout(job.id, f.item.id))} style={styles.smallBtn} accessibilityRole="button" accessibilityLabel={`The layout covers ${pieceName(f, figured, job)}`}>
+                <Text style={styles.smallBtnText}>The layout covers it</Text>
+              </Pressable>
+            </View>
+          ))}
         </View>
       ) : null}
       <Pressable onPress={() => (feel.tap(), onEdit())} style={[styles.primary, styles.wide]} accessibilityRole="button">
@@ -961,8 +1106,10 @@ function Prices({ job, figured }: { job: Job; figured: FiguredItem[] }) {
 
   // What each line can be, found in the job. Lines you tied to the job keep today's numbers.
   const sources = useMemo(() => bidOptions(figured, prefs, job), [figured, prefs, job]);
+  const missing = useMemo(() => missingLines(sources, job.lines ?? []), [sources, job.lines]);
   useEffect(() => {
-    const next = refreshLines(lines, sources);
+    // Lines made before the layout took over a piece move to the layout's piece; then today's numbers.
+    const next = refreshLines(remapLines(lines, job, sources), sources);
     if (next.some((l, i) => l !== lines[i])) jobStore.setLines(job.id, next);
   }, [sources]);
   const [picking, setPicking] = useState<{ kind: 'what' | 'measure' | 'unit'; line: number | 'new' } | null>(null);
@@ -983,6 +1130,7 @@ function Prices({ job, figured }: { job: Job; figured: FiguredItem[] }) {
   return (
     <>
       <Text style={styles.section}>Bid and bill</Text>
+      <NoSteelNote job={job} compact />
       <TextInput
         style={[styles.field, styles.customer]}
         value={job.customer ?? ''}
@@ -1041,6 +1189,18 @@ function Prices({ job, figured }: { job: Job; figured: FiguredItem[] }) {
         <Pressable onPress={() => setPicking({ kind: 'what', line: 'new' })} style={styles.addLine} accessibilityRole="button">
           <Text style={styles.addLineText}>+ Add a line</Text>
         </Pressable>
+        {missing.length ? (
+          <Pressable
+            onPress={() => {
+              feel.tap();
+              jobStore.setLines(job.id, [...lines, ...missing.map((l) => ({ id: '', ...l }))]);
+            }}
+            style={styles.addLine}
+            accessibilityRole="button"
+          >
+            <Text style={styles.addLineText}>+ Add every part of the job ({missing.length})</Text>
+          </Pressable>
+        ) : null}
         <PickSheet
           visible={!!picking}
           title={picking?.kind === 'what' ? 'What is it?' : picking?.kind === 'measure' ? 'Measured by' : 'Unit'}
@@ -1261,6 +1421,16 @@ const getStyles = themed(() => ({
   secondaryText: { fontSize: 17, fontWeight: '700', color: colors.accent },
   secondarySub: { fontSize: 14, color: colors.subtext, marginTop: 2, textAlign: 'center', paddingHorizontal: 12 },
   danger: { color: colors.danger },
+  overlap: { backgroundColor: colors.warningBg, borderRadius: 12, padding: 12 },
+  nameRow: { flexDirection: 'row', alignItems: 'center', gap: 8, flexShrink: 1, flex: 1 },
+  nameBig: { fontSize: 28, fontWeight: '800', color: colors.text, paddingVertical: 6, flexShrink: 1 },
+  renameBtn: { paddingHorizontal: 10, minHeight: 40, borderRadius: 10, backgroundColor: colors.panel2, justifyContent: 'center' },
+  renameText: { fontSize: 14, fontWeight: '800', color: colors.accent },
+  renameBox: { flex: 1, marginBottom: 6 },
+  renameInput: { backgroundColor: colors.bg, color: colors.text, fontSize: 22, fontWeight: '800', borderRadius: 10, paddingHorizontal: 12, minHeight: 50, borderWidth: 1, borderColor: colors.accent },
+  renameBtns: { flexDirection: 'row', gap: 8, marginTop: 8 },
+  saveBtn: { backgroundColor: colors.accent },
+  saveText: { color: colors.accentText },
   disabled: { opacity: 0.4 },
   card: { backgroundColor: colors.panel, borderRadius: 16, padding: 14, marginBottom: 10 },
   pressed: { backgroundColor: colors.panel2 },

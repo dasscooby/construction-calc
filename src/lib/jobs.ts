@@ -178,6 +178,13 @@ export const jobStore = {
   edit(id: string, patch: Partial<Pick<Job, 'name' | 'address' | 'notes' | 'customer' | 'taxPct' | 'paid' | 'slabBid' | 'together'>>) {
     update(id, (j) => ({ ...j, ...patch }));
   },
+  /** A new name for a job (trimmed). A blank name is refused: returns false and nothing changes. */
+  rename(id: string, name: string): boolean {
+    const clean = name.replace(/\s+/g, ' ').trim();
+    if (!clean || !jobs.some((j) => j.id === id)) return false;
+    update(id, (j) => ({ ...j, name: clean }));
+    return true;
+  },
   remove(id: string) {
     set(jobs.filter((j) => j.id !== id));
   },
@@ -213,6 +220,13 @@ export const jobStore = {
     const r = mergeBackup(jobs, text);
     if (!r.problem && (r.added || r.copies)) set(r.jobs);
     return r;
+  },
+  /** The foundation layout already counts this piece: hide it and leave it out of totals and the bid. */
+  coveredByLayout(jobId: string, itemId: string) {
+    update(jobId, (j) => {
+      const layout = j.items.find((it) => it.toolId === 'foundation-layout');
+      return layout ? { ...j, items: j.items.map((it) => (it.id === itemId ? { ...it, replacedBy: layout.id } : it)) } : j;
+    });
   },
   /** Takes the layout out and brings back what it replaced. */
   removeLayout(jobId: string) {

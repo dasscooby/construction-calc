@@ -7,6 +7,7 @@
 
 import { ftIn } from '../tools/format';
 import type { Layout } from './foundationLayout';
+import { ledgeOf, slabDropIn } from './slabLedge';
 import { faceAt, Pt, RunResult } from './wallGraph';
 
 const n = (v: number) => Math.round(v * 10) / 10;
@@ -28,11 +29,13 @@ export interface LayoutDrawInfo {
   highlight?: { run?: number; face?: number };
   /** Just the plan (no legend or title block), for the editor */
   compact?: boolean;
+  /** Anchor bolts: where each one goes (on the middle of the wall), and the legend line */
+  bolts?: { spots: Pt[]; text: string };
 }
 
 /** Plan scale and placement, shared by the drawing and the hit-test. */
 export function planFrame(l: Layout) {
-  const pts = l.graph.runs.flatMap((r) => wallRect(r));
+  const pts = [...l.graph.runs.flatMap((r) => wallRect(r)), ...(l.pieces ?? []).flatMap((pc) => pc.layers.flatMap((ly) => ly.poly))];
   const minX = Math.min(...pts.map((p) => p.x));
   const maxX = Math.max(...pts.map((p) => p.x));
   const minY = Math.min(...pts.map((p) => p.y));
@@ -108,7 +111,8 @@ export function hitLayout(l: Layout, px: number, py: number): { run?: number; fa
 export function graphPlanSvg(l: Layout, info: LayoutDrawInfo): string {
   const F = planFrame(l);
   const { W, s, X, Y, planH } = F;
-  const legendH = info.compact ? 0 : 24 + 32 * (2 + (l.spec.footing ? 1 : 0) + l.slabs.length);
+  const ledge = ledgeOf(l);
+  const legendH = info.compact ? 0 : 24 + 32 * (2 + (l.spec.footing ? 1 : 0) + l.slabs.length + (l.slabs.length ? 1 : 0) + (info.bolts ? 1 : 0));
   const titleH = info.compact ? 6 : 76;
   const H = Math.round(planH + legendH + titleH);
   const path = (pts: Pt[]) => `M${pts.map((p) => `${X(p.x)} ${Y(p.y)}`).join(' L')} Z`;
@@ -118,7 +122,7 @@ export function graphPlanSvg(l: Layout, info: LayoutDrawInfo): string {
     `<defs><pattern id="lhatch" width="9" height="9" patternUnits="userSpaceOnUse" patternTransform="rotate(45)"><line x1="0" y1="0" x2="0" y2="9" stroke="#111" stroke-width="1.2"/></pattern>` +
       `<pattern id="ldots" width="12" height="12" patternUnits="userSpaceOnUse"><circle cx="3" cy="3" r="1" fill="#9a9a9a"/><circle cx="9" cy="9" r="1" fill="#9a9a9a"/></pattern></defs>`,
   );
-  out.push(`<rect x="6" y="6" width="${W - 12}" height="${H - 12}" fill="none" stroke="#111" stroke-width="2"/>`);
+  out.push(`<rect class="dframe" x="6" y="6" width="${W - 12}" height="${H - 12}" fill="none" stroke="#111" stroke-width="2"/>`);
   const hl = info.highlight ?? {};
   // On the phone the plan is about half size: bigger, shorter labels so they read in sunlight.
   const fs = info.compact ? 1.9 : 1;
@@ -140,7 +144,47 @@ export function graphPlanSvg(l: Layout, info: LayoutDrawInfo): string {
   for (const r of rects) out.push(`<path d="${path(r)}" fill="none" stroke="#111" stroke-width="5" stroke-linejoin="miter"/>`);
   for (const r of rects) out.push(`<path d="${path(r)}" fill="#ffffff" stroke="none"/>`);
   rects.forEach((r, i) => out.push(`<path d="${path(r)}" fill="${l.runs[i].existing ? '#d9d9d9' : 'url(#lhatch)'}" stroke="none"/>`));
+  // Anchor bolts: a tick across the wall at each one.
+  for (const p of info.bolts?.spots ?? []) {
+    const run = l.graph.runs.find((r) => {
+      const d = unit(r.run);
+      const L = Math.hypot(r.run.b.x - r.run.a.x, r.run.b.y - r.run.a.y);
+      const along = (p.x - r.run.a.x) * d.x + (p.y - r.run.a.y) * d.y;
+      return Math.abs((p.x - r.run.a.x) * -d.y + (p.y - r.run.a.y) * d.x) < 1e-3 && along > -r.run.thick && along < L + r.run.thick;
+    });
+    if (!run) continue;
+    const d = unit(run.run);
+    const h = run.run.thick / 2 + 0.25;
+    out.push(`<line x1="${X(p.x - d.y * h)}" y1="${Y(p.y + d.x * h)}" x2="${X(p.x + d.y * h)}" y2="${Y(p.y - d.x * h)}" stroke="#b5371a" stroke-width="${info.compact ? 3 : 2.2}" stroke-linecap="round"/>`);
+  }
   if (hl.run !== undefined && rects[hl.run]) out.push(`<path d="${path(rects[hl.run])}" fill="${HILITE}" fill-opacity="0.75" stroke="${HILITE}" stroke-width="2"/>`);
+  // Steps and pads: each step's outline, the top one shaded; named beside it, along the wall (the wall's
+  // own label moves out past it).
+  const pieceBoxes = (l.pieces ?? [])
+    .filter((pc) => pc.layers.length)
+    .map((pc) => {
+      const xs = pc.layers[0].poly.map((p) => Number(X(p.x)));
+      const ys = pc.layers[0].poly.map((p) => Number(Y(p.y)));
+      return { pc, x0: Math.min(...xs), x1: Math.max(...xs), y0: Math.min(...ys), y1: Math.max(...ys) };
+    });
+  const bx = (F.minX + F.maxX) / 2;
+  const by = (F.minY + F.maxY) / 2;
+  for (const { pc, x0, x1, y0, y1 } of [...pieceBoxes]) {
+    pc.layers.forEach((ly, k) => out.push(`<path d="${path(ly.poly)}" fill="${k === pc.layers.length - 1 ? '#efece6' : '#ffffff'}" stroke="#111" stroke-width="${k === 0 ? 2.4 : 1.4}"/>`));
+    // Off a top or bottom wall: the name to its right; off a side wall: under it.
+    const c = pc.layers[0].poly.reduce((t, p) => ({ x: t.x + p.x / pc.layers[0].poly.length, y: t.y + p.y / pc.layers[0].poly.length }), { x: 0, y: 0 });
+    const offSide = Math.abs(c.x - bx) / Math.max(F.maxX - F.minX, 1) > Math.abs(c.y - by) / Math.max(F.maxY - F.minY, 1);
+    const size = 12 * fs;
+    const w = pc.name.length * size * 0.62;
+    // The name's own box, for the wall labels to keep clear of too.
+    const right = c.x > bx;
+    // (Under it, running away from the wall, so it doesn't sit over the wall line.)
+    pieceBoxes.push(offSide ? { pc, x0: right ? x0 : x1 - w, x1: right ? x0 + w : x1, y0: y1, y1: y1 + size + 4 } : { pc, x0: x1 + 5, x1: x1 + 5 + w, y0: (y0 + y1) / 2 - size / 2, y1: (y0 + y1) / 2 + size / 2 });
+    if (offSide) out.push(`<text x="${n(right ? x0 : x1)}" y="${n(y1 + size + 2)}" text-anchor="${right ? 'start' : 'end'}" ${FONT} font-size="${n(size)}" font-weight="800" fill="#111">${esc(pc.name.toUpperCase())}</text>`);
+    else out.push(`<text x="${n(x1 + 5)}" y="${n((y0 + y1) / 2 + size / 3)}" ${FONT} font-size="${n(size)}" font-weight="800" fill="#111">${esc(pc.name.toUpperCase())}</text>`);
+  }
+  // Slab edges on the ledge: dashed, under the walls.
+  if (ledge && !info.compact) for (const x of ledge.slabs) out.push(`<path d="${path(x.poured)}" fill="none" stroke="#111" stroke-width="1.2" stroke-dasharray="5 4"/>`);
 
   // Run labels: name and length as measured, beside each wall, on the side away from the middle (house
   // walls: away from the middle of the house, so a shared wall's label stays in the house; inside walls
@@ -181,11 +225,17 @@ export function graphPlanSvg(l: Layout, info: LayoutDrawInfo): string {
       }
     }
     const gap = (r.run.thick / 2) * s + (inside ? 12 : 20) * fs;
-    const tx = Number(X(mx)) + nx * gap;
-    const ty = Number(Y(my)) + ny * gap;
+    let tx = Number(X(mx)) + nx * gap;
+    let ty = Number(Y(my)) + ny * gap;
     const vertical = Math.abs(d.x) < Math.abs(d.y);
     const name = info.compact ? r.run.name.replace(/^(Main|Add-on( \d+)?) /, '') : r.run.name;
     const text = `${name.toUpperCase()} ${ft(r.run.measured)}${info2.existing ? ' (EXISTING)' : ''}`;
+    // Clear of any steps or pad on this wall: moved out past it.
+    const half = { w: ((vertical ? 1 : text.length * 0.6) * (inside ? 12 : 14) * fs) / 2 + 3, h: ((vertical ? text.length * 0.6 : 1) * (inside ? 12 : 14) * fs) / 2 + 3 };
+    for (let k = 0; k < 60 && pieceBoxes.some((b) => tx + half.w > b.x0 && tx - half.w < b.x1 && ty + half.h > b.y0 && ty - half.h < b.y1); k++) {
+      tx += nx * 4;
+      ty += ny * 4;
+    }
     const on = hl.run === i;
     // On the phone, a label longer than its wall would run into the next one: the run list has it.
     const size = (inside ? 12 : 14) * fs;
@@ -264,6 +314,13 @@ export function graphPlanSvg(l: Layout, info: LayoutDrawInfo): string {
     ]);
   }
   legend.push([`<rect x="28" y="${n(ly + 14 + legend.length * 32)}" width="44" height="18" fill="url(#ldots)" stroke="#111" stroke-width="1"/>`, 'SLAB · SIZES CLEAR, WALL FACE TO WALL FACE']);
+  if (l.slabs.length) {
+    const drop = slabDropIn(l.spec, l.slabs[0].thick);
+    legend.push([
+      ledge ? `<line x1="28" y1="${n(ly + 23 + legend.length * 32)}" x2="72" y2="${n(ly + 23 + legend.length * 32)}" stroke="#111" stroke-width="1.2" stroke-dasharray="5 4"/>` : '',
+      `TOP OF SLAB ${drop > 0 ? `${inch(drop / 12)} BELOW` : 'FLUSH WITH'} TOP OF WALL${ledge ? ` · SLAB ON A ${inch(ledge.e)} LEDGE (DASHED)` : ''}`,
+    ]);
+  }
   for (const sl of l.slabs) {
     const rect = sl.face.rect;
     const yd = info.pourYd?.[sl.pour];
@@ -272,13 +329,19 @@ export function graphPlanSvg(l: Layout, info: LayoutDrawInfo): string {
       `SLAB ${sl.pour}: ${sl.name.toUpperCase()}, ${inch(sl.thick)}${rect ? ` · ${dim(rect.w)} × ${dim(rect.h)} CLEAR` : ''} · ${Math.round(sl.face.clearArea).toLocaleString()} SQ FT${yd ? ` · ${yd} YD` : ''}`,
     ]);
   }
+  if (info.bolts) {
+    const y = ly + 23 + legend.length * 32;
+    legend.push([`<line x1="28" y1="${n(y)}" x2="72" y2="${n(y)}" stroke="#111" stroke-width="1"/><line x1="50" y1="${n(y - 9)}" x2="50" y2="${n(y + 9)}" stroke="#b5371a" stroke-width="2.4" stroke-linecap="round"/>`, `ANCHOR BOLT: ${info.bolts.text}`]);
+  }
   legend.forEach(([sym, text], i) => {
     out.push(sym);
     out.push(`<text x="86" y="${n(ly + 29 + i * 32)}" ${FONT} font-size="14" font-weight="600" fill="#111">${esc(text)}</text>`);
   });
 
   // Title block.
+  // (In a group, so a plan set can take it off: the sheet has its own title block.)
   const ty = H - titleH - 6;
+  out.push(`<g class="tblock" data-h="${titleH + 6}">`);
   out.push(`<rect x="6" y="${n(ty)}" width="${W - 12}" height="${titleH}" fill="#ffffff" stroke="#111" stroke-width="2"/>`);
   out.push(`<line x1="${n(W * 0.55)}" y1="${n(ty)}" x2="${n(W * 0.55)}" y2="${n(ty + titleH)}" stroke="#111" stroke-width="1.5"/>`);
   out.push(`<text x="22" y="${n(ty + 34)}" ${FONT} font-size="24" font-weight="900" fill="#111">FOUNDATION PLAN</text>`);
@@ -286,6 +349,7 @@ export function graphPlanSvg(l: Layout, info: LayoutDrawInfo): string {
   out.push(`<text x="${n(W * 0.55 + 16)}" y="${n(ty + 28)}" ${FONT} font-size="17" font-weight="800" fill="#111">${esc(info.job)}</text>`);
   out.push(`<text x="${n(W * 0.55 + 16)}" y="${n(ty + 50)}" ${FONT} font-size="13" fill="#333">${esc(info.company || '')}</text>`);
   out.push(`<text x="${n(W * 0.55 + 16)}" y="${n(ty + 68)}" ${FONT} font-size="13" fill="#333">${esc(info.date)} · SHEET S1</text>`);
+  out.push('</g>');
   return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${W} ${H}" width="100%" role="img" aria-label="Plan view">${out.join('')}</svg>`;
 }
 
@@ -304,29 +368,84 @@ const clockwise = (pts: Pt[]) => {
   return a >= 0 ? pts : [...pts].reverse();
 };
 
-export function graphIsoSvg(l: Layout, highlight: { run?: number; face?: number } = {}): string {
+/**
+ * The order to draw square-cornered pieces in the 3D view (looking from the front right, so bigger
+ * x + y is nearer): a piece that is wholly behind another along x or y, where they overlap the other
+ * way, is drawn first. Sorting by the middle of each piece isn't enough: a long wall's middle can be
+ * nearer than a short wall in front of it, and the long one gets drawn over it.
+ */
+export function paintOrder(polys: Pt[][]): number[] {
+  const box = polys.map((p) => ({
+    x0: Math.min(...p.map((q) => q.x)),
+    x1: Math.max(...p.map((q) => q.x)),
+    y0: Math.min(...p.map((q) => q.y)),
+    y1: Math.max(...p.map((q) => q.y)),
+  }));
+  const e = 1e-6;
+  const behind = (a: number, b: number) => {
+    const A = box[a];
+    const B = box[b];
+    const overlapX = A.x0 < B.x1 - e && B.x0 < A.x1 - e;
+    const overlapY = A.y0 < B.y1 - e && B.y0 < A.y1 - e;
+    return (A.x1 <= B.x0 + e && overlapY) || (A.y1 <= B.y0 + e && overlapX);
+  };
+  const n = polys.length;
+  const after = Array.from({ length: n }, () => [] as number[]);
+  const waiting = new Array(n).fill(0);
+  for (let a = 0; a < n; a++)
+    for (let b = 0; b < n; b++)
+      if (a !== b && behind(a, b)) {
+        after[a].push(b);
+        waiting[b]++;
+      }
+  const mid = (i: number) => box[i].x0 + box[i].x1 + box[i].y0 + box[i].y1;
+  const out: number[] = [];
+  const done = new Set<number>();
+  while (out.length < n) {
+    // Of the pieces with nothing left behind them, the farthest back first; if none (shouldn't happen
+    // with walls that don't cross), the farthest back of what's left.
+    const ready = [...Array(n).keys()].filter((i) => !done.has(i) && waiting[i] === 0);
+    const pool = ready.length ? ready : [...Array(n).keys()].filter((i) => !done.has(i));
+    const next = pool.sort((u, v) => mid(u) - mid(v))[0];
+    done.add(next);
+    out.push(next);
+    for (const b of after[next]) waiting[b]--;
+  }
+  return out;
+}
+
+/**
+ * The layout in 3D. apart: pulled apart like a kit, the walls lifted off the footing and the slabs lifted
+ * off the walls, each piece named (slabs at their poured size, out over the ledge if there is one).
+ */
+export function graphIsoSvg(l: Layout, highlight: { run?: number; face?: number } = {}, opts: { apart?: boolean } = {}): string {
   const spec = l.spec;
   const fd = spec.footing ? spec.footing.depth : 0;
   const walls = l.graph.runs.map((r) => clockwise(wallRect(r)));
   const foots = l.graph.runs.map((r) => footRect(r)).map((f) => (f ? clockwise(f) : null));
-  const all = [...walls, ...foots.filter((f): f is Pt[] => !!f)].flat();
+  const all = [...walls, ...foots.filter((f): f is Pt[] => !!f), ...(l.pieces ?? []).flatMap((pc) => pc.layers.map((ly) => ly.poly))].flat();
   const span = Math.max(Math.max(...all.map((p) => p.x)) - Math.min(...all.map((p) => p.x)), Math.max(...all.map((p) => p.y)) - Math.min(...all.map((p) => p.y)), 1);
   const z = Math.max(1, span / 5 / Math.max(fd + spec.wall.height, 0.5)); // stretch the height so it reads
   const Hf = fd * z;
   const top = Hf + spec.wall.height * z;
   const slabT = l.slabs[0]?.thick ?? 4 / 12;
   const drop = spec.slabDropIn !== undefined ? spec.slabDropIn / 12 : spec.wall.height >= 6 ? spec.wall.height - slabT : 0;
-  const slabTop = top - drop * z;
+  // Pulled apart: each piece lifted clear of the one under it.
+  const gap = opts.apart ? Math.max(fd + spec.wall.height, 1) * z * 0.9 : 0;
+  const wallLift = gap;
+  const slabLift = 2 * gap + (opts.apart ? slabT * z : 0);
+  const slabTop = top - drop * z + slabLift;
+  const ledge = ledgeOf(l);
   const proj = (x: number, y: number, h: number) => ({ x: (x - y) * C30, y: (x + y) * 0.5 - h });
-  const ps = all.flatMap((p) => [proj(p.x, p.y, 0), proj(p.x, p.y, top)]);
+  const ps = all.flatMap((p) => [proj(p.x, p.y, 0), proj(p.x, p.y, top + wallLift), proj(p.x, p.y, Math.max(top + wallLift, slabTop))]);
   const minX = Math.min(...ps.map((p) => p.x));
   const maxX = Math.max(...ps.map((p) => p.x));
   const minY = Math.min(...ps.map((p) => p.y));
   const maxY = Math.max(...ps.map((p) => p.y));
   const W = 760;
   const pad = 34;
-  const k = Math.min((W - 2 * pad) / (maxX - minX || 1), 440 / (maxY - minY || 1));
-  const H = Math.round((maxY - minY) * k + 2 * pad + 20);
+  const k = Math.min((W - 2 * pad) / (maxX - minX || 1), (opts.apart ? 520 : 440) / (maxY - minY || 1));
+  const H = Math.round((maxY - minY) * k + 2 * pad + 20 + (opts.apart ? 30 : 0));
   const lx = (W - (maxX - minX) * k) / 2;
   const pt = (x: number, y: number, h: number) => {
     const q = proj(x, y, h);
@@ -344,15 +463,65 @@ export function graphIsoSvg(l: Layout, highlight: { run?: number; face?: number 
     out.push(`<polygon points="${poly.map((p) => pt(p.x, p.y, z1)).join(' ')}" fill="${topFill}" stroke="#55514b" stroke-width="0.9"/>`);
   };
   // Footings, then slabs, then walls; each set back to front.
-  if (spec.footing) for (const f of foots.filter((x): x is Pt[] => !!x).sort((a, b) => depth(a) - depth(b))) prism(f, 0, Hf, '#cfcac1', '#b9b5ad', '#9a958d');
-  for (const sl of l.slabs) {
-    const i = l.graph.faces.indexOf(sl.face);
-    out.push(`<polygon points="${clockwise(sl.face.clear).map((p) => pt(p.x, p.y, slabTop)).join(' ')}" fill="${highlight.face === i ? '#ffc58a' : '#dedad2'}" stroke="#55514b" stroke-width="0.9"/>`);
+  if (spec.footing) {
+    const fs = foots.filter((x): x is Pt[] => !!x);
+    for (const k of paintOrder(fs)) prism(fs[k], 0, Hf, '#cfcac1', '#b9b5ad', '#9a958d');
   }
-  walls
-    .map((w, i) => ({ w, i }))
-    .sort((a, b) => depth(a.w) - depth(b.w))
-    .forEach(({ w, i }) => (highlight.run === i ? prism(w, Hf, top, '#ffb366', '#ff9a40', '#e5822a') : prism(w, Hf, top, '#ece9e3', '#c9c5bd', '#a9a49b')));
+  const slabPoly = (sl: (typeof l.slabs)[number]) => clockwise(opts.apart ? ledge?.slabs.find((x) => x.slab === l.slabs.indexOf(sl))?.poured ?? sl.face.clear : sl.face.clear);
+  if (!opts.apart)
+    for (const sl of l.slabs) {
+      const i = l.graph.faces.indexOf(sl.face);
+      out.push(`<polygon points="${slabPoly(sl).map((p) => pt(p.x, p.y, slabTop)).join(' ')}" fill="${highlight.face === i ? '#ffc58a' : '#dedad2'}" stroke="#55514b" stroke-width="0.9"/>`);
+    }
+  // Steps and pads: a step's top at the top of the slab (or wall), stacked down from there; a pad's top at
+  // the top of the slab. Behind the building drawn before the walls, in front after.
+  const pieceTop = top - drop * z;
+  const middle = (all.reduce((t, p) => t + p.x + p.y, 0) / Math.max(all.length, 1));
+  // The ground: 8" below the top of the wall (as the section draws it), never below the top of the footing.
+  const ground = Math.max(Hf, top - (8 / 12) * z);
+  const pieceSets = (l.pieces ?? []).filter((pc) => pc.layers.length).map((pc) => {
+    const n2 = pc.layers.length;
+    const hz = pc.layers[0].h * z;
+    const steps = pc.spec.kind === 'steps';
+    return { pc, front: pc.layers[0].poly.reduce((t, p) => t + p.x + p.y, 0) / pc.layers[0].poly.length > middle, base: steps ? pieceTop - n2 * hz : ground, hz };
+  });
+  // Steps solid to the ground (the bottom step runs down to it); a pad on the ground.
+  const drawPiece = (s: (typeof pieceSets)[number]) =>
+    s.pc.layers.forEach((ly, k) => prism(clockwise(ly.poly), k === 0 ? Math.min(s.base, ground) : s.base + k * s.hz, s.base + (k + 1) * s.hz, '#e4e0d8', '#cbc7bf', '#aaa59c'));
+  pieceSets.filter((s) => !s.front).forEach(drawPiece);
+  for (const i of paintOrder(walls)) {
+    if (highlight.run === i) prism(walls[i], Hf + wallLift, top + wallLift, '#ffb366', '#ff9a40', '#e5822a');
+    else prism(walls[i], Hf + wallLift, top + wallLift, '#ece9e3', '#c9c5bd', '#a9a49b');
+  }
+  pieceSets.filter((s) => s.front).forEach(drawPiece);
+  if (opts.apart) {
+    // Slabs over the walls, then each piece named, beside its front corner.
+    const polys = l.slabs.map(slabPoly);
+    for (const k2 of paintOrder(polys)) prism(polys[k2], slabTop - slabT * z, slabTop, '#dedad2', '#c9c5bd', '#a9a49b');
+    const front = (poly: Pt[]) => poly.reduce((b, p) => (p.x + p.y > b.x + b.y ? p : b), poly[0]);
+    const right = (poly: Pt[]) => poly.reduce((b, p) => (p.x - p.y > b.x - b.y ? p : b), poly[0]);
+    const label = (at: string, text: string) => {
+      const [x, y] = at.split(',').map(Number);
+      // (A box behind it rather than a text halo: the phone's drawing engine has no paint-order.)
+      // Kept inside the drawing: if it won't fit to the right of the point, it moves left.
+      const w = text.length * 15 * 0.66 + 8;
+      const bx = Math.max(8, Math.min(x + 8, W - 8 - w));
+      out.push(`<rect x="${n(bx)}" y="${n(y - 11)}" width="${n(w)}" height="22" rx="4" fill="#ffffff" fill-opacity="0.9" stroke="#111" stroke-width="0.8"/>`);
+      out.push(`<text x="${n(bx + 4)}" y="${n(y + 5)}" ${FONT} font-size="15" font-weight="900" fill="#111">${esc(text)}</text>`);
+    };
+    const allFoot = foots.filter((f): f is Pt[] => !!f).flat();
+    if (allFoot.length) {
+      const p = right(allFoot);
+      label(pt(p.x, p.y, Hf / 2), `FOOTING ${inch(spec.footing!.width)} × ${inch(spec.footing!.depth)}`);
+    }
+    const wp = right(walls.flat());
+    label(pt(wp.x, wp.y, Hf + wallLift + (top - Hf) / 2), `WALLS ${inch(spec.wall.thick)} × ${dim(spec.wall.height)}`);
+    l.slabs.forEach((sl, i) => {
+      const p = front(polys[i]);
+      label(pt(p.x, p.y, slabTop - (slabT * z) / 2), `SLAB ${sl.pour} · ${inch(sl.thick)}${ledge ? ` · ON ${inch(ledge.e)} LEDGE` : ''}`);
+    });
+    out.push(`<text x="14" y="${H - 10}" ${FONT} font-size="13" font-weight="700" fill="#333">PULLED APART: EACH PIECE LIFTED OFF THE ONE UNDER IT</text>`);
+  }
   if (z > 1.5) out.push(`<text x="${W - 14}" y="${H - 10}" text-anchor="end" ${FONT} font-size="12" fill="#666">Height stretched to show the footing, walls and slabs</text>`);
   return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${W} ${H}" width="100%" role="img" aria-label="3D view">${out.join('')}</svg>`;
 }

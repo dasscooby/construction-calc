@@ -5,8 +5,13 @@ import type { ChangeOrder, Job, PriceLine, Signature } from '../lib/jobs';
 import type { Settings } from '../lib/settings';
 import { commas, dec, ftIn, money } from '../tools/format';
 import { parseLength, parseNumber, RawLength, RawWallRow } from '../tools/run';
-import { DocMedia, docCss, logoHtml, noticeHtml } from './docStyle';
+import { DocMedia, docCss, logoHtml, noticeHtml, uniqueSvgIds } from './docStyle';
 import { confirmedFoundation, pourCount, pourName } from './foundation';
+import { bidOptions, refreshLines, remapLines } from './bidOptions';
+import { buildLayout, LayoutRun, LayoutSpec } from './foundationLayout';
+import { LAYOUT_POUR } from './layoutItems';
+import { ledgeOf, slabDropIn } from './slabLedge';
+import { Block, contentWidth, drawingCss, drawingPage, footerHtml, letterPortrait, pageCss, paginate, textHeight } from './pager';
 import { builtItems, FiguredItem, itemRebarLb, jobDrawings, jobTotals, numberIn, pieceName, steelItems } from './report';
 
 const esc = (s: string) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
@@ -117,6 +122,9 @@ export function suggestLines(items: FiguredItem[], s?: Settings, job?: Job): Omi
     // Dowels into the house or an existing slab, from a slab.
     const dowels = rows.find((r) => r.label === 'Dowels');
     if (dowels) lines.push({ desc: `${name}: dowels drilled and epoxied`, qty: String(numberIn(dowels.value)), unit: 'ea', price: price(p?.dowelEa), src: `${src}:dowels` });
+    // Anchor bolts in the walls of a foundation layout.
+    const bolts = rows.find((r) => r.label === 'Anchor bolts');
+    if (bolts) lines.push({ desc: `${name}: anchor bolts set (${bolts.note?.split(' with ')[0] ?? 'J-bolt'}s, nuts and washers)`, qty: String(numberIn(bolts.value)), unit: 'ea', price: price(p?.boltEa), src: `${src}:bolts` });
   }
   const delivered = deliveredYd(job);
   if (delivered !== null) {
@@ -130,7 +138,7 @@ export function suggestLines(items: FiguredItem[], s?: Settings, job?: Job): Omi
     const lb = itemRebarLb(f);
     if (lb > 0) lines.push({ desc: `${pieceName(f, items, job)}: rebar, cut, bent and tied`, qty: String(Math.round(lb)), unit: 'lb', price: price(p?.rebarLb), src: `item:${f.item.id}:rebar` });
   }
-  const layoutPours = items.filter((x) => /:(footings|walls|slab\d+)$/.test(x.item.id)).length;
+  const layoutPours = items.filter((x) => LAYOUT_POUR.test(x.item.id)).length;
   if (job?.order?.place === 'pump') lines.push({ desc: 'Pump truck', qty: String(layoutPours || (fnd ? pourCount(fnd) : 1)), unit: 'pour', price: price(p?.pumpPour), src: 'pump' });
   lines.push({ desc: 'Labor', qty: '1', unit: 'job', price: price(p?.laborJob), src: 'labor' });
   return lines;
@@ -166,7 +174,7 @@ const docNumber = (job: Job) => {
 };
 
 const STYLE = `
-  body { font-family: -apple-system, Helvetica, Arial, sans-serif; color: #111; margin: 0; padding: 28px; background: #fff; }
+  body { font-family: -apple-system, Helvetica, Arial, sans-serif; color: #111; margin: 0; background: #fff; }
   .top { display: flex; justify-content: space-between; gap: 16px; border-bottom: 3px solid #111; padding-bottom: 12px; }
   .co { font-size: 14px; line-height: 1.45; }
   .co b { font-size: 20px; }
@@ -190,7 +198,16 @@ const STYLE = `
   .sign svg { display: block; height: 60px; max-width: 100%; }
   .sign .filled { font-size: 15px; padding-bottom: 4px; }
   .co-sum { width: 340px; margin-left: auto; margin-top: 10px; }
-  .draw { border: 1px solid #ccc; border-radius: 10px; overflow: hidden; margin-top: 18px; break-inside: avoid; }
+  .draw { border: 1px solid #ccc; border-radius: 10px; overflow: hidden; margin-top: 10px; break-inside: avoid; page-break-inside: avoid; }
+  h3.page { break-before: page; page-break-before: always; }
+  .draw svg { display: block; width: 100%; height: auto; max-height: 92vh; }
+  h3 { font-size: 13px; text-transform: uppercase; letter-spacing: .08em; color: #333; margin: 26px 0 6px; border-bottom: 2px solid #111; padding-bottom: 4px; }
+  h2 { font-size: 14px; text-transform: uppercase; letter-spacing: .08em; color: #333; margin: 0 0 6px; padding-top: 4px; }
+  table.scope td.k { width: 30%; font-weight: 700; }
+  .scope { margin: 0; padding: 0; list-style: none; }
+  .scope li { font-size: 14px; padding: 6px 0; border-bottom: 1px solid #e5e5e5; display: flex; gap: 12px; }
+  .scope li b { min-width: 34%; }
+  .scope li span { flex: 1; color: #222; }
   .foot { margin-top: 28px; font-size: 11px; color: #888; text-align: center; }
   .print { position: fixed; right: 16px; bottom: 16px; padding: 12px 18px; border-radius: 999px; border: 0; background: #ff9f0a; color: #000; font-size: 16px; font-weight: 700; }
   @media print { .print { display: none; } body { padding: 0; } }`;
@@ -204,17 +221,111 @@ export function signBlock(who: string, sig?: Signature): string {
   return `<div class="sign"><div>${ink}<div class="line">${who}: ${esc(sig.name)}</div></div><div><div class="filled">${fmtDate(sig.at)}</div><div class="line">Date</div></div></div>`;
 }
 
+/**
+ * Every piece of the job in plain words, priced or not, so the bid shows the whole job: walls, footings,
+ * each slab and its pour, rebar, concrete and pumps, and anything else in it.
+ */
+export function scopeOfWork(items: FiguredItem[], job: Job): [string, string][] {
+  const out: [string, string][] = [];
+  const row = (f: FiguredItem, label: string) => (f.result.status === 'ok' ? f.result.result.rows.find((r) => r.label === label) : undefined);
+  let rebar = 0;
+  let yards = 0;
+  let boltCount = 0;
+  let boltText = '';
+  for (const f of items) {
+    if (f.result.status !== 'ok' || f.item.id.endsWith(':forms')) continue;
+    const name = f.item.label || f.tool.title;
+    const parts: string[] = [];
+    const measured = row(f, 'As measured') ?? row(f, 'House, around the outside');
+    const middle = row(f, 'Along the middle');
+    const area = row(f, 'Slab area');
+    const outside = row(f, 'To the outside of the walls');
+    if (measured) parts.push(`${measured.value} as measured`);
+    else if (middle) parts.push(`${middle.value}`);
+    if (area) parts.push(outside ? `${area.value} poured inside the walls (${outside.value} to the outside)` : area.value);
+    const order = row(f, 'Order');
+    if (order) {
+      parts.push(`${order.value} of concrete`);
+      yards += numberIn(order.value);
+    }
+    const lb = itemRebarLb(f);
+    if (lb > 0) {
+      parts.push(`${commas(Math.round(lb))} lb rebar`);
+      rebar += lb;
+    }
+    const mesh = row(f, 'Wire mesh');
+    if (mesh) parts.push(`wire mesh, ${mesh.value}`);
+    const bolts = row(f, 'Anchor bolts');
+    if (bolts) {
+      parts.push(`${bolts.value} anchor bolts`);
+      boltCount += numberIn(bolts.value);
+      boltText ||= bolts.note ?? '';
+    }
+    if (!parts.length) {
+      const big = f.result.result.rows.find((r) => r.big);
+      if (big) parts.push(`${big.label}: ${big.value}`);
+    }
+    if (parts.length) out.push([name, parts.join(' · ')]);
+  }
+  const pours = items.filter((x) => LAYOUT_POUR.test(x.item.id)).length;
+  // A foundation layout: the walls by where they are, and their size.
+  const layoutItem = job.items.find((it) => it.toolId === 'foundation-layout');
+  const spec = (layoutItem?.raw as { layout?: LayoutSpec } | undefined)?.layout;
+  if (spec?.house?.length) {
+    const l = buildLayout(spec);
+    const sum = (ok: (r: LayoutRun) => boolean) => l.runs.filter((r) => !r.existing && ok(r)).reduce((t, r) => t + r.measured, 0);
+    const parts = [
+      ['Main', sum((r) => r.group === 'Main')],
+      ['add-on outside walls', sum((r) => r.group !== 'Main' && !/inside/.test(r.name))],
+      ['inside walls', sum((r) => /inside/.test(r.name))],
+    ].filter(([, v]) => (v as number) > 0);
+    const at = out.findIndex(([k]) => k === 'Walls');
+    const line: [string, string] = [
+      'Wall breakdown',
+      `${parts.map(([k, v]) => `${k} ${ftIn(v as number).replace(/ 0"$/, '')}`).join(' · ')} · ${Math.round(spec.wall.thick * 12)}" thick × ${ftIn(spec.wall.height).replace(/ 0"$/, '')} tall${spec.footing ? ` on a ${Math.round(spec.footing.width * 12)}" × ${Math.round(spec.footing.depth * 12)}" footing` : ''}`,
+    ];
+    if (at >= 0) out.splice(at + 1, 0, line);
+    else out.push(line);
+    // Where the slabs sit in the walls.
+    if (l.slabs.length) {
+      const drop = slabDropIn(spec, l.slabs[0].thick);
+      const ledge = ledgeOf(l);
+      const lastSlab = out.reduce((k, [name], i) => (/^Slab \d/.test(name) ? i : k), -1);
+      const where: [string, string] = [
+        'Slab in the walls',
+        `Top of slab ${drop > 0 ? `${drop}" below` : 'flush with'} the top of the wall${ledge ? ` · ${ledge.ledgeIn}" ledge cut in the walls from the bottom of the slab up; the slab runs onto it` : ''}`,
+      ];
+      if (lastSlab >= 0) out.splice(lastSlab + 1, 0, where);
+      else out.push(where);
+    }
+  }
+  if (yards) out.push(['Concrete', `${dec(yards, 2)} yd${pours > 1 ? ` in ${pours} pours` : ''}`]);
+  if (rebar) {
+    const by = items
+      .filter((f) => f.result.status === 'ok' && itemRebarLb(f) > 0 && !f.item.id.endsWith(':forms'))
+      .map((f) => `${f.item.label || f.tool.title} ${commas(Math.round(itemRebarLb(f)))} lb`);
+    out.push(['Rebar', `${commas(Math.round(rebar))} lb, cut, bent and tied${by.length > 1 ? ` (${by.join(' · ')})` : ''}`]);
+  }
+  if (boltCount) out.push(['Anchor bolts', `${commas(boltCount)}: ${boltText.split(' · ').slice(0, 2).join(', ')}`]);
+  if (job.order?.place === 'pump') out.push(['Pump truck', `${pours > 1 ? `${pours} pours` : 'for the pour'}`]);
+  return out;
+}
+
 function moneyDoc(kind: 'bid' | 'bill', job: Job, s: Settings, items: FiguredItem[], now: Date, media: DocMedia): { html: string; text: string } {
   const c = s.company;
+  // Lines made before the foundation layout took over a piece bill as the layout's piece (never the hidden one).
+  const sources = bidOptions(items, s, job);
+  const current = refreshLines(remapLines(job.lines ?? [], job, sources), sources);
   // The bill adds any change orders after the bid's lines.
-  const lines = [...(job.lines ?? []), ...(kind === 'bill' ? changeLines(job) : [])].filter((l) => l.desc.trim() || num(l.price));
+  const lines = [...current, ...(kind === 'bill' ? changeLines(job) : [])].filter((l) => l.desc.trim() || num(l.price));
   const m = priceTotals({ ...job, lines, changes: [] });
   const title = kind === 'bid' ? 'BID' : 'INVOICE';
   const date = now.toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' });
   const no = docNumber(job);
   const coLines = [c.phone, c.email, c.license && `Lic #${c.license.replace(/^#/, '')}`].filter((x) => x && x.trim());
   const qtyText = (l: PriceLine) => (l.qty ? `${commas(num(l.qty), num(l.qty) % 1 ? 2 : 0)}${l.unit ? ` ${l.unit}` : ''}` : '');
-  const plan = kind === 'bid' ? jobDrawings(job, items, s.company.name)?.plan : undefined;
+  const drawings = kind === 'bid' ? jobDrawings(job, items, s.company.name) : null;
+  const scope = scopeOfWork(items, job);
 
   const sumRows: [string, string, string?][] = [['Subtotal', money(m.subtotal)]];
   if (m.tax) sumRows.push([`Tax (${dec(num(job.taxPct), 2)}%)`, money(m.tax)]);
@@ -230,19 +341,64 @@ function moneyDoc(kind: 'bid' | 'bill', job: Job, s: Settings, items: FiguredIte
   const terms = num(s.prices.termsDays);
   const when = kind === 'bid' ? `Good through ${fmtDate(days(30))}` : terms > 0 ? `Due ${fmtDate(days(terms))}` : 'Due on receipt';
 
-  const html = `<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
-<title>${esc(job.name)} – ${kind === 'bid' ? 'Bid' : 'Invoice'}</title><style>${STYLE}${docCss(s.docs)}</style></head><body>
-<div class="top"><div class="co">${logoHtml(media.logo)}${c.name ? `<b>${esc(c.name)}</b><br>` : ''}${coLines.map(esc).join('<br>')}</div>
+  // Laid out on Letter pages: the bid (lines run on with their heads if there are many), the totals
+  // kept with the signature, the scope of work on a fresh page, then each drawing on a page of its own.
+  const box = letterPortrait;
+  const W = contentWidth(box);
+  const header = `<div class="top"><div class="co">${logoHtml(media.logo)}${c.name ? `<b>${esc(c.name)}</b><br>` : ''}${coLines.map(esc).join('<br>')}</div>
 <div class="doc"><h1>${title}</h1><div class="meta">#${no}</div><div class="meta">${esc(date)}</div><div class="meta"><b>${esc(when)}</b></div></div></div>
 <div class="to">${job.customer ? `<div><h4>${kind === 'bid' ? 'Prepared for' : 'Bill to'}</h4>${esc(job.customer).replace(/\n/g, '<br>')}</div>` : ''}
-<div><h4>Job</h4>${esc(job.name)}${job.address ? `<br>${esc(job.address)}` : ''}</div></div>
-<table><tr><th>Description</th><th class="r">Qty</th><th class="r">Price</th><th class="r">Amount</th></tr>
-${lines.map((l) => `<tr><td>${esc(l.desc)}</td><td class="r">${esc(qtyText(l))}</td><td class="r">${num(l.price) ? money(num(l.price)) : ''}</td><td class="r">${money(lineAmount(l))}</td></tr>`).join('')}
-</table>
-<table class="sum">${sumRows.map(([k, v, cls]) => `<tr class="${cls ?? ''}"><td>${k}</td><td class="r">${v}</td></tr>`).join('')}</table>
-${kind === 'bid' ? signBlock('Accepted by', job.signature) : ''}
-${plan ? `<div class="draw">${plan}</div>` : ''}
-${noticeHtml(kind, s.docs)}
+<div><h4>Job</h4>${esc(job.name)}${job.address ? `<br>${esc(job.address)}` : ''}</div></div>`;
+  const headerH = 150 + (media.logo ? 70 : 0) + Math.max(coLines.length * 20, (job.customer ?? '').split('\n').length * 20);
+  const sumH = sumRows.length * 30 + 24;
+  const notice = noticeHtml(kind, s.docs);
+  const blocks: Block[] = [
+    { kind: 'block', html: header, h: headerH, keepWithNext: true },
+    {
+      kind: 'table',
+      title: '',
+      contTitle: kind === 'bid' ? 'Bid' : 'Invoice',
+      cls: 'lines',
+      head: '<tr><th>Description</th><th class="r">Qty</th><th class="r">Price</th><th class="r">Amount</th></tr>',
+      headH: 34,
+      rows: lines.map((l) => ({
+        html: `<tr><td>${esc(l.desc)}</td><td class="r">${esc(qtyText(l))}</td><td class="r">${num(l.price) ? money(num(l.price)) : ''}</td><td class="r">${money(lineAmount(l))}</td></tr>`,
+        h: textHeight(l.desc, 14, W * 0.5) + 15,
+      })),
+    },
+    {
+      kind: 'block',
+      html: `<table class="sum">${sumRows.map(([k, v, cls]) => `<tr class="${cls ?? ''}"><td>${k}</td><td class="r">${v}</td></tr>`).join('')}</table>`,
+      h: sumH,
+      keepWithNext: kind === 'bid',
+    },
+    ...(kind === 'bid' ? [{ kind: 'block' as const, html: signBlock('Accepted by', job.signature), h: job.signature ? 120 : 80 }] : []),
+    ...(notice ? [{ kind: 'block' as const, html: notice, h: textHeight(notice.replace(/<[^>]+>/g, ''), 13, W) + 40 }] : []),
+  ];
+  if (scope.length) {
+    blocks.push({
+      kind: 'table',
+      title: 'Scope of work',
+      cls: 'scope',
+      head: '<tr><th>What</th><th>Included</th></tr>',
+      headH: 34,
+      newPage: true,
+      rows: scope.map(([k, v]) => ({
+        html: `<tr><td class="k">${esc(k)}</td><td>${esc(v)}</td></tr>`,
+        h: Math.max(textHeight(k, 14, W * 0.3), textHeight(v, 14, W * 0.66)) + 16,
+      })),
+    });
+  }
+  const sheetNote = `${esc(job.name)} · ${esc(date)}`;
+  if (drawings?.plan) blocks.push(drawingPage(drawings.plan, 'Plan', sheetNote, box));
+  if (drawings?.iso) blocks.push(drawingPage(drawings.iso, '3D view', sheetNote, box));
+  if (drawings?.apart) blocks.push(drawingPage(drawings.apart, '3D view, pulled apart', sheetNote, box));
+  if (drawings?.section) blocks.push(drawingPage(drawings.section, 'Typical section', sheetNote, box));
+  if (drawings?.rebar) blocks.push(drawingPage(drawings.rebar, 'Footing and dowels', sheetNote, box));
+
+  const html = `<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>${esc(job.name)} – ${kind === 'bid' ? 'Bid' : 'Invoice'}</title><style>${STYLE}${docCss(s.docs)}${pageCss(box)}${drawingCss}</style></head><body>
+${paginate(blocks, box, (n, of) => footerHtml(`${esc(job.name)} · ${kind === 'bid' ? 'Bid' : 'Invoice'} #${no} · ${esc(date)}`, n, of))}
 <button class="print" onclick="window.print()">Save as PDF / Print</button>
 </body></html>`;
 
@@ -256,12 +412,13 @@ ${noticeHtml(kind, s.docs)}
     '',
     ...sumRows.map(([k, v]) => `${k}: ${v}`),
     '',
+    ...(scope.length ? ['Scope of work:', ...scope.map(([k, v]) => `• ${k}: ${v}`), ''] : []),
     [c.phone, c.email].filter(Boolean).join(' · '),
   ]
     .filter((l, i, a) => l !== '' || a[i - 1] !== '')
     .join('\n')
     .trim();
-  return { html, text };
+  return { html: uniqueSvgIds(html), text };
 }
 
 export const buildBid = (job: Job, s: Settings, items: FiguredItem[], now = new Date(), media: DocMedia = {}) => moneyDoc('bid', job, s, items, now, media);
@@ -299,6 +456,6 @@ ${noticeHtml('change', s.docs)}
   ]
     .filter(Boolean)
     .join('\n');
-  return { html, text };
+  return { html: uniqueSvgIds(html), text };
 }
 export const buildBill = (job: Job, s: Settings, items: FiguredItem[], now = new Date(), media: DocMedia = {}) => moneyDoc('bill', job, s, items, now, media);

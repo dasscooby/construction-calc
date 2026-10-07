@@ -133,3 +133,48 @@ describe('drawings of a layout', () => {
     expect([0, 1, 2].map((i) => bayName(i, 3, { side: 'right' }))).toEqual(['top bay', 'middle bay', 'bottom bay']);
   });
 });
+
+describe('the bid shows the whole job', () => {
+  const { scopeOfWork, buildBid } = require('../billing') as typeof import('../billing');
+  const { bidOptions: opts, missingLines } = require('../bidOptions') as typeof import('../bidOptions');
+  const pumped = { ...job, order: { place: 'pump' } as never };
+
+  test('scope of work lists every piece, priced or not', () => {
+    const scope = scopeOfWork(figureItems(pumped), pumped);
+    expect(scope.map(([k]) => k)).toEqual(['Walls', 'Wall breakdown', 'Footings', 'Slab 1: Main slab', 'Slab 2: Add-on slab, middle bay', 'Slab in the walls', 'Concrete', 'Rebar', 'Pump truck']);
+    expect(scope.find(([k]) => k === 'Wall breakdown')![1]).toBe(`Main 280' · add-on outside walls 150' · inside walls 80' · 8" thick × 4' tall on a 16" × 10" footing`);
+    expect(scope.find(([k]) => k === 'Walls')![1]).toMatch(/^510 ft as measured · 55.00 yd of concrete · [\d,]+ lb rebar$/);
+    expect(scope.find(([k]) => k === 'Slab 2: Add-on slab, middle bay')![1]).toMatch(/1,861.8 sq ft poured inside the walls \(1,979.1 sq ft to the outside\)/);
+    expect(scope.find(([k]) => k === 'Concrete')![1]).toBe('167.75 yd in 4 pours');
+    expect(scope.find(([k]) => k === 'Pump truck')![1]).toBe('4 pours');
+    const bid = buildBid(pumped, DEFAULT_SETTINGS, figureItems(pumped)).html;
+    for (const h of ['<h2>Scope of work</h2>', '<b>Plan</b>', '<b>3D view</b>', '<b>3D view, pulled apart</b>', '<b>Typical section</b>', '<b>Footing and dowels</b>', 'Page 1 of 7', 'Page 7 of 7']) expect(bid).toContain(h);
+  });
+
+  test('"Add every part of the job" adds a line for each piece not on the bid yet', () => {
+    const src = opts(figureItems(pumped), DEFAULT_SETTINGS, pumped);
+    const all = missingLines(src, []);
+    expect(all.map((l) => l.desc)).toEqual(
+      expect.arrayContaining([
+        'Walls: form and pour',
+        'Footings: dig, form and pour',
+        'Slab 1: Main slab: pour and finish (house size, to the outside of the walls)',
+        'Slab 2: Add-on slab, middle bay: pour and finish (house size, to the outside of the walls)',
+        'Pump truck: pour 1, walls',
+        'Pump truck: pour 4, slab 2',
+      ]),
+    );
+    // A pump line for each pour, named; not the one-line "Pump truck" too.
+    expect(all.filter((l) => l.desc.startsWith('Pump truck')).length).toBe(4);
+    expect(all.some((l) => l.desc === 'Pump truck')).toBe(false);
+    expect(all.some((l) => /Labor|^$/.test(l.desc))).toBe(false);
+    // Lines already on the bid aren't added again.
+    expect(missingLines(src, all).length).toBe(0);
+  });
+});
+
+test('every drawing in a document has its own pattern names (so none is drawn empty)', () => {
+  const { uniqueSvgIds } = require('../docStyle') as typeof import('../docStyle');
+  const two = '<svg><defs><pattern id="hatch"/></defs><rect fill="url(#hatch)"/></svg><svg><defs><pattern id="hatch"/></defs><rect fill="url(#hatch)"/></svg>';
+  expect(uniqueSvgIds(two)).toBe('<svg><defs><pattern id="d1-hatch"/></defs><rect fill="url(#d1-hatch)"/></svg><svg><defs><pattern id="d2-hatch"/></defs><rect fill="url(#d2-hatch)"/></svg>');
+});

@@ -161,6 +161,8 @@ export interface StockRow {
 export interface ToolContext {
   /** Wall heights that change around the house (daylight basement): ft along the outside from corner A, clockwise */
   heightRuns?: { length: number; height: number }[];
+  /** Concrete left out of a wall (the slab ledge notches), cu ft, with what it is */
+  less?: { cuFt: number; label: string; note: string };
 }
 
 /** What compute() reads. Required fields are always filled in and valid before compute() runs. */

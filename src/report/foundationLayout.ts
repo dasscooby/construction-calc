@@ -6,6 +6,8 @@
 // Corners of the main house are lettered clockwise from the front left: A front left, B back left,
 // C back right, D front right. On the plan the back is up.
 
+import { FaceLine, PieceSpec, PlacedPiece, placePieces } from './layoutPieces';
+import type { LayoutRebar } from './layoutRebar';
 import { faceAt, Face, GraphResult, Pt, Run, solveGraph } from './wallGraph';
 
 /** Side of the main house, on the plan: top = back (B–C), right = C–D, bottom = front (D–A), left = A–B. */
@@ -49,8 +51,17 @@ export interface LayoutSpec {
   slabs: SlabSpec[];
   /** Top of slab below the top of the wall, in (blank: a basement slab sits on the footing, a stem wall slab at the top) */
   slabDropIn?: number;
+  /** Slab ledge: the wall cut back this much (in) from the bottom of the slab to the top of the wall where a slab
+   *  meets it, so the slab runs over onto it. Blank or 0 = none (layouts saved before ledges). */
+  ledgeIn?: number;
   /** What's in a bay with no slab ("container pad", "gravel"), by "addOn:bay" */
   bayLabels?: Record<string, string>;
+  /** Steps and pads outside the walls, each its own pour */
+  pieces?: PieceSpec[];
+  /** The rebar and anchor bolts, as set (none until you add them; layouts saved before this have none) */
+  rebar?: LayoutRebar;
+  /** "No rebar yet" put away on purpose */
+  rebarWarnOff?: boolean;
 }
 
 export type EndText = string;
@@ -103,10 +114,14 @@ export interface Layout {
   totals: { measured: number; middle: number; footingMiddle: number; bends: number; corners: number; tees: number };
   /** Something that doesn't fit (bays too wide, a slab that isn't in a closed area) */
   problems: string[];
+  /** The outside wall faces steps and pads can go on */
+  faceLines: FaceLine[];
+  /** Steps and pads, placed */
+  pieces: PlacedPiece[];
 }
 
 /** Origin (the side's first corner, outside), direction along the side, and outward, for a main wall. */
-function frame(spec: LayoutSpec, side: Side) {
+export function frame(spec: LayoutSpec, side: Side) {
   const { length: L, width: W } = spec.house;
   const f = {
     top: { P: { x: 0, y: 0 }, dir: { x: 1, y: 0 } },
@@ -206,15 +221,17 @@ export function buildLayout(spec: LayoutSpec): Layout {
   // Slabs, and which pour each is in.
   const slabs: LayoutSlab[] = [];
   const pourOf = new Map<number, number>(); // slab index → pour number
-  let nextPour = 1;
-  spec.slabs.forEach((s, i) => {
+  // Slab 1 is always the main slab (the house); slabs in add-ons are numbered from 2 in the order added.
+  let nextAddOn = 2;
+  const order = spec.slabs.map((s, i) => ({ s, i })).sort((a, b) => (a.s.at.in === 'main' ? 0 : 1) - (b.s.at.in === 'main' ? 0 : 1) || a.i - b.i);
+  order.forEach(({ s, i }) => {
     const seed = s.at.in === 'main' ? { x: L / 2, y: W / 2 } : addOnGeom[s.at.addOn]?.seeds[s.at.bay];
     const k = seed ? faceAt(graph.faces, seed) : -1;
     if (k < 0) {
       problems.push('A slab is not inside a closed area.');
       return;
     }
-    const pour = s.pour && [...pourOf.values()].includes(s.pour) ? s.pour : nextPour++;
+    const pour = s.at.in === 'main' ? 1 : s.pour && [...pourOf.values()].includes(s.pour) ? s.pour : nextAddOn++;
     pourOf.set(i, pour);
     const name = s.at.in === 'main' ? 'Main slab' : `${spec.addOns.length > 1 ? `Add-on ${s.at.addOn + 1}` : 'Add-on'} slab${bays[s.at.addOn].length > 1 ? `, ${bayName(s.at.bay, bays[s.at.addOn].length, spec.addOns[s.at.addOn])}` : ''}`;
     slabs.push({ name, pour, index: i, face: graph.faces[k], thick: s.thick, at: s.at });
@@ -249,7 +266,27 @@ export function buildLayout(spec: LayoutSpec): Layout {
   }
   const corners = Math.round(corners2 / 2);
   const sum = (f: (r: LayoutRun) => number) => list.filter((r) => !r.existing).reduce((s, r) => s + f(r), 0);
-  const pours = [...(spec.footing ? ['Footings'] : []), 'Walls', ...[...new Set(slabs.map((s) => s.pour))].sort((a, b) => a - b).map((p) => `Slab ${p}: ${slabs.filter((s) => s.pour === p).map((s) => s.name).join(' + ')}`)];
+  // Outside wall faces, for steps and pads: each main wall, and each add-on's two sides and far wall.
+  const word = (v: Pt) => (Math.abs(v.x) > Math.abs(v.y) ? (v.x > 0 ? 'right' : 'left') : v.y > 0 ? 'front' : 'back');
+  const faceLines: FaceLine[] = (['left', 'top', 'right', 'bottom'] as Side[]).map((side) => {
+    const fr = frame(spec, side);
+    return { ref: { main: side }, name: `Main ${SIDE_NAME[side]}`, from: `corner ${SIDE_NAME[side].slice(-3, -2)}`, p0: fr.at(0, 0), u: fr.dir, o: fr.out, length: sideLength(spec, side) };
+  });
+  addOnGeom.forEach((g, i) => {
+    const gname = spec.addOns.length > 1 ? `Add-on ${i + 1}` : 'Add-on';
+    const neg = { x: -g.dir.x, y: -g.dir.y };
+    faceLines.push({ ref: { addOn: i, wall: 'side1' }, name: `${gname} ${word(neg)} wall`, from: 'the house', p0: g.at(g.from, 0), u: g.out, o: neg, length: g.depth });
+    faceLines.push({ ref: { addOn: i, wall: 'far' }, name: `${gname} far wall`, from: `its ${word(neg)} end`, p0: g.at(g.from, g.depth), u: g.dir, o: g.out, length: g.width });
+    faceLines.push({ ref: { addOn: i, wall: 'side2' }, name: `${gname} ${word(g.dir)} wall`, from: 'the house', p0: g.at(g.from + g.width, 0), u: g.out, o: g.dir, length: g.depth });
+  });
+  const pieces = placePieces(spec.pieces ?? [], faceLines, graph.outside);
+  for (const pc of pieces) if (pc.problem) problems.push(pc.problem);
+  const pours = [
+    ...(spec.footing ? ['Footings'] : []),
+    'Walls',
+    ...[...new Set(slabs.map((s) => s.pour))].sort((a, b) => a - b).map((p) => `Slab ${p}: ${slabs.filter((s) => s.pour === p).map((s) => s.name).join(' + ')}`),
+    ...pieces.filter((pc) => pc.layers.length).map((pc) => pc.name),
+  ];
   return {
     spec,
     runs: list,
@@ -260,6 +297,8 @@ export function buildLayout(spec: LayoutSpec): Layout {
     pours,
     totals: { measured: sum((r) => r.measured), middle: sum((r) => r.middle), footingMiddle: sum((r) => r.footingMiddle), bends: corners + tees, corners, tees },
     problems,
+    faceLines,
+    pieces,
   };
 }
 

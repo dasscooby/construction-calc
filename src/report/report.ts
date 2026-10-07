@@ -14,17 +14,23 @@ import type { ResultRow, Tool } from '../tools/types';
 import { houseSectionSvg, isoSlabSvg, isoSvg, planSvg, roundedLabels, roundedRect, sectionSvg, sideLabels, SlabSide, slabPlanSvg } from './drawings';
 import { insetOutline, Pt, wallOutline } from './geometry';
 import { layoutIsoSvg, layoutPlanSvg } from './layoutDraw';
-import { DocMedia, docCss, logoHtml, noticeHtml } from './docStyle';
+import { DocMedia, docCss, logoHtml, noticeHtml, uniqueSvgIds } from './docStyle';
+import { Block, contentHeight, contentWidth, drawingCss, drawingPage, footerHtml, letterPortrait, pageCss, paginate, textHeight } from './pager';
 import { buildLayout, matBars } from './layoutGeom';
 import { confirmedFoundation, Foundation, foundationLines, pourName } from './foundation';
 import { daylightWall, splitOutline, WallSteel } from './heightRuns';
 import { concreteResult } from '../lib/concrete';
 import { AddOnDraw, FoundationDraw, foundationIsoSvg, foundationPlanSvg, foundationSectionSvg } from './foundationDraw';
+import { radiusSteps, roundKind } from '../tools/concreteTools';
+import { radiusStepsSvg } from './stepsDraw';
 import { slabBarPlan } from '../tools/slabLayoutTool';
+import { footingRebarSvg } from './rebarDraw';
+import { ledgeOf, slabDropIn } from './slabLedge';
 import { LAYOUT_TOOL_ID, layoutChildren, LayoutRaw } from './layoutItems';
 import { buildLayout as buildFoundationLayout } from './foundationLayout';
 import { graphIsoSvg, graphPlanSvg } from './layoutPlanDraw';
 import { slabBarsAdvice } from '../lib/rebar';
+import { layoutSteel, LayoutSteel, spotKey } from './layoutRebar';
 
 export interface FiguredItem {
   item: JobItem;
@@ -43,6 +49,9 @@ export interface Totals {
   fillers: Map<string, number>;
   insideCorners: number;
   ties: number;
+  /** Anchor bolts, and what kind */
+  bolts: number;
+  boltSize: string;
 }
 
 /** First number in a value like "16.50 yd", "$2,475.00", "about 351", "565 lb". */
@@ -183,6 +192,8 @@ function rawTotals(items: FiguredItem[]): Totals {
     fillers: new Map(),
     insideCorners: 0,
     ties: 0,
+    bolts: 0,
+    boltSize: '',
   };
   // A cut list sent from Slab Layout is that slab's steel, cut up: count it once, from the cut list.
   const cutFromLayout = items.some((f) => f.tool.id === 'cut-list' && f.item.raw.from === 'slab-layout' && f.result.status === 'ok');
@@ -215,6 +226,11 @@ function rawTotals(items: FiguredItem[]): Totals {
       t.insideCorners += numberIn(row('Inside corners (4×4)')?.value ?? '0');
       t.ties += numberIn(row('Ties')?.value ?? '0');
     }
+    const bolts = row('Anchor bolts');
+    if (bolts) {
+      t.bolts += numberIn(bolts.value);
+      t.boltSize ||= bolts.note?.split(' with ')[0] ?? '';
+    }
     if (!steel) continue;
     if (row('Weight') && / lb$/.test(row('Weight')!.value)) t.rebarLb += numberIn(row('Weight')!.value);
     if (row('Rebar weight')) t.rebarLb += numberIn(row('Rebar weight')!.value);
@@ -245,7 +261,14 @@ export interface Drawings {
   section?: string;
   /** Where the slab meets the house */
   house?: string;
+  /** 3D pulled apart: footing, walls and slabs each lifted off the one under it */
+  apart?: string;
+  /** The footing at a corner with its bars and the vertical dowels */
+  rebar?: string;
 }
+
+/** The footing and dowels view, from a foundation's drawing data (none without a footing). */
+const rebarOf = (d: FoundationDraw, job: string) => (d.footing ? footingRebarSvg({ wallIn: d.wallIn, wallFt: d.wallFt, footing: d.footing, vert: d.wallVert, job }) : undefined);
 
 /** Plan and 3D view of a Wall Forms foundation (raw = the tool's boxes). Null until the walls close up. */
 export function wallFormsDrawings(raw: RawValues, title: string, date: string, slabThickFt = 0): Drawings | null {
@@ -521,6 +544,11 @@ export function toolDrawings(toolId: string, raw: RawValues, title: string): Dra
   if (toolId === 'slab-layout') return layoutDrawings(raw, title, date);
   if (toolId === 'layout-sketch') return sketchDrawings(raw, title, date);
   if (toolId === 'footings') return footingDrawings(raw, title, date);
+  const round = toolId === 'steps' ? roundKind(raw.shape) : null;
+  if (round) {
+    const r = radiusSteps(Number(raw.steps) || 0, parseLength(raw.diameter as never) ?? 0, parseLength(raw.run as never) ?? 0);
+    return 'error' in r ? null : { plan: radiusStepsSvg(r.diameters, parseLength(raw.run as never) ?? 0, title, round) };
+  }
   return null;
 }
 
@@ -605,7 +633,7 @@ export function foundationDrawings(job: Job, items: FiguredItem[], company = '')
     date: new Date(job.createdAt).toLocaleDateString(),
     kind: f.kind,
   };
-  return { plan: foundationPlanSvg(d), iso: foundationIsoSvg(d), section: foundationSectionSvg(d) };
+  return { plan: foundationPlanSvg(d), iso: foundationIsoSvg(d), section: foundationSectionSvg(d), rebar: rebarOf(d, job.name) };
 }
 
 const n2 = (v: number) => String(Math.round(v * 10) / 10);
@@ -623,6 +651,8 @@ export function pieceName(f: FiguredItem, items: FiguredItem[], job?: Job): stri
     const pour = fnd.pours.findIndex((x) => x.item.id === f.item.id);
     if (pour >= 0) return `${fnd.kind} slab, ${pourName(pour)}`;
   }
+  // Footings & Walls without a name: say which it is, so a footing doesn't read like walls.
+  if (!f.item.label && f.tool.id === 'footings') return f.item.raw.kind === 'wall' ? 'Walls' : 'Footings';
   return f.item.label || f.tool.title;
 }
 
@@ -644,6 +674,13 @@ const REBAR_ROWS = new Set([
   'Stirrups',
   'Ties',
   'Corner bars',
+  'Inside walls: Vertical bars',
+  'Inside walls: Horizontal bars',
+  'Anchor bolts',
+  'Nose bars',
+  'Pad bars',
+  'Wire mesh',
+  'Chairs',
 ]);
 const REBAR_TOOLS = ['slab-rebar', 'beam-bars', 'stirrups', 'cut-list', 'dowels'];
 
@@ -672,7 +709,7 @@ export interface RebarLine {
 export function rebarSchedule(items: FiguredItem[], job?: Job): RebarLine[] {
   const out: RebarLine[] = [];
   for (const f of steelItems(builtItems(items, job).items)) {
-    if (f.result.status !== 'ok' || (!itemRebarLb(f) && !f.result.result.rows.some((r) => r.label === 'Dowels'))) continue;
+    if (f.result.status !== 'ok' || (!itemRebarLb(f) && !f.result.result.rows.some((r) => ['Dowels', 'Anchor bolts', 'Wire mesh'].includes(r.label)))) continue;
     const where = pieceName(f, items, job);
     for (const r of f.result.result.rows) {
       const isRebar = REBAR_ROWS.has(r.label) || (REBAR_TOOLS.includes(f.tool.id) && !/sticks|Weight|Sticks to order|Lap$|Total footage|Chairs/.test(r.label));
@@ -699,15 +736,51 @@ export function layoutItemDrawings(job: Job, items: FiguredItem[], company = '',
   const ft = raw.footing ?? {};
   const num = (v: unknown, d: number) => parseNumber(String(v ?? '')) ?? d;
   const bars = w.bars === '1';
+  // The layout's own rebar, once it's set: what the section and the footing view show.
+  const set = l.spec.rebar;
+  let st: LayoutSteel | null = null;
+  try {
+    st = set ? layoutSteel(l, set) : null;
+  } catch {
+    st = null;
+  }
+  const slab0 = l.slabs[0] ? set?.slabs[spotKey(l.slabs[0].at)] : undefined;
+  const wallIn = l.spec.wall.height * 12;
   const d: FoundationDraw = {
     outline: [],
     wallIn: l.spec.wall.thick * 12,
     wallFt: l.spec.wall.height,
-    wallSteel: bars && String(w.vSpacing ?? '').trim() ? `#${num(w.barSize, 4)} VERT. @ ${n2(num(w.vSpacing, 24))}" O.C.` : '',
-    wallVert: bars && String(w.vSpacing ?? '').trim() ? { size: num(w.barSize, 4), spacingIn: num(w.vSpacing, 24) } : null,
-    wallHoriz: bars && num(w.lines, 2) > 1 ? { size: num(w.barSize, 4), spacingIn: Math.max(6, (l.spec.wall.height * 12 - 6) / (num(w.lines, 2) - 1)) } : null,
-    footing: l.spec.footing ? { widthIn: l.spec.footing.width * 12, depthIn: l.spec.footing.depth * 12, lines: ft.bars === '1' ? num(ft.lines, 2) : 0, barSize: num(ft.barSize, 4) } : null,
-    slab: l.slabs.length ? { thickIn: l.slabs[0].thick * 12, dropIn: l.spec.slabDropIn ?? (l.spec.wall.height >= 6 ? Math.round(l.spec.wall.height * 12 - l.slabs[0].thick * 12) : 0), steel: '', bar: null } : null,
+    wallSteel: set
+      ? [
+          set.vert.spacingIn > 0 ? `#${set.vert.size} VERT. @ ${n2(set.vert.spacingIn)}" O.C.` : '',
+          st && st.rows > 0 ? (set.horiz.rows === 'topMid' ? `#${set.horiz.size} HORIZ. TOP + MID` : `(${st.rows}) #${set.horiz.size} HORIZ.`) : '',
+          st && st.bolts.total ? `${set.bolts.size.toUpperCase()}S @ ${n2(set.bolts.spacingFt)}' O.C.` : '',
+        ]
+          .filter(Boolean)
+          .join(', ')
+      : bars && String(w.vSpacing ?? '').trim()
+        ? `#${num(w.barSize, 4)} VERT. @ ${n2(num(w.vSpacing, 24))}" O.C.`
+        : '',
+    wallVert: set ? (set.vert.spacingIn > 0 ? { size: set.vert.size, spacingIn: set.vert.spacingIn } : null) : bars && String(w.vSpacing ?? '').trim() ? { size: num(w.barSize, 4), spacingIn: num(w.vSpacing, 24) } : null,
+    wallHoriz: set
+      ? st && st.rows > 0
+        ? { size: set.horiz.size, spacingIn: st.rows > 1 ? Math.max(6, (wallIn - 6) / (st.rows - 1)) : wallIn }
+        : null
+      : bars && num(w.lines, 2) > 1
+        ? { size: num(w.barSize, 4), spacingIn: Math.max(6, (l.spec.wall.height * 12 - 6) / (num(w.lines, 2) - 1)) }
+        : null,
+    footing: l.spec.footing
+      ? { widthIn: l.spec.footing.width * 12, depthIn: l.spec.footing.depth * 12, lines: set ? set.footing.bars : ft.bars === '1' ? num(ft.lines, 2) : 0, barSize: set ? set.footing.size : num(ft.barSize, 4) }
+      : null,
+    slab: l.slabs.length
+      ? {
+          thickIn: l.slabs[0].thick * 12,
+          dropIn: slabDropIn(l.spec, l.slabs[0].thick),
+          steel: !slab0 ? '' : slab0.kind === 'grid' ? `#${slab0.size} @ ${n2(slab0.spacingIn)}" O.C. E.W.${slab0.chairsFt ? ' ON CHAIRS' : ''}` : slab0.kind === 'mesh' ? `WIRE MESH${slab0.chairsFt ? ' ON CHAIRS' : ''}` : 'NO STEEL',
+          bar: slab0?.kind === 'grid' ? { size: slab0.size, spacingIn: slab0.spacingIn } : null,
+          ledgeIn: ledgeOf(l)?.ledgeIn,
+        }
+      : null,
     vaporBarrier: items.some((x) => x.tool.id === 'vapor-barrier'),
     title: job.name,
     job: job.name,
@@ -716,9 +789,11 @@ export function layoutItemDrawings(job: Job, items: FiguredItem[], company = '',
     kind: 'Foundation',
   };
   return {
-    plan: graphPlanSvg(l, { title: 'Foundation layout', job: job.name, company, date, pourYd, highlight }),
+    plan: graphPlanSvg(l, { title: 'Foundation layout', job: job.name, company, date, pourYd, highlight, bolts: st?.bolts.total ? { spots: st.bolts.runs.flatMap((b) => b.spots), text: `${set!.bolts.size.toUpperCase()} @ ${n2(set!.bolts.spacingFt)}' O.C. MAX, ${n2(set!.bolts.endIn)}" FROM ENDS · ${st.bolts.total} TOTAL` } : undefined }),
     iso: graphIsoSvg(l, highlight),
+    apart: graphIsoSvg(l, {}, { apart: true }),
     section: foundationSectionSvg(d),
+    rebar: d.footing ? footingRebarSvg({ wallIn: d.wallIn, wallFt: d.wallFt, footing: d.footing, vert: d.wallVert, job: job.name, ...(st && set ? { vertCutFt: st.vertCutFt, hookIn: st.hookFt * 12, lapIn: (set.lapDia * set.footing.size) / 8 } : {}) }) : undefined,
   };
 }
 
@@ -776,6 +851,7 @@ function totalsRows(t: Totals): { label: string; value: string }[] {
   for (const [k, v] of [...t.fillers].sort((a, b) => inchesOf(b[0]) - inchesOf(a[0]))) rows.push({ label: k, value: commas(v) });
   if (t.insideCorners) rows.push({ label: 'Inside corners (4×4)', value: commas(t.insideCorners) });
   if (t.ties) rows.push({ label: 'Ties', value: `about ${commas(t.ties)}` });
+  if (t.bolts) rows.push({ label: `Anchor bolts${t.boltSize ? ` (${t.boltSize}s, nuts and washers)` : ''}`, value: commas(t.bolts) });
   return rows;
 }
 
@@ -797,6 +873,7 @@ export function buildReport(job: Job, s: Settings, opts: { now?: Date; crew?: bo
   const steelTotals: [string, string][] = [
     ...[...totals.sticks].map(([k, v]): [string, string] => [`${k} to load`, commas(v)]),
     ...(totals.rebarLb ? [['Rebar weight', `${commas(totals.rebarLb)} lb (${dec(totals.rebarLb / 2000, 2)} tons)`] as [string, string]] : []),
+    ...(totals.bolts ? [[`Anchor bolts${totals.boltSize ? ` (${totals.boltSize}s)` : ''}`, commas(totals.bolts)] as [string, string]] : []),
   ];
   const company = companyLine(s);
   const drawings = jobDrawings(job, items, s.company.name);
@@ -806,22 +883,87 @@ export function buildReport(job: Job, s: Settings, opts: { now?: Date; crew?: bo
 
   // Shown as built: a slab inside checked walls, walls whose height changes.
   const shown = builtItems(items, job).items;
-  const itemHtml = shown
-    .map(({ item, tool, result, inputs }) => {
+  const pieces = shown.map(({ item, tool, result, inputs }) => {
       const head = `<h3>${esc(item.label || tool.title)}${item.label ? ` <span class="tool">${esc(tool.title)}</span>` : ''}</h3>`;
       const inp = `<div class="inputs">${inputs.map((i) => `<span><b>${esc(i.label)}:</b> ${esc(i.value)}</span>`).join('')}</div>`;
       const body =
         result.status === 'ok'
           ? `${(result.result.warnings ?? []).map((w) => `<div class="warn">⚠ ${esc(w)}</div>`).join('')}${rowsTable(result.result.rows)}`
           : `<div class="warn">Not finished: ${esc(result.message)}</div>`;
-      return `<section class="item">${head}${inp}${body}</section>`;
-    })
-    .join('');
+      const rows = result.status === 'ok' ? result.result.rows : [];
+      const h =
+        46 +
+        textHeight(inputs.map((i) => `${i.label}: ${i.value}`).join('    '), 12.5, contentWidth(letterPortrait) - 30) +
+        rows.reduce((t, r) => t + 30 + (r.note ? textHeight(r.note, 12, contentWidth(letterPortrait) * 0.55) : 0), 0) +
+        (result.status === 'ok' ? (result.result.warnings ?? []).length * 40 : 40);
+      return { html: `<section class="item">${head}${inp}${body}</section>`, h };
+    });
+
+  // Laid out on Letter pages: the load list and rebar schedule up front, each drawing on a page of its
+  // own, then the details (a piece never split across pages), then any scanned plan pages.
+  const box = letterPortrait;
+  const W = contentWidth(box);
+  const blocks: Block[] = [];
+  blocks.push({
+    kind: 'block',
+    html: `<div class="top"><div>${crew ? '<div class="kind">CREW SHEET</div>' : ''}<h1>${esc(job.name)}</h1>${job.address ? `<div class="meta">${esc(job.address)}</div>` : ''}<div class="meta">${esc(date)}</div></div>
+${company || opts.logo ? `<div class="co">${logoHtml(opts.logo)}${esc(company).replace(/ · /g, '<br>')}</div>` : ''}</div>`,
+    h: 120 + (opts.logo ? 70 : 0),
+  });
+  if (crew && job.notes) blocks.push({ kind: 'block', html: notesHtml, h: textHeight(job.notes, 14, W) + 60 });
+  if (sum.length) {
+    blocks.push({
+      kind: 'table',
+      title: crew ? 'Load list' : 'Order summary',
+      cls: 'sum',
+      head: '',
+      headH: 0,
+      rows: sum.map((r) => ({ html: `<tr><td>${esc(r.label)}</td><td class="v">${esc(r.value)}</td></tr>`, h: textHeight(r.label, 15, W * 0.6) + 14 })),
+    });
+  }
+  if (schedule.length) {
+    blocks.push({
+      kind: 'table',
+      title: 'Rebar schedule',
+      cls: 'rebar',
+      head: '<tr><th>Where</th><th>Bars</th><th class="v">How many / long</th></tr>',
+      headH: 34,
+      rows: [
+        ...schedule.map((r) => ({
+          html: `<tr><td>${esc(r.where)}</td><td>${esc(r.what)}${r.note ? `<div class="note">${esc(r.note)}</div>` : ''}</td><td class="v">${esc(r.amount)}</td></tr>`,
+          h: Math.max(textHeight(r.where, 14, W * 0.25), textHeight(r.what, 14, W * 0.45) + (r.note ? textHeight(r.note, 12, W * 0.45) : 0)) + 14,
+        })),
+        ...steelTotals.map(([k, v]) => ({ html: `<tr class="tot"><td colspan="2">${esc(k)}</td><td class="v">${esc(v)}</td></tr>`, h: 32 })),
+      ],
+    });
+  }
+  const sheetNote = `${esc(job.name)} · ${esc(date)}`;
+  if (drawings?.plan) blocks.push(drawingPage(drawings.plan, foundation ? 'Foundation plan' : 'Plan', sheetNote, box));
+  if (drawings?.iso) blocks.push(drawingPage(drawings.iso, '3D view', sheetNote, box));
+  if (drawings?.apart) blocks.push(drawingPage(drawings.apart, '3D view, pulled apart', sheetNote, box));
+  if (drawings?.section) blocks.push(drawingPage(drawings.section, foundation ? 'Typical section' : 'Section', sheetNote, box));
+  if (drawings?.rebar) blocks.push(drawingPage(drawings.rebar, 'Footing and dowels', sheetNote, box));
+  if (drawings?.house) blocks.push(drawingPage(drawings.house, 'At the house', sheetNote, box));
+  (opts.photos ?? []).forEach((src, i) => blocks.push({ kind: 'block', html: `${i === 0 ? '<h2>Photos</h2>' : ''}<div class="photo"><img src="${src}" alt="Photo ${i + 1}"></div>`, h: 420 + (i === 0 ? 44 : 0), newPage: i === 0 }));
+  if (foundation) {
+    const fl = foundationLines(foundation, job);
+    blocks.push({ kind: 'block', html: `<h2>Foundation: ${esc(foundation.kind)}</h2><div class="item"><ul class="fnd">${fl.map((l) => `<li>${esc(l)}</li>`).join('')}</ul></div>`, h: 80 + fl.reduce((t, l) => t + textHeight(l, 14, W - 40, 1.5), 0), newPage: true });
+  }
+  if (items.length) {
+    pieces.forEach((pc, i) => blocks.push({ kind: 'block', html: `${i === 0 ? '<h2>Details</h2>' : ''}${pc.html}`, h: pc.h + (i === 0 ? 44 : 0), newPage: i === 0 && !foundation }));
+  } else blocks.push({ kind: 'block', html: '<p>Nothing added to this job yet.</p>', h: 40 });
+  if (!crew && job.notes) blocks.push({ kind: 'block', html: notesHtml, h: textHeight(job.notes, 14, W) + 60 });
+  scans.forEach((src, i) => blocks.push({ kind: 'sheet', html: `<div class="dhead"><b>Plans · page ${i + 1}</b><span>${sheetNote}</span></div><div class="fit" style="height:${contentHeight(box) - 46}px"><img src="${src}" alt="Plan page ${i + 1}"></div>` }));
+  const notice = noticeHtml('crew', s.docs);
+  if (notice) blocks.push({ kind: 'block', html: notice, h: textHeight(notice.replace(/<[^>]+>/g, ''), 13, W) + 40 });
 
   const html = `<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
 <title>${esc(job.name)} – ${crew ? 'Crew sheet' : 'Job report'}</title>
 <style>
-  body { font-family: -apple-system, Helvetica, Arial, sans-serif; color: #111; margin: 0; padding: 24px; background: #fff; }
+  body { font-family: -apple-system, Helvetica, Arial, sans-serif; color: #111; margin: 0; background: #fff; }
+  h2:first-child { margin-top: 0; }
+  .photo img { width: 100%; max-height: 400px; object-fit: contain; border: 1px solid #ccc; border-radius: 8px; }
+  .fit img { max-width: 100%; max-height: 100%; object-fit: contain; }
   .top { display: flex; justify-content: space-between; align-items: flex-start; gap: 16px; border-bottom: 3px solid #111; padding-bottom: 12px; }
   .co { font-size: 13px; color: #444; }
   h1 { font-size: 26px; margin: 0 0 4px; }
@@ -840,7 +982,9 @@ export function buildReport(job: Job, s: Settings, opts: { now?: Date; crew?: bo
   .item { border: 1px solid #ccc; border-radius: 10px; padding: 12px 14px; margin: 0 0 12px; break-inside: avoid; }
   .inputs { display: flex; flex-wrap: wrap; gap: 4px 14px; font-size: 12.5px; color: #444; margin-bottom: 8px; }
   .warn { background: #fff4dc; border: 1px solid #e0a000; border-radius: 6px; padding: 6px 8px; font-size: 13px; margin-bottom: 6px; }
-  .draw { border: 1px solid #ccc; border-radius: 10px; overflow: hidden; margin-bottom: 12px; break-inside: avoid; }
+  .draw { border: 1px solid #ccc; border-radius: 10px; overflow: hidden; margin-bottom: 12px; break-inside: avoid; page-break-inside: avoid; }
+  h2.page { break-before: page; page-break-before: always; }
+  .draw svg { display: block; width: 100%; height: auto; max-height: 92vh; }
   .notes { white-space: pre-wrap; font-size: 14px; }
   .fnd { margin: 0; padding-left: 18px; font-size: 14px; line-height: 1.5; }
   table.rebar th { text-align: left; font-size: 12px; text-transform: uppercase; letter-spacing: .05em; color: #555; border-bottom: 2px solid #111; padding: 6px 4px; }
@@ -852,23 +996,9 @@ export function buildReport(job: Job, s: Settings, opts: { now?: Date; crew?: bo
   .print { position: fixed; right: 16px; bottom: 16px; padding: 12px 18px; border-radius: 999px; border: 0; background: #ff9f0a; color: #000; font-size: 16px; font-weight: 700; }
   @media print { .print { display: none; } body { padding: 0; } }
 ${docCss(s.docs)}
+${pageCss(letterPortrait)}${drawingCss}
 </style></head><body>
-<div class="top"><div>${crew ? '<div class="kind">CREW SHEET</div>' : ''}<h1>${esc(job.name)}</h1>${job.address ? `<div class="meta">${esc(job.address)}</div>` : ''}<div class="meta">${esc(date)}</div></div>
-${company || opts.logo ? `<div class="co">${logoHtml(opts.logo)}${esc(company).replace(/ · /g, '<br>')}</div>` : ''}</div>
-${crew ? notesHtml : ''}
-${sum.length ? `<h2>${crew ? 'Load list' : 'Order summary'}</h2><table class="sum">${sum.map((r) => `<tr><td>${esc(r.label)}</td><td class="v">${esc(r.value)}</td></tr>`).join('')}</table>` : ''}
-${schedule.length ? `<h2>Rebar schedule</h2><table class="rebar"><tr><th>Where</th><th>Bars</th><th class="v">How many / long</th></tr>${schedule
-      .map((r) => `<tr><td>${esc(r.where)}</td><td>${esc(r.what)}${r.note ? `<div class="note">${esc(r.note)}</div>` : ''}</td><td class="v">${esc(r.amount)}</td></tr>`)
-      .join('')}${steelTotals.map(([k, v]) => `<tr class="tot"><td colspan="2">${esc(k)}</td><td class="v">${esc(v)}</td></tr>`).join('')}</table>` : ''}
-${drawings?.plan ? `<h2>${foundation ? 'Foundation plan' : 'Plan'}</h2><div class="draw">${drawings.plan}</div>` : ''}${drawings?.iso ? `<h2>3D view</h2><div class="draw">${drawings.iso}</div>` : ''}
-${drawings?.section ? `<h2>${foundation ? 'Typical section' : 'Edge detail'}</h2><div class="draw">${drawings.section}</div>` : ''}
-${drawings?.house ? `<h2>At the house</h2><div class="draw">${drawings.house}</div>` : ''}
-${opts.photos?.length ? `<h2>Photos</h2><div class="photos">${opts.photos.map((src, i) => `<img src="${src}" alt="Photo ${i + 1}">`).join('')}</div>` : ''}
-${foundation ? `<h2>Foundation: ${esc(foundation.kind)}</h2><div class="item"><ul class="fnd">${foundationLines(foundation, job).map((l) => `<li>${esc(l)}</li>`).join('')}</ul></div>` : ''}
-${items.length ? `<h2>Details</h2>${itemHtml}` : '<p>Nothing added to this job yet.</p>'}
-${crew ? '' : notesHtml}
-${scans.map((src, i) => `<div class="scan"><h2>Plans · page ${i + 1}</h2><img src="${src}" alt="Plan page ${i + 1}"></div>`).join('')}
-${noticeHtml('crew', s.docs)}
+${paginate(blocks, box, (n, of) => footerHtml(`${esc(job.name)} · ${crew ? 'Crew sheet' : 'Job report'} · ${esc(date)}`, n, of))}
 <button class="print" onclick="window.print()">Save as PDF / Print</button>
 </body></html>`;
 
@@ -892,5 +1022,5 @@ ${noticeHtml('crew', s.docs)}
     .join('\n')
     .trim();
 
-  return { html, text };
+  return { html: uniqueSvgIds(html), text };
 }

@@ -10,6 +10,7 @@ import { ftIn } from '../tools/format';
 import { barSpots } from './footingDraw';
 import { bounds, insetOutline, Pt } from './geometry';
 import { addonLayout, Rect } from '../tools/addon';
+import { paintOrder } from './layoutPlanDraw';
 
 const n = (v: number) => Math.round(v * 10) / 10;
 const esc = (s: string) => s.replace(/&/g, '+').replace(/</g, '‹').replace(/>/g, '›');
@@ -28,7 +29,7 @@ export interface FoundationDraw {
   wallVert: { size: number; spacingIn: number } | null;
   wallHoriz: { size: number; spacingIn: number } | null;
   footing: { widthIn: number; depthIn: number; lines: number; barSize: number } | null;
-  slab: { thickIn: number; dropIn: number; steel: string; bar: { size: number; spacingIn: number } | null } | null;
+  slab: { thickIn: number; dropIn: number; steel: string; bar: { size: number; spacingIn: number } | null; /** Slab ledge cut in the wall, in */ ledgeIn?: number } | null;
   vaporBarrier: boolean;
   /** Walls that change height: pieces of the outline, each at its height (from corner A clockwise) */
   runs?: { a: Pt; b: Pt; height: number; run: number }[];
@@ -143,7 +144,7 @@ export function foundationPlanSvg(d: FoundationDraw): string {
     `<defs><pattern id="hatch" width="9" height="9" patternUnits="userSpaceOnUse" patternTransform="rotate(45)"><line x1="0" y1="0" x2="0" y2="9" stroke="#111" stroke-width="1.2"/></pattern>` +
       `<pattern id="dots" width="12" height="12" patternUnits="userSpaceOnUse"><circle cx="3" cy="3" r="1" fill="#9a9a9a"/><circle cx="9" cy="9" r="1" fill="#9a9a9a"/></pattern></defs>`,
   );
-  out.push(`<rect x="6" y="6" width="${W - 12}" height="${H - 12}" fill="none" stroke="#111" stroke-width="2"/>`);
+  out.push(`<rect class="dframe" x="6" y="6" width="${W - 12}" height="${H - 12}" fill="none" stroke="#111" stroke-width="2"/>`);
 
   // Slab inside the walls.
   if (d.slab) out.push(`<path d="${path(inner)}" fill="url(#dots)" stroke="none"/>`);
@@ -316,6 +317,7 @@ export function foundationPlanSvg(d: FoundationDraw): string {
 
   // Title block.
   const ty = H - titleH - 6;
+  out.push(`<g class="tblock" data-h="${titleH + 6}">`);
   out.push(`<rect x="6" y="${n(ty)}" width="${W - 12}" height="${titleH}" fill="#ffffff" stroke="#111" stroke-width="2"/>`);
   out.push(`<line x1="${W * 0.55}" y1="${n(ty)}" x2="${W * 0.55}" y2="${n(ty + titleH)}" stroke="#111" stroke-width="1.5"/>`);
   out.push(`<text x="22" y="${n(ty + 34)}" ${FONT} font-size="24" font-weight="900" fill="#111">FOUNDATION PLAN</text>`);
@@ -323,6 +325,7 @@ export function foundationPlanSvg(d: FoundationDraw): string {
   out.push(`<text x="${n(W * 0.55 + 16)}" y="${n(ty + 28)}" ${FONT} font-size="17" font-weight="800" fill="#111">${esc(d.job)}</text>`);
   out.push(`<text x="${n(W * 0.55 + 16)}" y="${n(ty + 50)}" ${FONT} font-size="13" fill="#333">${esc(d.company || '')}</text>`);
   out.push(`<text x="${n(W * 0.55 + 16)}" y="${n(ty + 68)}" ${FONT} font-size="13" fill="#333">${esc(d.date)} · SHEET S1</text>`);
+  out.push('</g>');
   return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${W} ${H}" width="100%" role="img" aria-label="Plan view">${out.join('')}</svg>`;
 }
 
@@ -373,9 +376,15 @@ export function foundationSectionSvg(d: FoundationDraw): string {
   const conc = (x: number, y: number, w: number, h: number) =>
     out.push(`<rect x="${X(x)}" y="${Y(y)}" width="${n(w * k)}" height="${n(h * k)}" fill="#e6e3dc" stroke="#111" stroke-width="2.2"/><rect x="${X(x)}" y="${Y(y)}" width="${n(w * k)}" height="${n(h * k)}" fill="url(#conc)"/>`);
   if (d.footing) conc(fx0, fy0, fw, fd);
-  conc(0, 0, t, wallH);
+  // On a ledge the wall's slab side is cut back from the bottom of the slab to the top; the slab runs onto it.
+  const ledge = d.slab?.ledgeIn && d.slab.ledgeIn < t ? d.slab.ledgeIn : 0;
+  if (ledge) {
+    const wallPts: [number, number][] = [[0, 0], [t - ledge, 0], [t - ledge, slabBot], [t, slabBot], [t, wallH], [0, wallH]];
+    const pts = wallPts.map(([x, y]) => `${X(x)},${Y(y)}`).join(' ');
+    out.push(`<polygon points="${pts}" fill="#e6e3dc" stroke="#111" stroke-width="2.2"/><polygon points="${pts}" fill="url(#conc)"/>`);
+  } else conc(0, 0, t, wallH);
   if (d.slab) {
-    conc(t, slabTop, slabRun, d.slab.thickIn);
+    conc(t - ledge, slabTop, slabRun + ledge, d.slab.thickIn);
     // Break line where the drawing stops.
     const bx = Number(X(right));
     out.push(`<path d="M${bx} ${n(Number(Y(slabTop)) - 10)} L${bx} ${n(Number(Y((slabTop + slabBot) / 2)) - 6)} L${bx + 8} ${Y((slabTop + slabBot) / 2)} L${bx - 8} ${n(Number(Y((slabTop + slabBot) / 2)) + 6)} L${bx} ${n(Number(Y(slabBot)) + 10)}" fill="#fff" stroke="#111" stroke-width="1.6"/>`);
@@ -423,16 +432,27 @@ export function foundationSectionSvg(d: FoundationDraw): string {
   }
   if (d.slab && d.slab.dropIn > 0) dimV(right + 14, 0, slabTop, inch(d.slab.dropIn), 'R');
   if (d.slab) dimV(right + 14, slabTop, slabBot, inch(d.slab.thickIn), 'R');
+  if (ledge && d.slab) {
+    const y = slabBot + 4;
+    out.push(`<line x1="${X(t - ledge)}" y1="${Y(slabBot)}" x2="${X(t - ledge)}" y2="${Y(y + 2)}" stroke="#111" stroke-width="0.8"/>`);
+    out.push(`<line x1="${X(t - ledge)}" y1="${Y(y)}" x2="${X(t + 6)}" y2="${Y(y)}" stroke="#111" stroke-width="1"/>`);
+    for (const x of [t - ledge, t]) out.push(`<line x1="${n(Number(X(x)) - 5)}" y1="${n(Number(Y(y)) + 5)}" x2="${n(Number(X(x)) + 5)}" y2="${n(Number(Y(y)) - 5)}" stroke="#111" stroke-width="2"/>`);
+    out.push(`<text x="${n(Number(X(t + 6)) + 4)}" y="${n(Number(Y(y)) + 5)}" ${FONT} font-size="15" font-weight="700" fill="#111">${esc(inch(ledge))}</text>`);
+  }
   if (d.slab && d.slab.dropIn > 0) out.push(`<line x1="${X(t)}" y1="${Y(0)}" x2="${X(right + 18)}" y2="${Y(0)}" stroke="#111" stroke-width="0.8" stroke-dasharray="4 4"/>`);
 
   // Callouts with leaders, stacked on the right.
   const notes: { at: Pt; text: string[] }[] = [];
-  if (d.slab) notes.push({ at: { x: t + slabRun * 0.6, y: slabTop + 1 }, text: [`${inch(d.slab.thickIn)} CONCRETE SLAB`, d.slab.steel].filter(Boolean) });
+  if (d.slab) notes.push({ at: { x: t + slabRun * 0.6, y: slabTop + 1 }, text: [`${inch(d.slab.thickIn)} CONCRETE SLAB`, d.slab.steel, d.slab.dropIn > 0 ? `TOP ${inch(d.slab.dropIn)} BELOW TOP OF WALL` : 'TOP FLUSH WITH TOP OF WALL'].filter(Boolean) });
+  if (ledge && d.slab) notes.push({ at: { x: t - ledge / 2, y: slabBot - 0.5 }, text: [`${inch(ledge)} SLAB LEDGE`, `WALL ${inch(t - ledge)} ABOVE SLAB BOTTOM`] });
   notes.push({ at: { x: t * 0.7, y: wallH * 0.4 }, text: [`${inch(t)} CONCRETE WALL`, ...d.wallSteel.split(', ')].filter(Boolean) });
   if (d.footing) notes.push({ at: { x: fx0 + fw * 0.8, y: fy0 + fd * 0.5 }, text: [`${inch(fw)} × ${inch(fd)} CONT. FOOTING`, d.footing.lines ? `(${d.footing.lines}) #${d.footing.barSize} CONTINUOUS` : ''].filter(Boolean) });
   const nx = W - 236;
+  // Each note as tall as its lines, stacked down the right side, all kept above the title line.
+  const tall = notes.map((note) => note.text.length * 20 + 30);
+  let ny = Math.min(190, H - 62 - 16 - tall.reduce((s, h) => s + h, 0) + 30);
   notes.forEach((note, i) => {
-    const ny = 190 + i * 115;
+    if (i) ny += tall[i - 1];
     out.push(`<polyline points="${X(note.at.x)},${Y(note.at.y)} ${nx - 14},${ny - 6} ${nx - 4},${ny - 6}" fill="none" stroke="#111" stroke-width="1.2"/>`);
     out.push(`<circle cx="${X(note.at.x)}" cy="${Y(note.at.y)}" r="3" fill="#111"/>`);
     note.text.forEach((l, j) => out.push(`<text x="${nx}" y="${n(ny + j * 20)}" ${FONT} font-size="${j === 0 ? 15 : 13}" font-weight="${j === 0 ? 800 : 500}" fill="#111">${esc(l)}</text>`));
@@ -505,9 +525,9 @@ export function foundationIsoSvg(d: FoundationDraw): string {
   const mid = (ps: Pt[]) => ps.reduce((sum, p) => sum + p.x + p.y, 0) / ps.length;
   const drawAdd = (x: PlacedAddOn) => {
     const hf = x.a.footing ? (x.a.footing.depthIn / 12) * z : Hf;
-    for (const p of [...x.footings].sort((u, v) => mid(u) - mid(v))) prism(p, Hf - hf, Hf, '#cfcac1', '#b9b5ad', '#9a958d');
+    for (const p of paintOrder(x.footings).map((k) => x.footings[k])) prism(p, Hf - hf, Hf, '#cfcac1', '#b9b5ad', '#9a958d');
     if (x.pour && x.a.pour) out.push(`<polygon points="${x.pour.map((p) => pt(p.x, p.y, Hf + x.a.wallFt * z - ((d.slab?.dropIn ?? 0) / 12) * z)).join(' ')}" fill="#dedad2" stroke="#55514b" stroke-width="0.9"/>`);
-    for (const p of [...x.walls].sort((u, v) => mid(u) - mid(v))) prism(p, Hf, Hf + x.a.wallFt * z, '#ece9e3', '#c9c5bd', '#a9a49b');
+    for (const p of paintOrder(x.walls).map((k) => x.walls[k])) prism(p, Hf, Hf + x.a.wallFt * z, '#ece9e3', '#c9c5bd', '#a9a49b');
   };
   const house = mid(outer);
   for (const x of adds) if (mid(x.box) < house) drawAdd(x);

@@ -172,7 +172,7 @@ const footings: Tool = {
     lapField(['bars']),
     ...ORDER_FIELDS,
   ],
-  compute: (inp) => {
+  compute: (inp, ctx) => {
     const t = inp.len('width');
     const h = inp.len('depth');
     if (t <= 0 || h <= 0) return { error: 'Height and thickness must be more than 0.' };
@@ -201,7 +201,9 @@ const footings: Tool = {
         note: `${inp.choice('kind') === 'footing' ? 'Centered under the wall, in from the house edge' : 'Middle of the wall'}: what the concrete and bars follow · ${run.corners} corners`,
       });
     }
-    rows.push(...concreteRows(run.centerFt * t * h, inp));
+    const less = ctx?.less && ctx.less.cuFt > 0 ? Math.min(ctx.less.cuFt, run.centerFt * t * h) : 0;
+    if (less) rows.push({ label: ctx!.less!.label, value: `−${commasTrim(less, 1)} cu ft`, note: ctx!.less!.note });
+    rows.push(...concreteRows(run.centerFt * t * h - less, inp));
     if (!inp.on('bars')) return { rows, warnings };
 
     const bar = getBar(inp.choice('barSize'));
@@ -289,25 +291,83 @@ const piers: Tool = {
   notes: ['Drilled holes are rarely perfect. Many crews use more waste on piers.'],
 };
 
+/** Round steps: half (against the house), full (free-standing) or quarter (in a corner). 'radius' = half (saved jobs). */
+export type RoundKind = 'half' | 'full' | 'quarter';
+export const roundKind = (shape: unknown): RoundKind | null => (shape === 'radius' ? 'half' : shape === 'full' ? 'full' : shape === 'quarter' ? 'quarter' : null);
+/** How much of a circle each shape is. */
+export const ROUND_PART: Record<RoundKind, number> = { half: 0.5, full: 1, quarter: 0.25 };
+export const ROUND_NAME: Record<RoundKind, string> = { half: 'half round', full: 'full round', quarter: 'quarter round' };
+
+/** Round steps: each step's diameter, bottom first (2 treads smaller each step up). */
+export function radiusSteps(n: number, diameterFt: number, treadFt: number): { diameters: number[] } | { error: string } {
+  if (!(diameterFt > 0)) return { error: 'Put in the main diameter (the bottom step).' };
+  if (!(n >= 1)) return { error: 'Put in how many steps.' };
+  const diameters = Array.from({ length: n }, (_, k) => diameterFt - 2 * k * treadFt);
+  if (diameters[n - 1] <= 0) return { error: `${n} steps with ${ftIn(treadFt)} treads need more than ${ftIn(diameterFt)} across. Make it wider or use fewer steps.` };
+  return { diameters };
+}
+
 const steps: Tool = {
   id: 'steps',
   title: 'Steps',
   blurb: 'Solid steps, optional landing at the top',
   fields: [
+    {
+      key: 'shape',
+      label: 'Shape',
+      kind: 'choice',
+      options: [
+        { value: 'square', label: 'Square' },
+        { value: 'radius', label: 'Half round' },
+        { value: 'full', label: 'Full round' },
+        { value: 'quarter', label: 'Quarter round' },
+      ],
+      default: 'square',
+    },
     { key: 'steps', label: 'Number of steps', kind: 'count' },
     { key: 'rise', label: 'Rise (each step)', kind: 'length' },
-    { key: 'run', label: 'Run (each step)', kind: 'length' },
-    { key: 'width', label: 'Width', kind: 'length' },
-    { key: 'landing', label: 'Landing depth', kind: 'length', optional: true, help: 'Landing at the top' },
+    { key: 'run', label: 'Run (each step)', kind: 'length', help: 'Tread depth' },
+    { key: 'width', label: 'Width', kind: 'length', showIf: ['shape=square'] },
+    {
+      key: 'diameter',
+      label: 'Main diameter',
+      kind: 'length',
+      help: 'The bottom step, all the way across (a quarter round: twice its reach out from the corner). Each step up is 2 treads smaller.',
+      showIfAny: ['shape=radius', 'shape=full', 'shape=quarter'],
+    },
+    { key: 'landing', label: 'Landing depth', kind: 'length', optional: true, help: 'Landing at the top', showIf: ['shape=square'] },
     ...ORDER_FIELDS,
   ],
   compute: (inp) => {
     const n = inp.count('steps');
+    const rise = inp.len('rise');
+    const run = inp.len('run');
+    if (rise <= 0 || run <= 0) return { error: 'Rise and run must be more than 0.' };
+    const warnings = [tooBig('Rise', rise, 1), tooBig('Run', run, 4)].filter((w): w is string => !!w);
+    const round = roundKind(inp.choice('shape'));
+    if (round) {
+      // Rounds stacked on one center: step k (1 = bottom) is D − 2 × (k − 1) × tread across, each one
+      // solid down to the ground. Half: the flat side against the house. Full: free-standing. Quarter:
+      // its two straight sides against the walls of a corner.
+      const part = ROUND_PART[round];
+      const D = inp.len('diameter');
+      const r = radiusSteps(n, D, run);
+      if ('error' in r) return { error: r.error };
+      const cuFt = r.diameters.reduce((sum, d) => sum + (Math.PI * d * d) / 4, 0) * part * rise;
+      const rows: ResultRow[] = r.diameters.map((d, k) => ({
+        label: k === 0 ? 'Step 1 (bottom)' : k === n - 1 ? `Step ${k + 1} (top)` : `Step ${k + 1}`,
+        value: round === 'quarter' ? `${ftIn(d / 2)} out from the corner` : `${ftIn(d)} across`,
+        note: `Curved form ${ftIn(Math.PI * d * part)} × ${ftIn(rise)} high`,
+      }));
+      const formFt = r.diameters.reduce((sum, d) => sum + Math.PI * d * part, 0);
+      const sides = { half: 'the flat side is against the house, no form there', full: 'no straight sides', quarter: 'the two straight sides are against the walls, no form there' }[round];
+      rows.push({ label: 'Curved form', value: `${commasTrim(formFt, 1)} ft`, note: `Bendable form board (bender board or ply strips) for each riser; ${sides}` });
+      return { rows: [...rows, ...concreteRows(cuFt, inp)], warnings };
+    }
     if (n < 1) return { error: 'Enter at least 1 step.' };
-    if (inp.len('rise') <= 0 || inp.len('run') <= 0 || inp.len('width') <= 0) return { error: 'Rise, run and width must be more than 0.' };
-    const stairs = stepsCuFt(n, inp.len('rise'), inp.len('run'), inp.len('width'));
-    const landing = inp.len('landing') * inp.len('width') * n * inp.len('rise');
-    const warnings = [tooBig('Rise', inp.len('rise'), 1), tooBig('Run', inp.len('run'), 4)].filter((w): w is string => !!w);
+    if (inp.len('width') <= 0) return { error: 'Width must be more than 0.' };
+    const stairs = stepsCuFt(n, rise, run, inp.len('width'));
+    const landing = inp.len('landing') * inp.len('width') * n * rise;
     return { rows: concreteRows(stairs + landing, inp), warnings };
   },
 };

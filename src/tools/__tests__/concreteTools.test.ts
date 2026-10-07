@@ -554,8 +554,8 @@ describe('a 0 typed in a size box gets a note, not 0 yards', () => {
   test('steps', () => {
     const base = { steps: 3, rise: { ft: '', in: '7' }, run: { ft: '', in: '11' }, width: 4 };
     expect(msg(runTool(tool('steps'), { ...base, steps: 0 }))).toBe('Enter at least 1 step.');
-    expect(msg(runTool(tool('steps'), { ...base, width: 0 }))).toBe('Rise, run and width must be more than 0.');
-    expect(msg(runTool(tool('steps'), { ...base, rise: { ft: '0', in: '0' } }))).toBe('Rise, run and width must be more than 0.');
+    expect(msg(runTool(tool('steps'), { ...base, width: 0 }))).toBe('Width must be more than 0.');
+    expect(msg(runTool(tool('steps'), { ...base, rise: { ft: '0', in: '0' } }))).toBe('Rise and run must be more than 0.');
   });
   test('footings & walls, straight run', () => {
     const run = { shape: 'run', depth: { ft: '', in: '10' }, width: { ft: '', in: '20' } };
@@ -599,4 +599,43 @@ test('the typo notes are told apart from the everyday ones (the screen shows the
   const everyday = r.result.warnings!.filter((w) => !isTooBig(w));
   expect(everyday.some((w) => /rarely dug even/.test(w))).toBe(true);
   expect(everyday.some((w) => /Did you mean|bigger than usual/.test(w))).toBe(false);
+});
+
+test('radius steps: half rounds off the main diameter, 2 treads smaller each step up', () => {
+  const t = CONCRETE_TOOLS.find((x) => x.id === 'steps')!;
+  const L = (ft: string, i = '') => ({ ft, in: i });
+  const r = runTool(t, { shape: 'radius', steps: '3', rise: L('', '7'), run: L('1'), diameter: L('10'), waste: '0' });
+  // 10', 8', 6' across.
+  expect(rowValue(r, 'Step 1 (bottom)')).toBe(`10' 0" across`);
+  expect(rowValue(r, 'Step 2')).toBe(`8' 0" across`);
+  expect(rowValue(r, 'Step 3 (top)')).toBe(`6' 0" across`);
+  // Each step solid to the ground: 7/12 × π/8 × (10² + 8² + 6²) = 45.81 cu ft = 1.70 cu yd.
+  expect(rowValue(r, 'Cubic feet')).toBe('45.8');
+  expect(rowValue(r, 'Cubic yards')).toBe('1.7');
+  // Curved form: π/2 × (10 + 8 + 6) = 37.7 ft.
+  expect(rowValue(r, 'Curved form')).toBe('37.7 ft');
+  // Too many steps for the width is caught.
+  expect(runTool(t, { shape: 'radius', steps: '6', rise: L('', '7'), run: L('1'), diameter: L('10') }).status).toBe('invalid');
+  // Square steps work as before (and an old saved one with no shape opens as square).
+  const sq = runTool(t, { steps: '4', rise: L('', '7'), run: L('', '11'), width: L('4'), waste: '10' });
+  expect(rowValue(sq, 'Before waste')).toBe('0.79 cu yd');
+});
+
+test('round steps: full and quarter rounds off the main diameter, checked by hand', () => {
+  const t = CONCRETE_TOOLS.find((x) => x.id === 'steps')!;
+  const L = (ft: string, i = '') => ({ ft, in: i });
+  const base = { steps: '3', rise: L('', '7'), run: L('1'), diameter: L('10'), waste: '0' };
+  // Full: 7/12 × π/4 × (10² + 8² + 6²) = 91.63 cu ft; curved form π × 24 = 75.4 ft.
+  const full = runTool(t, { ...base, shape: 'full' });
+  expect(rowValue(full, 'Cubic feet')).toBe('91.6');
+  expect(rowValue(full, 'Curved form')).toBe('75.4 ft');
+  expect(rowValue(full, 'Step 3 (top)')).toBe(`6' 0" across`);
+  // Quarter: 7/12 × π/16 × 200 = 22.91 cu ft; curved form π/4 × 24 = 18.8 ft; sizes as reach out from the corner.
+  const q = runTool(t, { ...base, shape: 'quarter' });
+  expect(rowValue(q, 'Cubic feet')).toBe('22.9');
+  expect(rowValue(q, 'Curved form')).toBe('18.8 ft');
+  expect(rowValue(q, 'Step 1 (bottom)')).toBe(`5' 0" out from the corner`);
+  // The drawing, for each shape.
+  const { radiusStepsSvg } = require('../../report/stepsDraw') as typeof import('../../report/stepsDraw');
+  for (const kind of ['half', 'full', 'quarter'] as const) expect(radiusStepsSvg([10, 8, 6], 1, 'Front steps', kind)).toContain(`${kind.toUpperCase()} ROUND STEPS`);
 });

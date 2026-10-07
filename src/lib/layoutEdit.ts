@@ -57,7 +57,7 @@ const pick = (raw: RawValues, keys: string[]) => Object.fromEntries(keys.filter(
 
 /** A blank layout, sized from the defaults (8" × 4' wall, 16" × 10" footing, 4" slab). */
 export function blankLayout(): LayoutSpec {
-  return { house: { length: 0, width: 0 }, wall: { thick: 8 / 12, height: 4 }, footing: { width: 16 / 12, depth: 10 / 12 }, addOns: [], slabs: [] };
+  return { house: { length: 0, width: 0 }, wall: { thick: 8 / 12, height: 4 }, footing: { width: 16 / 12, depth: 10 / 12 }, addOns: [], slabs: [], ledgeIn: 2 };
 }
 
 /**
