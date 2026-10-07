@@ -48,6 +48,14 @@ describe('grade rod & elevations', () => {
   // BM 100.00, backsight 4.62 → HI 104.62. Top of slab 101.50 → rod should read 3.12.
   const base = { bm: 100, bs: 4.62, target: 101.5 };
 
+  test('a rod reading with the decimal point left out (462 for 4.62) gets a yellow check', () => {
+    const r = runTool(tool('elevations'), { ...base, bs: 462 });
+    expect(r.status === 'ok' && r.result.warnings?.[0]).toBe('Rod on benchmark is 462 ft, longer than a grade rod. Missed a decimal point (4.62)? Check the number.');
+    const s = runTool(tool('elevations'), { ...base, shot: 347 });
+    expect(s.status === 'ok' && s.result.warnings).toContain('Rod at a spot is 347 ft, longer than a grade rod. Missed a decimal point (4.62)? Check the number.');
+    expect(runTool(tool('elevations'), { ...base, shot: 3.47 })).toMatchObject({ status: 'ok', result: { warnings: [] } });
+  });
+
   test('height of instrument and the target rod reading', () => {
     const r = runTool(tool('elevations'), base);
     expect(rowValue(r, 'Laser height (HI)')).toBe('104.62 ft');

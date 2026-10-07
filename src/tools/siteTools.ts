@@ -92,6 +92,10 @@ const elevations: Tool = {
       { label: 'Laser height (HI)', value: elev(hi) },
     ];
     const warnings: string[] = [];
+    // Grade rods run to about 25 ft. More than that is nearly always a missed decimal point (462 for 4.62).
+    for (const [key, label] of [['bs', 'Rod on benchmark'], ['shot', 'Rod at a spot']] as const) {
+      if (inp.has(key) && inp.num(key) > 25) warnings.push(`${label} is ${dec(inp.num(key))} ft, longer than a grade rod. Missed a decimal point (4.62)? ${CHECK_IT}`);
+    }
     if (want < 0) warnings.push('Grade is above the laser. Set the laser higher.');
     if (inp.has('shot')) {
       const spot = elevationFromRod(hi, inp.num('shot'));
