@@ -83,6 +83,7 @@ const footingSize: Tool = {
         { label: 'Soil pressure', value: psf(soilPressurePsf(load, (sizeIn / 12) ** 2, thickFt)), note: `Soil can take ${psf(bearing)}` },
       );
     }
+    if (bearing < 500) warnings.push(`Soil bearing is ${commas(bearing)} psf. Even soft clay takes about 1,500. Missed some zeros? ${CHECK_IT}`);
     if (sizeIn < IRC_MIN_FOOTING_WIDTH_IN) warnings.push(`Code minimum is ${IRC_MIN_FOOTING_WIDTH_IN}" wide.`);
     if (inp.has('thick') && thickFt * 12 < IRC_MIN_FOOTING_THICKNESS_IN - 1e-9) warnings.push(`Code minimum is ${IRC_MIN_FOOTING_THICKNESS_IN}" thick.`);
     return { rows, warnings };

@@ -15,6 +15,12 @@ const note = (r: ReturnType<typeof runTool>, label: string) =>
 const warnings = (r: ReturnType<typeof runTool>) => (r.status === 'ok' ? r.result.warnings ?? [] : []);
 
 describe('footing size', () => {
+  test('soil bearing typed as 15 (meant 1,500) gets a yellow check; 1,500 does not', () => {
+    const r = runTool(tool('footing-size'), { load: 3000, bearing: 15 });
+    expect(warnings(r)).toContain('Soil bearing is 15 psf. Even soft clay takes about 1,500. Missed some zeros? Check the number.');
+    expect(warnings(runTool(tool('footing-size'), { load: 3000 }))).toEqual([]);
+  });
+
   test('3,000 lb/ft wall on 1,500 psf soil needs a 24" footing', () => {
     const r = runTool(tool('footing-size'), { load: 3000 });
     expect(rowValue(r, 'Footing width')).toBe(`24" (2' 0")`);
