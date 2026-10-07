@@ -118,7 +118,7 @@ export function graphPlanSvg(l: Layout, info: LayoutDrawInfo): string {
     `<defs><pattern id="lhatch" width="9" height="9" patternUnits="userSpaceOnUse" patternTransform="rotate(45)"><line x1="0" y1="0" x2="0" y2="9" stroke="#111" stroke-width="1.2"/></pattern>` +
       `<pattern id="ldots" width="12" height="12" patternUnits="userSpaceOnUse"><circle cx="3" cy="3" r="1" fill="#9a9a9a"/><circle cx="9" cy="9" r="1" fill="#9a9a9a"/></pattern></defs>`,
   );
-  out.push(`<rect x="6" y="6" width="${W - 12}" height="${H - 12}" fill="none" stroke="#111" stroke-width="2"/>`);
+  out.push(`<rect class="dframe" x="6" y="6" width="${W - 12}" height="${H - 12}" fill="none" stroke="#111" stroke-width="2"/>`);
   const hl = info.highlight ?? {};
   // On the phone the plan is about half size: bigger, shorter labels so they read in sunlight.
   const fs = info.compact ? 1.9 : 1;
@@ -278,7 +278,9 @@ export function graphPlanSvg(l: Layout, info: LayoutDrawInfo): string {
   });
 
   // Title block.
+  // (In a group, so a plan set can take it off: the sheet has its own title block.)
   const ty = H - titleH - 6;
+  out.push(`<g class="tblock" data-h="${titleH + 6}">`);
   out.push(`<rect x="6" y="${n(ty)}" width="${W - 12}" height="${titleH}" fill="#ffffff" stroke="#111" stroke-width="2"/>`);
   out.push(`<line x1="${n(W * 0.55)}" y1="${n(ty)}" x2="${n(W * 0.55)}" y2="${n(ty + titleH)}" stroke="#111" stroke-width="1.5"/>`);
   out.push(`<text x="22" y="${n(ty + 34)}" ${FONT} font-size="24" font-weight="900" fill="#111">FOUNDATION PLAN</text>`);
@@ -286,6 +288,7 @@ export function graphPlanSvg(l: Layout, info: LayoutDrawInfo): string {
   out.push(`<text x="${n(W * 0.55 + 16)}" y="${n(ty + 28)}" ${FONT} font-size="17" font-weight="800" fill="#111">${esc(info.job)}</text>`);
   out.push(`<text x="${n(W * 0.55 + 16)}" y="${n(ty + 50)}" ${FONT} font-size="13" fill="#333">${esc(info.company || '')}</text>`);
   out.push(`<text x="${n(W * 0.55 + 16)}" y="${n(ty + 68)}" ${FONT} font-size="13" fill="#333">${esc(info.date)} · SHEET S1</text>`);
+  out.push('</g>');
   return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${W} ${H}" width="100%" role="img" aria-label="Plan view">${out.join('')}</svg>`;
 }
 

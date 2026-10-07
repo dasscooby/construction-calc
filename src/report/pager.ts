@@ -40,7 +40,7 @@ export interface PageBox {
 export const letterPortrait: PageBox = { w: 8.5 * PX_PER_IN, h: 11 * PX_PER_IN, margin: 0.5 * PX_PER_IN, footer: 30 };
 
 /** Room for content on a page, px */
-export const contentHeight = (p: PageBox) => p.h - 2 * p.margin - p.footer;
+export const contentHeight = (p: PageBox) => p.h - 2 - 2 * p.margin - p.footer;
 export const contentWidth = (p: PageBox) => p.w - 2 * p.margin;
 
 /** Height of text set in a box this wide: lines × line height (Helvetica, on the generous side). */
@@ -139,7 +139,7 @@ export function paginate(blocks: Block[], box: PageBox, footer: (n: number, of: 
   return pages
     .map(
       (p, i) =>
-        `<section class="page${p.sheet ? ' sheetpage' : ''}" style="width:${box.w}px;height:${box.h}px;padding:${box.margin}px ${box.margin}px ${box.margin + box.footer}px">` +
+        `<section class="page${p.sheet ? ' sheetpage' : ''}" style="width:${box.w}px;height:${box.h - 2}px;padding:${box.margin}px ${box.margin}px ${box.margin + box.footer}px">` +
         `<div class="pagebody">${p.html.join('')}</div><div class="pagefoot" style="left:${box.margin}px;right:${box.margin}px;bottom:${box.margin * 0.6}px">${footer(i + 1, n)}</div></section>`,
     )
     .join('');
@@ -151,8 +151,10 @@ export function pageCss(box: PageBox): string {
   @page { size: ${box.w / PX_PER_IN}in ${box.h / PX_PER_IN}in; margin: 0; }
   html { background: #8a8a8a; }
   body { margin: 0; padding: 12px 0; }
-  .page { position: relative; box-sizing: border-box; margin: 0 auto 12px; background: #fff; box-shadow: 0 2px 10px rgba(0,0,0,.35); overflow: visible; break-after: page; page-break-after: always; }
+  .page { position: relative; box-sizing: border-box; margin: 0 auto 12px; background: #fff; box-shadow: 0 2px 10px rgba(0,0,0,.35); overflow: hidden; -webkit-print-color-adjust: exact; print-color-adjust: exact; break-after: page; page-break-after: always; }
   .page:last-child { break-after: auto; page-break-after: auto; }
+  /* (A page is a fixed box a hair short of the paper, so the break after it lands on the paper's edge in any
+     print engine; the iPhone's ignores "don't split" on rows, so nothing relies on that.) */
   .pagebody > * { break-inside: avoid; page-break-inside: avoid; }
   .pagefoot { position: absolute; display: flex; justify-content: space-between; gap: 12px; font-size: 11px; color: #555; border-top: 1px solid #bbb; padding-top: 6px; }
   .cont { font-weight: 400; color: #777; text-transform: none; letter-spacing: 0; }

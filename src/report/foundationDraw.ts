@@ -144,7 +144,7 @@ export function foundationPlanSvg(d: FoundationDraw): string {
     `<defs><pattern id="hatch" width="9" height="9" patternUnits="userSpaceOnUse" patternTransform="rotate(45)"><line x1="0" y1="0" x2="0" y2="9" stroke="#111" stroke-width="1.2"/></pattern>` +
       `<pattern id="dots" width="12" height="12" patternUnits="userSpaceOnUse"><circle cx="3" cy="3" r="1" fill="#9a9a9a"/><circle cx="9" cy="9" r="1" fill="#9a9a9a"/></pattern></defs>`,
   );
-  out.push(`<rect x="6" y="6" width="${W - 12}" height="${H - 12}" fill="none" stroke="#111" stroke-width="2"/>`);
+  out.push(`<rect class="dframe" x="6" y="6" width="${W - 12}" height="${H - 12}" fill="none" stroke="#111" stroke-width="2"/>`);
 
   // Slab inside the walls.
   if (d.slab) out.push(`<path d="${path(inner)}" fill="url(#dots)" stroke="none"/>`);
@@ -317,6 +317,7 @@ export function foundationPlanSvg(d: FoundationDraw): string {
 
   // Title block.
   const ty = H - titleH - 6;
+  out.push(`<g class="tblock" data-h="${titleH + 6}">`);
   out.push(`<rect x="6" y="${n(ty)}" width="${W - 12}" height="${titleH}" fill="#ffffff" stroke="#111" stroke-width="2"/>`);
   out.push(`<line x1="${W * 0.55}" y1="${n(ty)}" x2="${W * 0.55}" y2="${n(ty + titleH)}" stroke="#111" stroke-width="1.5"/>`);
   out.push(`<text x="22" y="${n(ty + 34)}" ${FONT} font-size="24" font-weight="900" fill="#111">FOUNDATION PLAN</text>`);
@@ -324,6 +325,7 @@ export function foundationPlanSvg(d: FoundationDraw): string {
   out.push(`<text x="${n(W * 0.55 + 16)}" y="${n(ty + 28)}" ${FONT} font-size="17" font-weight="800" fill="#111">${esc(d.job)}</text>`);
   out.push(`<text x="${n(W * 0.55 + 16)}" y="${n(ty + 50)}" ${FONT} font-size="13" fill="#333">${esc(d.company || '')}</text>`);
   out.push(`<text x="${n(W * 0.55 + 16)}" y="${n(ty + 68)}" ${FONT} font-size="13" fill="#333">${esc(d.date)} · SHEET S1</text>`);
+  out.push('</g>');
   return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${W} ${H}" width="100%" role="img" aria-label="Plan view">${out.join('')}</svg>`;
 }
 

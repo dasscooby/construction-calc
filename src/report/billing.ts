@@ -335,7 +335,7 @@ function moneyDoc(kind: 'bid' | 'bill', job: Job, s: Settings, items: FiguredIte
       headH: 34,
       rows: lines.map((l) => ({
         html: `<tr><td>${esc(l.desc)}</td><td class="r">${esc(qtyText(l))}</td><td class="r">${num(l.price) ? money(num(l.price)) : ''}</td><td class="r">${money(lineAmount(l))}</td></tr>`,
-        h: textHeight(l.desc, 14, W * 0.5) + 18,
+        h: textHeight(l.desc, 14, W * 0.5) + 15,
       })),
     },
     {

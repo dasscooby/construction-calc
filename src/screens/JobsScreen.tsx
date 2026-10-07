@@ -12,7 +12,10 @@ import { Settings, useSettings } from '../lib/settings';
 import type { DocMedia } from '../report/docStyle';
 import { dec } from '../tools/format';
 import { liveActivitiesSupported } from '../widgets/bridge';
-import { openReport } from '../report/open';
+import { openReport, PageSize } from '../report/open';
+import { buildPlanSet } from '../report/planSet';
+import { PAPERS, paperOf } from '../report/pager';
+import { setPaper, usePaper } from '../lib/paperPref';
 import { buildBid, buildBill, buildChange, lineAmount, priceTotals } from '../report/billing';
 import { bidOptions, lineFor, missingLines, refreshLines, remapLines, UNITS } from '../report/bidOptions';
 import PickSheet from './PickSheet';
@@ -325,6 +328,7 @@ function JobDetail({ job, onBack, onOpenItem }: { job: Job; onBack: () => void; 
         <Pressable onPress={() => Share.share({ title: job.name, message: report.text }).catch(() => {})} style={styles.linkBtn} accessibilityRole="button">
           <Text style={styles.linkText}>Text the crew sheet instead</Text>
         </Pressable>
+        <PlanSetCard job={job} figured={figured} />
 
         <Prices job={job} figured={figured} />
 
@@ -745,10 +749,10 @@ function PlanReader({ job }: { job: Job }) {
  * Makes a document with your logo (and, on the phone, the job's photos and scanned plans) and opens it.
  * Web: everything is already in memory, so it opens straight from the tap (Safari only allows that).
  */
-export function sendDoc(job: Job | null, s: Settings, make: (m: DocMedia) => { html: string; text: string }, title: string): void {
+export function sendDoc(job: Job | null, s: Settings, make: (m: DocMedia) => { html: string; text: string }, title: string, page?: PageSize): void {
   if (Platform.OS === 'web') {
     const r = make({ logo: s.docs.logo || undefined });
-    openReport(r.html, r.text, title);
+    openReport(r.html, r.text, title, page);
     return;
   }
   void (async () => {
@@ -756,8 +760,42 @@ export function sendDoc(job: Job | null, s: Settings, make: (m: DocMedia) => { h
     const photos = job?.photos?.length ? await asDataUris(job.photos) : [];
     const scans = job?.scans?.length ? await scansForReport(job.scans) : [];
     const r = make({ logo, photos, scans });
-    openReport(r.html, r.text, title);
+    openReport(r.html, r.text, title, page);
   })();
+}
+
+/** The drawings as a plan set: sideways sheets with a title block, on the paper picked here (remembered). */
+function PlanSetCard({ job, figured }: { job: Job; figured: FiguredItem[] }) {
+  const prefs = useSettings();
+  const paperId = usePaper();
+  const paper = paperOf(paperId);
+  return (
+    <View style={styles.card}>
+      <Text style={styles.label}>Plan set</Text>
+      <Text style={styles.help}>The drawings on sideways sheets with a title block, like engineered plans. Letter for home and the crew; the big sizes for a print shop.</Text>
+      <View style={styles.chipRow}>
+        {PAPERS.map((pp) => (
+          <Pressable
+            key={pp.id}
+            onPress={() => setPaper(pp.id)}
+            style={[styles.chip, pp.id === paperId && styles.chipOn]}
+            accessibilityRole="button"
+            accessibilityState={{ selected: pp.id === paperId }}
+            accessibilityLabel={`Paper ${pp.label}`}
+          >
+            <Text style={[styles.chipText, pp.id === paperId && styles.chipTextOn]}>{pp.label}</Text>
+          </Pressable>
+        ))}
+      </View>
+      <Pressable
+        onPress={() => sendDoc(job, prefs, (m) => buildPlanSet(job, prefs, figured, paper, undefined, m), `${job.name} plans`, { wIn: paper.hIn, hIn: paper.wIn })}
+        style={[styles.secondary, { marginBottom: 0 }]}
+        accessibilityRole="button"
+      >
+        <Text style={styles.secondaryText}>Plan set · {paper.label}</Text>
+      </Pressable>
+    </View>
+  );
 }
 
 /** Start a foundation layout: from the house already in the job, the container barn preset, or blank. */
