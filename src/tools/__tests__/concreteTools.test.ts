@@ -49,6 +49,22 @@ describe('slab with an exterior footing (mono pour)', () => {
     expect(r.status === 'ok' && r.result.warnings?.[0]).toMatch(/rarely dug even/);
   });
 
+  // Garage: 24 × 24, 4" slab, 12" × 18" thickened edge.
+  //   slab     576 sq ft × 1/3 ft                = 192 cu ft     = 7.11 yd
+  //   edge     96 ft around → middle 96 − 4 = 92 ft × 1 × (1.5 − 1/3) = 107.33 cu ft = 3.98 yd
+  //   total    299.33 cu ft = 11.09 yd; +10% = 329.27 cu ft = 12.20 yd → order 12.25 yd
+  //   trucks   10 yd trucks: 1 full + a last load of 2.25 yd
+  test('24 × 24 garage, mono pour with a 12" × 18" edge', () => {
+    const r = runTool(tool('slab'), { areas: [[24, 24]], footing: true, fDepth: { ft: '', in: '18' } });
+    expect(rowValue(r, 'Slab')).toBe('7.11 cu yd');
+    expect(rowValue(r, 'Exterior footing')).toBe('3.98 cu yd');
+    expect(rowValue(r, 'Before waste')).toBe('11.09 cu yd');
+    expect(rowValue(r, 'Cubic yards')).toBe('12.2');
+    expect(rowValue(r, 'Order')).toBe('12.25 yd');
+    expect(rowValue(r, 'Trucks')).toBe('2 trucks');
+    expect(r.status === 'ok' && r.result.rows.find((x) => x.label === 'Trucks')?.note).toBe('1 full (10 yd) + last load 2.25 yd');
+  });
+
   test('dug 2" wider and 2" deeper: the order uses the footing as dug', () => {
     // 14" × 26": centerline 140 − 4.667 = 135.33 × 1.1667 × (26 − 4)/12 = 289.46 cu ft = 10.72 yd
     const r = runTool(tool('slab'), { ...mono, dugW: 2, dugD: 2 });
@@ -230,6 +246,21 @@ describe('piers & columns', () => {
     });
     expect(rowValue(r, 'Bell height used')).toBe(`2' 7-3/16"`);
     expect(rowValue(r, 'Each pier')).toBe('48.88 cu ft');
+  });
+
+  // Deck footings: nine 10" sonotubes, 4 ft deep.
+  //   each  π × (5/12)² × 4 = 2.18 cu ft;  nine = 19.63 cu ft = 0.73 yd
+  //   +10%  21.60 cu ft = 0.80 yd → order 1.00 yd (next ¼ yd up from 0.7999)
+  //   bags  21.60 ÷ 0.6 = 36.0 → 36 × 80 lb;  ÷ 0.45 = 48.0 → 48 × 60 lb;  ÷ 0.3 = 72.0 → 72 × 40 lb
+  test('deck: nine 10" sonotubes 4 ft deep, with the bag counts', () => {
+    const r = runTool(tool('piers'), { size: { ft: '', in: '10' }, height: 4, qty: 9 });
+    expect(rowValue(r, 'Each pier')).toBe('2.18 cu ft');
+    expect(rowValue(r, 'Before waste')).toBe('0.73 cu yd');
+    expect(rowValue(r, 'Cubic feet')).toBe('21.6');
+    expect(rowValue(r, 'Order')).toBe('1.00 yd');
+    expect(rowValue(r, '80 lb bags')).toBe('36');
+    expect(rowValue(r, '60 lb bags')).toBe('48');
+    expect(rowValue(r, '40 lb bags')).toBe('72');
   });
 
   test('square columns: 16" × 16" × 10 ft, two of them = 35.56 cu ft = 1.32 cu yd', () => {
