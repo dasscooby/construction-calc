@@ -44,6 +44,11 @@ export function orderChecks(inp: Inputs): string[] {
   ];
 }
 
+/** Bars closer than 4" in a slab: nearly always feet typed in the inches box (1.5 for 18"). */
+export function tightSpacing(spacingIn: number): string | null {
+  return spacingIn > 0 && spacingIn < 4 ? `Bars ${dec(spacingIn)}" apart is very tight. On center is in inches (18, not 1.5). ${CHECK_IT}` : null;
+}
+
 /** The standard answer block: yards with waste, order amount, trucks, bags, and the before-waste number. */
 export function concreteRows(baseCuFt: number, inp: Inputs, bags = true): ResultRow[] {
   const waste = inp.num('waste');

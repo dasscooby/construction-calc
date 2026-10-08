@@ -706,3 +706,10 @@ test('a 100 yd truck (typo) gets a yellow check; 10 yd does not', () => {
   expect(rowValue(r, 'Trucks')).toBe('1 truck'); // left as typed
   expect(runTool(tool('slab'), { areas: [[40, 30]], truck: 10 })).toMatchObject({ status: 'ok', result: { warnings: [] } });
 });
+
+test('Slab: picked bars 1.5" apart get the same yellow check', () => {
+  const r = runTool(tool('slab'), { areas: [[12, 10]], slabRebar: true, pickBars: true, spacing: 1.5 });
+  expect(r.status === 'ok' && r.result.warnings).toContain('Bars 1.5" apart is very tight. On center is in inches (18, not 1.5). Check the number.');
+  const ok18 = runTool(tool('slab'), { areas: [[12, 10]], slabRebar: true, pickBars: true });
+  expect(ok18.status === 'ok' && ok18.result.warnings?.some((w) => /very tight/.test(w))).toBe(false);
+});

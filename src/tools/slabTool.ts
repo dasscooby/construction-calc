@@ -9,7 +9,7 @@
 
 import { beamBars, Bar, BARS, countAlong, getBar, lapIn, LB_PER_TON, planRun, slabBarsAdvice, sticksToCut, weightLb } from '../lib/rebar';
 import { buildLayout, insetRuns } from '../report/layoutGeom';
-import { concreteRows, CUFT_PER_CUYD, ORDER_FIELDS, orderChecks, tooBig } from './concreteShared';
+import { concreteRows, CUFT_PER_CUYD, ORDER_FIELDS, orderChecks, tightSpacing, tooBig } from './concreteShared';
 import { commas, commasTrim, cuYd, dec, ftIn, inches, lb, sqFt, tons } from './format';
 import { ChoiceField, ResultRow, Tool } from './types';
 
@@ -334,6 +334,8 @@ export const slab: Tool = {
         // Your own bars, or sized for the slab's length and thickness (a small slab gets just the edge bar).
         const own = inp.on('pickBars');
         if (own && inp.num('spacing') <= 0) return { error: 'On center must be more than 0.' };
+        const tight = own ? tightSpacing(inp.num('spacing')) : null;
+        if (tight) warnings.push(tight);
         const longest = Math.max(...rects.map((r) => Math.max(r.length, r.width)));
         const advice = slabBarsAdvice(t * 12, longest);
         const bar = getBar(own ? inp.choice('barSize') : advice.size);

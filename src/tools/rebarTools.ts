@@ -26,7 +26,7 @@ import {
   weightLb,
 } from '../lib/rebar';
 import { commas, commasTrim, dec, ftIn, inches, lb, sqFt, tons } from './format';
-import { tooBig } from './concreteShared';
+import { tightSpacing, tooBig } from './concreteShared';
 import { ChoiceField, Inputs, NumberField, ResultRow, Tool } from './types';
 
 // ---------------------------------------------------------------------------------------------
@@ -154,7 +154,8 @@ const slabRebar: Tool = {
       note: `1 #${bar.size} around the edge · 4 corner L-bars ${ftIn(e.cornerBarFt)} · ${commas(e.laps)} laps`,
     };
     const thickWarn = tooBig('Slab thickness', thickFt, 1);
-    const warnings = thickWarn ? [thickWarn] : [];
+    const tight = tightSpacing(spacingIn);
+    const warnings = [thickWarn, tight].filter((w): w is string => !!w);
     const why = own ? undefined : `Sized for a ${ftIn(Math.max(lengthFt, widthFt))} long, ${inches(thickFt * 12)} slab: #${bar.size} at ${dec(spacingIn)}"`;
 
     if (!matOn) {

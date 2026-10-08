@@ -421,3 +421,9 @@ describe('inches typed in the feet box', () => {
     expect(ok(runTool(tool('slab-rebar'), { length: 8, width: 4 })).warnings).toEqual([]); // edge bar only
   });
 });
+
+test('bars 1.5" apart (feet typed in the inches box) get a yellow check on Slab Rebar; 18" does not', () => {
+  const tight = 'Bars 1.5" apart is very tight. On center is in inches (18, not 1.5). Check the number.';
+  expect(ok(runTool(tool('slab-rebar'), { pickBars: true, length: 12, width: 10, spacing: 1.5 })).warnings).toEqual([tight]);
+  expect(ok(runTool(tool('slab-rebar'), { pickBars: true, length: 30, width: 20 })).warnings).toEqual([]);
+});
