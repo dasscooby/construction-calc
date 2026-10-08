@@ -280,7 +280,11 @@ const stirrups: Tool = {
     if (spacingIn <= 0) return { error: 'On center must be more than 0.' };
     const outW = widthIn - 2 * coverIn;
     const outD = depthIn - 2 * coverIn;
-    if (outW <= 0 || outD <= 0) return { error: 'The cover leaves no room for a stirrup.' };
+    if (outW <= 0 || outD <= 0) {
+      // A 1 or 2 here is usually feet typed in an inches box.
+      const tiny = widthIn <= 4 || depthIn <= 4;
+      return { error: `The cover leaves no room for a stirrup.${tiny ? ' Beam width and depth are in inches (12, not 1).' : ''}` };
+    }
 
     const ext = tieHookExtIn(bar, hook);
     const cutIn = tieCutLengthIn(widthIn, depthIn, coverIn, bar, hook);

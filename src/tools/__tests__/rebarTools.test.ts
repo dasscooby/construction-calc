@@ -260,6 +260,8 @@ describe('stirrups', () => {
   test('errors', () => {
     expect(runTool(ties, { run: 20 })).toEqual({ status: 'missing', message: 'Enter beam width' });
     expect(runTool(ties, { run: 20, width: 3, depth: 24 }).status).toBe('invalid'); // 3" wide, 1.5" clear each side
+    expect(runTool(ties, { run: 20, width: 1, depth: 2 })).toEqual({ status: 'invalid', message: 'The cover leaves no room for a stirrup. Beam width and depth are in inches (12, not 1).' });
+    expect(runTool(ties, { run: 20, width: 12, depth: 24, cover: 13 })).toEqual({ status: 'invalid', message: 'The cover leaves no room for a stirrup.' });
     expect(runTool(ties, { run: 20, width: 12, depth: 24, spacing: 0 }).status).toBe('invalid');
     expect(runTool(ties, { run: 0, width: 12, depth: 24 }).status).toBe('invalid');
     expect(runTool(ties, { run: 20, width: 60, depth: 72 }).status).toBe('invalid'); // stirrup longer than 20'
