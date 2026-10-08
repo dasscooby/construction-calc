@@ -713,3 +713,10 @@ test('Slab: picked bars 1.5" apart get the same yellow check', () => {
   const ok18 = runTool(tool('slab'), { areas: [[12, 10]], slabRebar: true, pickBars: true });
   expect(ok18.status === 'ok' && ok18.result.warnings?.some((w) => /very tight/.test(w))).toBe(false);
 });
+
+test('Footings & Walls: verticals every 2" (feet typed in the inches box) get the same yellow check', () => {
+  const wall = { kind: 'wall', shape: 'run', length: 20, width: { ft: '', in: '8' }, depth: 4, bars: true };
+  const r = runTool(tool('footings'), { ...wall, vSpacing: 2 });
+  expect(r.status === 'ok' && r.result.warnings).toEqual(['Bars 2" apart is very tight. On center is in inches (18, not 1.5). Check the number.']);
+  expect(runTool(tool('footings'), { ...wall, vSpacing: 24 })).toMatchObject({ status: 'ok', result: { warnings: [] } });
+});

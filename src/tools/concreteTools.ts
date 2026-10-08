@@ -16,7 +16,7 @@ import { Field, Inputs, ResultRow, Tool, WallRow } from './types';
 import { cornersAfter } from '../report/geometry';
 import { addonLayout } from './addon';
 
-import { CHECK_IT, concreteRows, CUFT_PER_CUYD, ORDER_FIELDS, orderChecks, tooBig } from './concreteShared';
+import { CHECK_IT, concreteRows, CUFT_PER_CUYD, ORDER_FIELDS, orderChecks, tightSpacing, tooBig } from './concreteShared';
 import { slabLayout } from './slabLayoutTool';
 import { slab } from './slabTool';
 
@@ -227,6 +227,8 @@ const footings: Tool = {
     if (inp.has('vSpacing')) {
       const s = inp.num('vSpacing');
       if (s <= 0) return { error: 'Verticals spacing must be more than 0.' };
+      const tight = tightSpacing(s);
+      if (tight) warnings.push(tight);
       const len = h - COVER_FT;
       if (len <= 0) return { error: 'It’s too short for verticals.' };
       if (len > stockFt) return { error: `A vertical won’t fit in a ${stockFt}' stick.` };
