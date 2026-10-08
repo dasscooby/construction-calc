@@ -65,4 +65,31 @@ Same branch, built on last night's work. Today's main (round steps, layout rebar
 - The same "did you mean inches?" check could go on Wall Forms (panel height typed in feet) and the add-on / second-slab boxes. Those were off limits, so I didn't touch them.
 - Rebar Cut List can't tell an 18" dowel typed as 18 ft from a real 18 ft bar. A "Did you mean 18 inches?" for short-bar marks would need you to say what's normal.
 
+## Night of 2026-10-08
+
+Same branch. Main hadn't changed since last night, so there was nothing to merge.
+
+### What got better
+- Bars on center under 4" now get a yellow "On center is in inches (18, not 1.5)". This covers Slab Rebar, Slab, and wall verticals in Footings & Walls. The bars are left as typed.
+- Stirrups: a beam width or depth of 4 or less (feet typed in an inches box) adds "Beam width and depth are in inches (12, not 1)" to the no-room message.
+- Answers that now say what they mean:
+  - Form Pressure "Full liquid": the most it could push, with the whole pour still soft.
+  - Rebar Weight "Common laps": 40, 48 and 60 times the bar size; your plans say which.
+- New tests on everyday jobs, checked by hand:
+  - nine 10" deck sonotubes 4 ft deep, with the 80, 60 and 40 lb bag counts (36 / 48 / 72)
+  - a 24 × 24 garage poured mono with a 12" × 18" edge: 11.09 yd before waste, order 12.25 yd, 2 trucks
+  - that garage edge's rebar: 2 #4 with corner L-bars, 12 sticks, 157 lb
+- Checked at small-phone width (iPhone SE): Jobs, Preferences, Form Pressure, Rebar Cut List and Grade Rod screens. Nothing was cut off, so nothing needed changing.
+
+### Tests
+- Before tonight: 492 passing. After: 498 passing (35 suites). Typecheck clean.
+
+### Stopped early
+8 commits. The safe, worthwhile fixes are running out. What's left either needs your answer (below) or is in parts I was told to leave alone (Wall Forms, add-on walls / second slabs, the layout).
+
+### Still waiting on you (nothing changed)
+1. **Rock tons / compaction:** 40 × 30 at 4" shows 24.9 tons; at a usual compacted weight it's about 28 tons. Raise "Extra for compaction" to about 35%?
+2. **Stake corners:** a 20 × 20 slab gets 24 stakes (2 per corner) instead of 20. Which do you want?
+3. **10" footing:** the layout assumes a 10" deep footing when there's nothing to copy it from. Right for your area?
+
 Reply "ship it" to send to your phone, or "scrap it" to throw it away.
