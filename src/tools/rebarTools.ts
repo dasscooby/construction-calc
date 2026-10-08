@@ -424,7 +424,7 @@ const rebarWeight: Tool = {
         weightRow(bar, totalFt),
         { label: 'Bar thickness', value: bar.size <= 8 ? inches(d) : `${dec(d, 3)}"` },
         { label: 'Weight per foot', value: `${dec(bar.lbPerFt, 3)} lb` },
-        { label: 'Common laps', value: lapText },
+        { label: 'Common laps', value: lapText, note: '40, 48 and 60 times the bar size. Your plans say which.' },
         { label: '90° hook leg', value: inches(up8(hook90ExtIn(bar))) },
         { label: '180° hook leg', value: inches(up8(hook180ExtIn(bar))) },
         { label: 'Smallest bend', value: inches(up8(minBendDiaIn(bar))), note: 'Inside diameter of the bend' },

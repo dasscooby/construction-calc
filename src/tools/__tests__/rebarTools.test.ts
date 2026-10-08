@@ -281,6 +281,7 @@ describe('rebar-weight', () => {
     expect(rowValue(r, 'Bar thickness')).toBe('5/8"');
     expect(rowValue(r, 'Weight per foot')).toBe('1.043 lb');
     expect(rowValue(r, 'Common laps')).toBe('25" · 30" · 37-1/2"');
+    expect(note(r, 'Common laps')).toBe('40, 48 and 60 times the bar size. Your plans say which.');
     expect(rowValue(r, '90° hook leg')).toBe('7-1/2"');
     expect(rowValue(r, '180° hook leg')).toBe('2-1/2"');
     expect(rowValue(r, 'Smallest bend')).toBe('3-3/4"');
