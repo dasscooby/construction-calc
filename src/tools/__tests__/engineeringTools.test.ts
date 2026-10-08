@@ -134,6 +134,7 @@ describe('form pressure (ACI 347R-14)', () => {
     const r = runTool(tool('form-pressure'), { height: 10, rate: 5 });
     expect(rowValue(r, 'Form pressure')).toBe('793 psf');
     expect(rowValue(r, 'Full liquid')).toBe('1,500 psf');
+    expect(r.status === 'ok' && r.result.rows.find((x) => x.label === 'Full liquid')?.note).toBe('The most it could push: the whole pour still soft, like a tank of water');
     expect(rowValue(r, 'Max pressure starts at')).toBe(`5' 3-7/16"`); // 792.9 ÷ 150 = 5.29 ft
   });
 

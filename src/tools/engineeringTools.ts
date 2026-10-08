@@ -286,7 +286,7 @@ const formPressureTool: Tool = {
     return {
       rows: [
         { label: 'Form pressure', value: psf(r.pressurePsf), big: true, note: GOVERNS[r.governs] },
-        { label: 'Full liquid', value: psf(r.hydrostaticPsf) },
+        { label: 'Full liquid', value: psf(r.hydrostaticPsf), note: 'The most it could push: the whole pour still soft, like a tank of water' },
         { label: 'Max pressure starts at', value: ftIn(r.depthToMaxFt), note: 'Below the top of the concrete' },
       ],
     };
