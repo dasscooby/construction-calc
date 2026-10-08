@@ -168,6 +168,20 @@ describe('beam-bars', () => {
     expect(note(r, 'Weight')).toBe('0.27 tons');
   });
 
+  // Garage thickened edge: 96 ft around, 2 #4, 4 corners, 20' sticks, 20" lap.
+  //   per bar  (96 − 1.667) ÷ (20 − 1.667) = 5.15 → 6 sticks, 5 laps → 96 + 5 × 1.667 = 104.33 ft
+  //   2 bars   208.67 ft, 10 laps;  corner L-bars 4 × 2 = 8 × 40" (3' 4") = 26.67 ft  → 235.33 ft
+  //   sticks   10 full + two 4.33' ends + eight 3.33' L-bars (5 fit in one stick, 3 + the ends in another) = 12
+  //   weight   235.33 × 0.668 = 157 lb
+  test('garage thickened edge: 96 ft, 2 #4, 4 corners', () => {
+    const r = runTool(beam, { run: 96, bars: 2, barSize: '4', corners: 4 });
+    expect(rowValue(r, 'Number of laps')).toBe('10');
+    expect(rowValue(r, 'Corner bars')).toBe(`8 × 3' 4"`);
+    expect(rowValue(r, 'Total footage')).toBe('235.3 ft');
+    expect(rowValue(r, 'Sticks to order')).toBe(`12 × 20'`);
+    expect(rowValue(r, 'Weight')).toBe('157 lb');
+  });
+
   test('corners blank = no corner bars', () => {
     const r = runTool(beam, { run: 100 });
     expect(rowValue(r, 'Corner bars')).toBeUndefined();
